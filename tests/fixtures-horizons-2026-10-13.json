@@ -1,0 +1,103 @@
+{
+ "source": "NASA JPL Horizons API (ssd.jpl.nasa.gov/api/horizons.api), queried 2026-10-13",
+ "at": "2026-10-13T05:00:00Z",
+ "site": {
+  "lat": -34.6037,
+  "lon": -58.3816,
+  "elevation": 0,
+  "name": "Buenos Aires"
+ },
+ "note": "lon/lat: geocentric (500@399) apparent ecliptic of date (QUANTITIES=31). az/alt: topocentric at the site, apparent, refracted (QUANTITIES=4, APPARENT=REFRACTED). altAirless/azAirless: the same without refraction (APPARENT=AIRLESS).",
+ "bodies": [
+  {
+   "body": "Sun",
+   "az": 152.051814,
+   "alt": -42.932606,
+   "lon": 199.8821385,
+   "lat": -0.0001308,
+   "altAirless": -43.579219,
+   "azAirless": 152.051814
+  },
+  {
+   "body": "Moon",
+   "az": 188.142236,
+   "alt": -32.564056,
+   "lon": 229.7478089,
+   "lat": -5.0381772,
+   "altAirless": -33.210668,
+   "azAirless": 188.142236
+  },
+  {
+   "body": "Mercury",
+   "az": 183.615148,
+   "alt": -35.552336,
+   "lon": 224.8651026,
+   "lat": -2.9559499,
+   "altAirless": -36.198949,
+   "azAirless": 183.615148
+  },
+  {
+   "body": "Venus",
+   "az": 172.293374,
+   "alt": -33.550271,
+   "lon": 216.5617654,
+   "lat": -7.5592304,
+   "altAirless": -34.196884,
+   "azAirless": 172.293374
+  },
+  {
+   "body": "Mars",
+   "az": 75.505104,
+   "alt": -12.56209,
+   "lon": 128.6450822,
+   "lat": 1.2321347,
+   "altAirless": -13.208703,
+   "azAirless": 75.505104
+  },
+  {
+   "body": "Jupiter",
+   "az": 86.218693,
+   "alt": -20.646755,
+   "lon": 141.66435,
+   "lat": 0.6307618,
+   "altAirless": -21.293368,
+   "azAirless": 86.218693
+  },
+  {
+   "body": "Saturn",
+   "az": 318.76306,
+   "alt": 45.445532,
+   "lon": 10.6228509,
+   "lat": -2.7124286,
+   "altAirless": 45.428872,
+   "azAirless": 318.76306
+  },
+  {
+   "body": "Uranus",
+   "az": 26.926176,
+   "alt": 29.547107,
+   "lon": 65.2659452,
+   "lat": -0.1527958,
+   "altAirless": 29.517409,
+   "azAirless": 26.926176
+  },
+  {
+   "body": "Neptune",
+   "az": 308.259134,
+   "alt": 42.313679,
+   "lon": 2.5319076,
+   "lat": -1.4195122,
+   "altAirless": 42.295102,
+   "azAirless": 308.259134
+  },
+  {
+   "body": "Pluto",
+   "az": 249.200522,
+   "alt": 11.730119,
+   "lon": 303.0706215,
+   "lat": -4.2858114,
+   "altAirless": 11.651897,
+   "azAirless": 249.200522
+  }
+ ]
+}

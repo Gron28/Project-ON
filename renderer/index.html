@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream: file:; connect-src 'self' file:">
+<title>Entity Alive</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #dfe3ff; font: 12px/1.4 ui-monospace, Consolas, monospace; user-select: none; }
+  #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #bc { position: fixed; left: -10000px; top: 0; }
+  #hud { position: fixed; left: 12px; top: 12px; width: 360px; max-height: calc(100% - 24px); overflow: auto; padding: 10px 12px; border-radius: 8px; background: rgba(4, 4, 10, .78); backdrop-filter: blur(6px); display: none; pointer-events: none; }
+  body.hud #hud { display: block; }
+  #hud h1 { font-size: 13px; margin: 0 0 6px; letter-spacing: .08em; text-transform: uppercase; color: #9fe6ff; }
+  #hud .row { display: flex; justify-content: space-between; gap: 8px; }
+  #hud .bar { height: 5px; background: rgba(255,255,255,.1); border-radius: 3px; overflow: hidden; margin: 2px 0 5px; }
+  #hud .bar i { display: block; height: 100%; width: 0; background: #9fe6ff; }
+  #hud .bar.val { position: relative; } #hud .bar.val i { position: absolute; left: 50%; background: #ffd36b; }
+  #hud .grp { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px 10px; margin: 4px 0; }
+  #hud .grp span { white-space: nowrap; }
+  #hud .dim { opacity: .6; }
+  #hud .log { margin-top: 6px; max-height: 110px; overflow: hidden; }
+  #hud .log div { opacity: .85; }
+  #ctl { position: fixed; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; opacity: 0; transition: opacity .3s; }
+  body.hover #ctl, body.hud #ctl { opacity: 1; }
+  #ctl button, #ctl select { font: inherit; color: #fff; background: rgba(8, 8, 18, .75); border: 1px solid rgba(255,255,255,.25); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  #ctl button:hover { background: rgba(36, 26, 66, .9); }
+  #ctl .love { color: #ff7ab0; } #ctl .no { color: #9fe6ff; }
+  #say { position: fixed; left: 50%; bottom: 5%; transform: translateX(-50%); padding: 5px 12px; border-radius: 99px; background: rgba(8, 8, 18, .6); opacity: 0; transition: opacity .6s; pointer-events: none; white-space: nowrap; }
+  #say.on { opacity: 1; }
+  #boot { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; color: #9fe6ff; background: #000; }
+  #boot small { display: block; color: #889; margin-top: 8px; }
+</style>
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js", "butterchurn": "../node_modules/@webamp/butterchurn/dist/butterchurn.js" } }</script>
+</head>
+<body class="hud">
+<canvas id="view"></canvas>
+<canvas id="bc" width="1280" height="720"></canvas>
+<div id="boot"><div>waking the fly<small id="bootmsg">loading 139,255 neurons</small></div></div>
+<div id="hud"></div>
+<div id="ctl">
+  <select id="src"><option value="system">System audio</option><option value="mic">Microphone</option><option value="file">Audio file...</option></select>
+  <div><button class="love" title="Love this (L): reward dopamine into PAM neurons">♥ love</button> <button class="no" title="Not this (X): punishment dopamine into PPL1 neurons">✕ not this</button></div>
+  <div><button id="hudb" title="H">hud</button> <button id="viewb" title="V">view</button> <button id="nextb" title="N: you choose a preset (the fly normally does)">next</button></div>
+</div>
+<div id="say"></div>
+<script type="module" src="./app.mjs"></script>
+</body>
+</html>

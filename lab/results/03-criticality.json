@@ -1,0 +1,452 @@
+{
+  "nCore": 10199,
+  "earGain": 3,
+  "runs": [
+    {
+      "wScale": 1,
+      "earHz": 2,
+      "coreRateHz": 0.001,
+      "binMs": 182,
+      "sigma": 0.606,
+      "avalanches": 13,
+      "meanSize": 3.4,
+      "maxSize": 10,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 1,
+      "earHz": 5,
+      "coreRateHz": 0.005,
+      "binMs": 20,
+      "sigma": 0.721,
+      "avalanches": 87,
+      "meanSize": 4.5,
+      "maxSize": 21,
+      "sizeSlope": -1.63
+    },
+    {
+      "wScale": 1,
+      "earHz": 10,
+      "coreRateHz": 0.03,
+      "binMs": 3.5,
+      "sigma": 0.861,
+      "avalanches": 206,
+      "meanSize": 5.8,
+      "maxSize": 54,
+      "sizeSlope": -1.74
+    },
+    {
+      "wScale": 1,
+      "earHz": 20,
+      "coreRateHz": 0.134,
+      "binMs": 0.5,
+      "sigma": 0.627,
+      "avalanches": 1766,
+      "meanSize": 3.1,
+      "maxSize": 43,
+      "sizeSlope": -2.49
+    },
+    {
+      "wScale": 1,
+      "earHz": 40,
+      "coreRateHz": 0.401,
+      "binMs": 0.5,
+      "sigma": 1.133,
+      "avalanches": 991,
+      "meanSize": 16.5,
+      "maxSize": 158,
+      "sizeSlope": -1.33
+    },
+    {
+      "wScale": 1,
+      "earHz": 80,
+      "coreRateHz": 0.942,
+      "binMs": 0.5,
+      "sigma": 1.308,
+      "avalanches": 101,
+      "meanSize": 376.6,
+      "maxSize": 2363,
+      "sizeSlope": -0.86
+    },
+    {
+      "wScale": 1,
+      "earHz": 160,
+      "coreRateHz": 1.854,
+      "binMs": 0.5,
+      "sigma": 1.152,
+      "avalanches": 2,
+      "meanSize": 34709,
+      "maxSize": 38354,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 1.5,
+      "earHz": 2,
+      "coreRateHz": 0.008,
+      "binMs": 13,
+      "sigma": 1.004,
+      "avalanches": 76,
+      "meanSize": 8.2,
+      "maxSize": 45,
+      "sizeSlope": -1.4
+    },
+    {
+      "wScale": 1.5,
+      "earHz": 5,
+      "coreRateHz": 5.345,
+      "binMs": 0.5,
+      "sigma": 1.044,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 1.5,
+      "earHz": 10,
+      "coreRateHz": 5.411,
+      "binMs": 0.5,
+      "sigma": 1.043,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 1.5,
+      "earHz": 20,
+      "coreRateHz": 5.313,
+      "binMs": 0.5,
+      "sigma": 1.045,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 1.5,
+      "earHz": 40,
+      "coreRateHz": 5.521,
+      "binMs": 0.5,
+      "sigma": 1.042,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 1.5,
+      "earHz": 80,
+      "coreRateHz": 5.679,
+      "binMs": 0.5,
+      "sigma": 1.042,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 1.5,
+      "earHz": 160,
+      "coreRateHz": 7.157,
+      "binMs": 0.5,
+      "sigma": 1.031,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 2,
+      "earHz": 2,
+      "coreRateHz": 7.549,
+      "binMs": 0.5,
+      "sigma": 1.013,
+      "avalanches": 193,
+      "meanSize": 2.3,
+      "maxSize": 57,
+      "sizeSlope": -2.72
+    },
+    {
+      "wScale": 2,
+      "earHz": 5,
+      "coreRateHz": 9.205,
+      "binMs": 0.5,
+      "sigma": 1.025,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 2,
+      "earHz": 10,
+      "coreRateHz": 9.296,
+      "binMs": 0.5,
+      "sigma": 1.025,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 2,
+      "earHz": 20,
+      "coreRateHz": 19.046,
+      "binMs": 0.5,
+      "sigma": 1.011,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 2,
+      "earHz": 40,
+      "coreRateHz": 19.135,
+      "binMs": 0.5,
+      "sigma": 1.012,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 2,
+      "earHz": 80,
+      "coreRateHz": 19.343,
+      "binMs": 0.5,
+      "sigma": 1.011,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 2,
+      "earHz": 160,
+      "coreRateHz": 11.161,
+      "binMs": 0.5,
+      "sigma": 1.02,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 3,
+      "earHz": 2,
+      "coreRateHz": 24.975,
+      "binMs": 0.5,
+      "sigma": 1.009,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 3,
+      "earHz": 5,
+      "coreRateHz": 25.244,
+      "binMs": 0.5,
+      "sigma": 1.009,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 3,
+      "earHz": 10,
+      "coreRateHz": 25.224,
+      "binMs": 0.5,
+      "sigma": 1.01,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 3,
+      "earHz": 20,
+      "coreRateHz": 25.344,
+      "binMs": 0.5,
+      "sigma": 1.009,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 3,
+      "earHz": 40,
+      "coreRateHz": 25.643,
+      "binMs": 0.5,
+      "sigma": 1.01,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 3,
+      "earHz": 80,
+      "coreRateHz": 26.289,
+      "binMs": 0.5,
+      "sigma": 1.01,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    },
+    {
+      "wScale": 3,
+      "earHz": 160,
+      "coreRateHz": 27.555,
+      "binMs": 0.5,
+      "sigma": 1.01,
+      "avalanches": 0,
+      "meanSize": 0,
+      "maxSize": 0,
+      "sizeSlope": null
+    }
+  ],
+  "dynamicRange": [
+    {
+      "wScale": 1,
+      "dB": 7.8,
+      "response": [
+        [
+          2,
+          0.001
+        ],
+        [
+          5,
+          0.005
+        ],
+        [
+          10,
+          0.03
+        ],
+        [
+          20,
+          0.134
+        ],
+        [
+          40,
+          0.401
+        ],
+        [
+          80,
+          0.942
+        ],
+        [
+          160,
+          1.854
+        ]
+      ]
+    },
+    {
+      "wScale": 1.5,
+      "dB": 17,
+      "response": [
+        [
+          2,
+          0.008
+        ],
+        [
+          5,
+          5.345
+        ],
+        [
+          10,
+          5.411
+        ],
+        [
+          20,
+          5.313
+        ],
+        [
+          40,
+          5.521
+        ],
+        [
+          80,
+          5.679
+        ],
+        [
+          160,
+          7.157
+        ]
+      ]
+    },
+    {
+      "wScale": 2,
+      "dB": 6.9,
+      "response": [
+        [
+          2,
+          7.549
+        ],
+        [
+          5,
+          9.205
+        ],
+        [
+          10,
+          9.296
+        ],
+        [
+          20,
+          19.046
+        ],
+        [
+          40,
+          19.135
+        ],
+        [
+          80,
+          19.343
+        ],
+        [
+          160,
+          11.161
+        ]
+      ]
+    },
+    {
+      "wScale": 3,
+      "dB": 14.6,
+      "response": [
+        [
+          2,
+          24.975
+        ],
+        [
+          5,
+          25.244
+        ],
+        [
+          10,
+          25.224
+        ],
+        [
+          20,
+          25.344
+        ],
+        [
+          40,
+          25.643
+        ],
+        [
+          80,
+          26.289
+        ],
+        [
+          160,
+          27.555
+        ]
+      ]
+    }
+  ]
+}

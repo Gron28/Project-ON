@@ -1,0 +1,1011 @@
+{
+  "setup": {
+    "FS": 1000,
+    "DUR": 20,
+    "MEASURE_FROM": 8,
+    "NOSC": 289,
+    "range": [
+      0.25,
+      16
+    ]
+  },
+  "banks": {
+    "linear": {
+      "alpha": -1,
+      "beta1": 0,
+      "beta2": 0,
+      "eps": 0,
+      "c": 1
+    },
+    "critical": {
+      "alpha": 0,
+      "beta1": -1,
+      "beta2": -0.25,
+      "eps": 1,
+      "c": 1
+    }
+  },
+  "motor": {
+    "alpha": -0.3,
+    "beta1": 1,
+    "beta2": -1,
+    "eps": 1,
+    "c": 1,
+    "cAff": 1,
+    "cInt": 0.3
+  },
+  "results": {
+    "isochronous@0.01": {
+      "inputSpectrum": {
+        "0.5 Hz": 0,
+        "1 Hz": 0,
+        "1.5 Hz": 0,
+        "2 Hz": 1,
+        "2.5 Hz": 0,
+        "3 Hz": 0,
+        "4 Hz": 0.995,
+        "8 Hz": 0.976
+      },
+      "linear": {
+        "contrast2Hz": 1.41,
+        "beatBand": {
+          "strongestHz": 2,
+          "ratioTo2Hz": 1
+        },
+        "saturated": 0,
+        "pulseSalience": 1,
+        "strongestHz": 2,
+        "peaks": [
+          [
+            2,
+            1
+          ],
+          [
+            4,
+            1
+          ],
+          [
+            5.99,
+            0.99
+          ],
+          [
+            8,
+            0.98
+          ],
+          [
+            9.93,
+            0.96
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 7.06,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 1.87
+        },
+        "saturated": 0,
+        "pulseSalience": 0.182,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            11.99,
+            0.8
+          ],
+          [
+            8,
+            0.63
+          ],
+          [
+            5.99,
+            0.48
+          ],
+          [
+            4,
+            0.34
+          ],
+          [
+            14.05,
+            0.29
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 6.78,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 2.18
+        },
+        "saturated": 0,
+        "pulseSalience": 0.151,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            11.99,
+            0.75
+          ],
+          [
+            8,
+            0.71
+          ],
+          [
+            5.99,
+            0.48
+          ],
+          [
+            4,
+            0.33
+          ],
+          [
+            14.05,
+            0.26
+          ]
+        ]
+      }
+    },
+    "missingPulse@0.01": {
+      "inputSpectrum": {
+        "0.5 Hz": 0.193,
+        "1 Hz": 0.139,
+        "1.5 Hz": 0.394,
+        "2 Hz": 0,
+        "2.5 Hz": 0.263,
+        "3 Hz": 0.334,
+        "4 Hz": 0.51,
+        "8 Hz": 1
+      },
+      "linear": {
+        "contrast2Hz": 0.85,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 1.84
+        },
+        "saturated": 0,
+        "pulseSalience": 0.317,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            15.77,
+            0.93
+          ],
+          [
+            4.12,
+            0.59
+          ],
+          [
+            1.48,
+            0.43
+          ],
+          [
+            0.5,
+            0.23
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 0.88,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 11.23
+        },
+        "saturated": 0,
+        "pulseSalience": 0.016,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            8,
+            0.73
+          ],
+          [
+            11.99,
+            0.48
+          ],
+          [
+            9.51,
+            0.34
+          ],
+          [
+            10.99,
+            0.32
+          ],
+          [
+            14.46,
+            0.29
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 2.51,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 18.83
+        },
+        "saturated": 0,
+        "pulseSalience": 0.02,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            4,
+            0.38
+          ],
+          [
+            11.99,
+            0.24
+          ],
+          [
+            9.51,
+            0.15
+          ],
+          [
+            10.99,
+            0.14
+          ]
+        ]
+      }
+    },
+    "syncopated@0.01": {
+      "inputSpectrum": {
+        "0.5 Hz": 0,
+        "1 Hz": 0.142,
+        "1.5 Hz": 0,
+        "2 Hz": 0.342,
+        "2.5 Hz": 0,
+        "3 Hz": 0.823,
+        "4 Hz": 0.34,
+        "8 Hz": 1
+      },
+      "linear": {
+        "contrast2Hz": 1.09,
+        "beatBand": {
+          "strongestHz": 3,
+          "ratioTo2Hz": 1.92
+        },
+        "saturated": 0,
+        "pulseSalience": 0.452,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            11.31,
+            0.96
+          ],
+          [
+            15.54,
+            0.93
+          ],
+          [
+            4.97,
+            0.91
+          ],
+          [
+            3,
+            0.87
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 3.14,
+        "beatBand": {
+          "strongestHz": 3,
+          "ratioTo2Hz": 3.45
+        },
+        "saturated": 0,
+        "pulseSalience": 0.066,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            10.99,
+            0.68
+          ],
+          [
+            8,
+            0.68
+          ],
+          [
+            11.99,
+            0.33
+          ],
+          [
+            3,
+            0.23
+          ],
+          [
+            4.97,
+            0.22
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 2.78,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 4.32
+        },
+        "saturated": 0,
+        "pulseSalience": 0.031,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            8,
+            0.95
+          ],
+          [
+            10.99,
+            0.38
+          ],
+          [
+            11.99,
+            0.17
+          ],
+          [
+            4,
+            0.13
+          ],
+          [
+            4.97,
+            0.12
+          ]
+        ]
+      }
+    },
+    "isochronous@0.03": {
+      "inputSpectrum": {
+        "0.5 Hz": 0,
+        "1 Hz": 0,
+        "1.5 Hz": 0,
+        "2 Hz": 1,
+        "2.5 Hz": 0,
+        "3 Hz": 0,
+        "4 Hz": 0.995,
+        "8 Hz": 0.976
+      },
+      "linear": {
+        "contrast2Hz": 1.41,
+        "beatBand": {
+          "strongestHz": 2,
+          "ratioTo2Hz": 1
+        },
+        "saturated": 0,
+        "pulseSalience": 1,
+        "strongestHz": 2,
+        "peaks": [
+          [
+            2,
+            1
+          ],
+          [
+            4,
+            1
+          ],
+          [
+            5.99,
+            0.99
+          ],
+          [
+            8,
+            0.98
+          ],
+          [
+            9.93,
+            0.96
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 14.18,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 1.91
+        },
+        "saturated": 0,
+        "pulseSalience": 0.264,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            11.99,
+            0.92
+          ],
+          [
+            8,
+            0.83
+          ],
+          [
+            5.99,
+            0.69
+          ],
+          [
+            4,
+            0.5
+          ],
+          [
+            14.05,
+            0.43
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 32.05,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 2.62
+        },
+        "saturated": 0,
+        "pulseSalience": 0.261,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            5.99,
+            0.95
+          ],
+          [
+            11.99,
+            0.86
+          ],
+          [
+            8,
+            0.77
+          ],
+          [
+            4,
+            0.68
+          ],
+          [
+            2,
+            0.26
+          ]
+        ]
+      }
+    },
+    "missingPulse@0.03": {
+      "inputSpectrum": {
+        "0.5 Hz": 0.193,
+        "1 Hz": 0.139,
+        "1.5 Hz": 0.394,
+        "2 Hz": 0,
+        "2.5 Hz": 0.263,
+        "3 Hz": 0.334,
+        "4 Hz": 0.51,
+        "8 Hz": 1
+      },
+      "linear": {
+        "contrast2Hz": 0.85,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 1.84
+        },
+        "saturated": 0,
+        "pulseSalience": 0.317,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            15.77,
+            0.93
+          ],
+          [
+            4.12,
+            0.59
+          ],
+          [
+            1.48,
+            0.43
+          ],
+          [
+            0.5,
+            0.23
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 0.72,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 26.09
+        },
+        "saturated": 0,
+        "pulseSalience": 0.014,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            8,
+            0.97
+          ],
+          [
+            11.99,
+            0.7
+          ],
+          [
+            9.51,
+            0.54
+          ],
+          [
+            10.99,
+            0.51
+          ],
+          [
+            14.46,
+            0.43
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 4.2,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 20.58
+        },
+        "saturated": 0,
+        "pulseSalience": 0.044,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            4,
+            0.9
+          ],
+          [
+            11.99,
+            0.83
+          ],
+          [
+            8,
+            0.69
+          ],
+          [
+            9.51,
+            0.43
+          ],
+          [
+            10.99,
+            0.38
+          ]
+        ]
+      }
+    },
+    "syncopated@0.03": {
+      "inputSpectrum": {
+        "0.5 Hz": 0,
+        "1 Hz": 0.142,
+        "1.5 Hz": 0,
+        "2 Hz": 0.342,
+        "2.5 Hz": 0,
+        "3 Hz": 0.823,
+        "4 Hz": 0.34,
+        "8 Hz": 1
+      },
+      "linear": {
+        "contrast2Hz": 1.09,
+        "beatBand": {
+          "strongestHz": 3,
+          "ratioTo2Hz": 1.92
+        },
+        "saturated": 0,
+        "pulseSalience": 0.452,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            11.31,
+            0.96
+          ],
+          [
+            15.54,
+            0.93
+          ],
+          [
+            4.97,
+            0.91
+          ],
+          [
+            3,
+            0.87
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 6.26,
+        "beatBand": {
+          "strongestHz": 3,
+          "ratioTo2Hz": 3.54
+        },
+        "saturated": 0,
+        "pulseSalience": 0.108,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            8,
+            0.92
+          ],
+          [
+            10.99,
+            0.86
+          ],
+          [
+            11.99,
+            0.51
+          ],
+          [
+            3,
+            0.38
+          ],
+          [
+            4.97,
+            0.38
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 4.92,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 12.55
+        },
+        "saturated": 0,
+        "pulseSalience": 0.045,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            10.99,
+            0.89
+          ],
+          [
+            8,
+            0.84
+          ],
+          [
+            4,
+            0.57
+          ],
+          [
+            11.99,
+            0.33
+          ],
+          [
+            3,
+            0.22
+          ]
+        ]
+      }
+    },
+    "isochronous@0.1": {
+      "inputSpectrum": {
+        "0.5 Hz": 0,
+        "1 Hz": 0,
+        "1.5 Hz": 0,
+        "2 Hz": 1,
+        "2.5 Hz": 0,
+        "3 Hz": 0,
+        "4 Hz": 0.995,
+        "8 Hz": 0.976
+      },
+      "linear": {
+        "contrast2Hz": 1.41,
+        "beatBand": {
+          "strongestHz": 2,
+          "ratioTo2Hz": 1
+        },
+        "saturated": 0,
+        "pulseSalience": 1,
+        "strongestHz": 2,
+        "peaks": [
+          [
+            2,
+            1
+          ],
+          [
+            4,
+            1
+          ],
+          [
+            5.99,
+            0.99
+          ],
+          [
+            8,
+            0.98
+          ],
+          [
+            9.93,
+            0.96
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 20.05,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 1.6
+        },
+        "saturated": 0,
+        "pulseSalience": 0.539,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            11.99,
+            0.98
+          ],
+          [
+            5.99,
+            0.96
+          ],
+          [
+            4,
+            0.86
+          ],
+          [
+            14.05,
+            0.76
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 58.24,
+        "beatBand": {
+          "strongestHz": 2,
+          "ratioTo2Hz": 1
+        },
+        "saturated": 0,
+        "pulseSalience": 0.949,
+        "strongestHz": 16,
+        "peaks": [
+          [
+            14.05,
+            0.95
+          ],
+          [
+            2,
+            0.95
+          ],
+          [
+            11.99,
+            0.85
+          ],
+          [
+            4,
+            0.78
+          ],
+          [
+            5.99,
+            0.72
+          ]
+        ]
+      }
+    },
+    "missingPulse@0.1": {
+      "inputSpectrum": {
+        "0.5 Hz": 0.193,
+        "1 Hz": 0.139,
+        "1.5 Hz": 0.394,
+        "2 Hz": 0,
+        "2.5 Hz": 0.263,
+        "3 Hz": 0.334,
+        "4 Hz": 0.51,
+        "8 Hz": 1
+      },
+      "linear": {
+        "contrast2Hz": 0.85,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 1.84
+        },
+        "saturated": 0,
+        "pulseSalience": 0.317,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            15.77,
+            0.93
+          ],
+          [
+            4.12,
+            0.59
+          ],
+          [
+            1.48,
+            0.43
+          ],
+          [
+            0.49,
+            0.23
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 0.59,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 34.11
+        },
+        "saturated": 0,
+        "pulseSalience": 0.02,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            11.99,
+            0.78
+          ],
+          [
+            4,
+            0.68
+          ],
+          [
+            9.51,
+            0.66
+          ],
+          [
+            10.99,
+            0.62
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 2.44,
+        "beatBand": {
+          "strongestHz": 4,
+          "ratioTo2Hz": 13.84
+        },
+        "saturated": 0,
+        "pulseSalience": 0.065,
+        "strongestHz": 5.5,
+        "peaks": [
+          [
+            5.5,
+            1
+          ],
+          [
+            10.99,
+            0.94
+          ],
+          [
+            9.51,
+            0.93
+          ],
+          [
+            6.54,
+            0.92
+          ],
+          [
+            14.46,
+            0.9
+          ]
+        ]
+      }
+    },
+    "syncopated@0.1": {
+      "inputSpectrum": {
+        "0.5 Hz": 0,
+        "1 Hz": 0.142,
+        "1.5 Hz": 0,
+        "2 Hz": 0.342,
+        "2.5 Hz": 0,
+        "3 Hz": 0.823,
+        "4 Hz": 0.34,
+        "8 Hz": 1
+      },
+      "linear": {
+        "contrast2Hz": 1.09,
+        "beatBand": {
+          "strongestHz": 3,
+          "ratioTo2Hz": 1.92
+        },
+        "saturated": 0,
+        "pulseSalience": 0.452,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            11.31,
+            0.96
+          ],
+          [
+            15.54,
+            0.93
+          ],
+          [
+            4.97,
+            0.91
+          ],
+          [
+            3,
+            0.87
+          ]
+        ]
+      },
+      "critical": {
+        "contrast2Hz": 9.52,
+        "beatBand": {
+          "strongestHz": 3,
+          "ratioTo2Hz": 3.11
+        },
+        "saturated": 0,
+        "pulseSalience": 0.224,
+        "strongestHz": 8,
+        "peaks": [
+          [
+            8,
+            1
+          ],
+          [
+            10.99,
+            0.88
+          ],
+          [
+            3,
+            0.7
+          ],
+          [
+            11.99,
+            0.67
+          ],
+          [
+            4.97,
+            0.63
+          ]
+        ]
+      },
+      "motor": {
+        "contrast2Hz": 5.34,
+        "beatBand": {
+          "strongestHz": 3,
+          "ratioTo2Hz": 7.38
+        },
+        "saturated": 0,
+        "pulseSalience": 0.131,
+        "strongestHz": 4.97,
+        "peaks": [
+          [
+            4.97,
+            1
+          ],
+          [
+            10.99,
+            0.97
+          ],
+          [
+            3,
+            0.97
+          ],
+          [
+            13.07,
+            0.87
+          ],
+          [
+            5.99,
+            0.87
+          ]
+        ]
+      }
+    }
+  }
+}

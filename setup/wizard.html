@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ON setup</title>
+<link rel="stylesheet" href="/wizard.css?token=__TOKEN__">
+<script type="module" src="/wizard.js?token=__TOKEN__"></script>
+</head>
+<body data-token="__TOKEN__">
+<main>
+  <img class="icon" src="/icon.png?token=__TOKEN__" alt="">
+  <h1>ON</h1>
+  <p class="lead" id="lead">A living music visualizer for your desktop.</p>
+
+  <section id="welcome">
+    <label class="opt"><input type="checkbox" id="desktop" checked> Desktop shortcut</label>
+    <label class="opt"><input type="checkbox" id="startup"> Start with Windows</label>
+    <p class="meta" id="meta">About 350 MB · no administrator access</p>
+  </section>
+
+  <section id="installing" hidden>
+    <div class="bar"><i id="fill"></i></div>
+    <ol id="steps"></ol>
+  </section>
+
+  <section id="error" hidden><p class="err" id="errmsg"></p></section>
+
+  <p class="err" id="note" hidden></p>
+
+  <details id="details" hidden><summary>Details</summary><pre id="logs"></pre></details>
+
+  <footer>
+    <button id="secondary" class="ghost" hidden></button>
+    <button id="primary">Install</button>
+  </footer>
+</main>
+</body>
+</html>

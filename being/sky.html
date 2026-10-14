@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>ON · the sky</title>
+<style>
+  :root {
+    --bg: #07080c; --panel: #0d0f16; --line: #1c2030; --ink: #ece7dc; --dim: #9a968e; --faint: #5a5b63; --gold: #e0b95c; --sun: #ffcf4a; --moon: #e4eaf4;
+    --serif: 'Noto Serif', 'DejaVu Serif', Georgia, serif; --sans: 'Noto Sans', 'DejaVu Sans', system-ui, sans-serif;
+    --sym: 'Noto Sans Symbols', 'Noto Sans Symbols2', 'DejaVu Sans', sans-serif; --mono: 'DejaVu Sans Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); }
+  body { padding: 22px 26px 40px; max-width: 1400px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  #line { font: 22px/1.3 var(--serif); letter-spacing: .01em; }
+  #where { color: var(--dim); text-align: right; }
+  #where button { font: inherit; color: var(--ink); background: none; border: 0; border-bottom: 1px dotted var(--faint); cursor: pointer; padding: 0; }
+  #clock { font-family: var(--mono); color: var(--ink); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  h2 { font: 600 12px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--gold); margin: 0 0 12px; }
+  h3 { font: 400 20px/1.25 var(--serif); margin: 0 0 4px; }
+  .sym { font-family: var(--sym); font-variant-emoji: text; }
+  .muted { color: var(--dim); } .faint { color: var(--faint); }
+  .num { font-family: var(--mono); font-size: 13px; }
+  .src { color: var(--faint); font-size: 12px; margin-top: 10px; }
+  .err { color: #d98a6a; }
+  /* now: four cards */
+  .now { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 18px; }
+  .card { position: relative; min-height: 132px; }
+  .card .big { font: 400 26px/1.15 var(--serif); margin: 2px 0 6px; }
+  .card .row2 { color: var(--dim); }
+  .card .row2 b { color: var(--ink); font-weight: 500; }
+  .card svg.icon { position: absolute; right: 16px; top: 16px; }
+  /* today's arcs */
+  #today { margin-top: 16px; }
+  .arc { display: grid; grid-template-columns: 120px minmax(0, 1fr) 270px; gap: 14px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+  .arc:first-child { border-top: 0; }
+  .arc .nm { font-size: 15px; } .arc .nm .sym { font-size: 19px; margin-right: 6px; }
+  .arc .st { font-size: 14px; } .arc .st small { display: block; color: var(--dim); font-size: 12.5px; margin-top: 2px; }
+  .arc.below .nm, .arc.below .st { color: var(--dim); }
+  .arc svg { width: 100%; display: block; overflow: visible; }
+  .axis { display: grid; grid-template-columns: 120px minmax(0, 1fr) 270px; gap: 14px; color: var(--faint); font: 12px var(--mono); }
+  .axis div:nth-child(2) { display: flex; justify-content: space-between; }
+  /* the rest */
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 16px; margin-top: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; margin-top: 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 5px 7px; text-align: left; vertical-align: top; border-bottom: 1px solid #141724; }
+  th { font-weight: 400; color: var(--dim); font-size: 12px; letter-spacing: .03em; }
+  tr.below td { color: var(--dim); }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
+  dt { color: var(--dim); } dd { margin: 0; }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; border: 1px solid #fff2; }
+  svg text { fill: var(--ink); }
+  #wheel, #dome { width: 100%; height: auto; display: block; max-width: 620px; margin: 0 auto; }
+  .bar { height: 4px; background: #191c28; border-radius: 2px; overflow: hidden; margin: 8px 0 10px; } .bar i { display: block; height: 100%; background: var(--gold); }
+  .strip { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; margin-top: 8px; }
+  .strip span { height: 22px; border-radius: 2px; display: flex; align-items: center; justify-content: center; font: 11px var(--sym); color: #000c; }
+  .strip span.now { outline: 1.5px solid var(--ink); outline-offset: 1px; }
+  .modes label { display: flex; gap: 8px; align-items: center; padding: 3px 0; cursor: pointer; }
+  .dot { width: 46px; height: 46px; border-radius: 50%; float: right; box-shadow: 0 0 18px currentColor; }
+  .pairs span { display: inline-block; margin: 0 18px 8px 0; }
+  dialog { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  dialog input { font: 13px var(--mono); background: #090a10; color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; width: 150px; }
+  dialog label { display: grid; grid-template-columns: 90px 1fr; align-items: center; margin: 6px 0; }
+  dialog button, .btn { font: inherit; background: #1a1d2a; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  @media (max-width: 860px) { .arc, .axis { grid-template-columns: 90px minmax(0, 1fr); } .arc .st { grid-column: 1 / -1; } .axis div:nth-child(3) { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div id="line">…</div>
+  <div id="where"><span id="clock"></span><br><button id="place" title="Change the place">…</button></div>
+</header>
+
+<div class="now">
+  <section class="card" id="cSun"></section>
+  <section class="card" id="cMoon"></section>
+  <section class="card" id="cStation"></section>
+  <section class="card" id="cHour"></section>
+</div>
+
+<section id="today"><h2>Today</h2><div id="arcs"></div>
+  <div class="src">Each curve is how high the body stands above your horizon through today (this machine's clock); the line is the horizon, the dot is now. Rise, highest point and set checked against NASA JPL Horizons to about a minute.</div></section>
+
+<div class="row">
+  <section><h2 id="wheelTitle">The ecliptic, oriented to your horizon</h2><svg id="wheel" viewBox="-318 -318 636 636"></svg><div class="src" id="wheelSrc"></div></section>
+  <section><h2>The sky above you</h2><svg id="dome" viewBox="-230 -230 460 460"></svg>
+    <div class="src">Looking up: zenith at the centre, the horizon the circle, north at the top and east at the left. Bodies below the horizon are drawn faintly outside it.</div></section>
+</div>
+
+<section style="margin-top:16px"><h2>Positions</h2><table id="bodies"></table>
+  <div class="src">Positions: astronomy-engine (VSOP87 / ELP, nutation, aberration, light time), computed on this machine; checked against NASA JPL Horizons to within 21″ in longitude and 22″ on the horizon (tests/cosmos.test.mjs). Constellations by the IAU boundaries. Altitudes are refracted only near and above the horizon.</div></section>
+<section style="margin-top:16px"><h2 id="pairsTitle">Angles between them</h2><div id="pairs" class="pairs"></div></section>
+
+<div class="grid">
+  <section id="hour"></section>
+  <section id="moon"></section>
+  <section id="lore" hidden></section>
+  <section id="rng"></section>
+  <section id="space"></section>
+  <section id="modes" class="modes"></section>
+</div>
+
+<dialog id="placeDlg"><form method="dialog">
+  <h3>Where you are</h3>
+  <label>Name <input name="name"></label>
+  <label>Latitude <input name="lat" placeholder="-34.6037 (south −)"></label>
+  <label>Longitude <input name="lon" placeholder="-58.3816 (west −)"></label>
+  <label>Elevation m <input name="elevation" placeholder="25"></label>
+  <p class="muted" style="max-width:340px">The sky is computed on this machine; the place is not sent anywhere.</p>
+  <button value="cancel">Cancel</button> <button value="ok" class="btn">Save</button>
+</form></dialog>
+
+<script type="module">
+import { BODY, SECTORS, METAL_RGB, OUTER } from './cosmos/tables.mjs';
+import { lexicon } from './lexicon.mjs';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const S = (g) => `<span class="sym">${g}︎</span>`;
+const bridge = window.sky;
+let C = null, LABELS = [], RING = 'Show the sky around it', LEX = lexicon('plain'), lore = null;
+const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const fmt = (iso, opt = { hour: '2-digit', minute: '2-digit' }) => (iso ? new Intl.DateTimeFormat('en-GB', { timeZone: tz(), ...opt }).format(new Date(iso)) : '—');
+const fmtDay = (iso) => fmt(iso, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const ago = (iso) => { if (!iso) return 'never'; const s = (Date.now() - Date.parse(iso)) / 1000; return s < 90 ? `${Math.round(s)} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${(s / 3600).toFixed(1)} h ago`; };
+const until = (iso) => { const m = Math.max(0, (Date.parse(iso) - Date.now()) / 60000); return m >= 60 ? `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, '0')} min` : `${Math.round(m)} min`; };
+const compass = (az) => ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'][Math.round(az / 22.5) % 16];
+const feedLine = (name, src) => { const f = C.feeds && C.feeds[name]; if (!f) return `<div class="src">${esc(src)} · waiting</div>`; return `<div class="src">${esc(src)} · ${f.ok ? 'updated ' + ago(f.at) : `<span class="err">failed: ${esc(f.error)}</span>`}</div>`; };
+const swatch = (hex) => `<span class="sw" style="background:${hex}"></span>`;
+const metalHex = (m) => '#' + METAL_RGB[m].map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+const glyphOf = (n) => (BODY[n] ? BODY[n].glyph : OUTER[n] || '');
+const where = (b) => (b.alt > 0 ? `<b>${b.alt.toFixed(0)}°</b> high in the <b>${compass(b.az)}</b>` : `below the horizon (${compass(b.az)})`);
+const pos = (b) => (b.sign ? `${b.deg}°${String(b.min).padStart(2, '0')}′ ${S(b.signGlyph)} ${b.sign}` : `${b.lon.toFixed(1)}° · ${esc(b.constellation)}`);   // b.sign: the local set's reading
+const H = { S: (g) => S(g), esc: (x) => esc(x), fmt: (x) => fmt(x), fmtDay: (x) => fmtDay(x), compass: (x) => compass(x), swatch: (x) => swatch(x), metalHex: (x) => metalHex(x), pos: (b) => pos(b) };   // helpers for the local views
+const moonPath = (m, south, r = 40) => { const litRight = m.waxing !== south, k = 2 * m.illumination - 1, rx = Math.abs(k) * r; return `M0,-${r} A${r},${r} 0 0 ${litRight ? 1 : 0} 0,${r} A${rx},${r} 0 0 ${(k > 0) === litRight ? 1 : 0} 0,-${r} Z`; };
+
+// ---- now: four cards ----
+function nowCards(sky) {
+  const A = sky.arcs, arc = (n) => A && A.bodies.find((x) => x.name === n), sun = sky.bodies[0], moon = sky.bodies[1], sa = arc('Sun'), ma = arc('Moon');
+  const riseSet = (a) => (a ? `rises <b>${fmt(a.rise)}</b> · highest <b>${fmt(a.transit)}</b>${a.transitAlt != null ? ` (${Math.round(a.transitAlt)}°)` : ''} · sets <b>${fmt(a.set)}</b>` : '');
+  $('cSun').innerHTML = `<h2>Sun</h2><svg class="icon" width="40" height="40" viewBox="-20 -20 40 40"><circle r="11" fill="var(--sun)" fill-opacity="${sun.up ? 1 : .35}"/></svg>
+    <div class="big">${sun.up ? 'Up' : 'Below the horizon'}</div><div class="row2">${sun.up ? where(sun) : ''}</div><div class="row2">${riseSet(sa)}</div><div class="row2">${pos(sun)}</div>`;
+  const m = sky.moon, south = sky.place.lat < 0;
+  $('cMoon').innerHTML = `<h2>Moon</h2><svg class="icon" width="44" height="44" viewBox="-22 -22 44 44"><circle r="18" fill="#1a1d28"/><path d="${moonPath(m, south, 18)}" fill="var(--moon)"/></svg>
+    <div class="big">${esc(m.name)} · ${Math.round(100 * m.illumination)}%</div><div class="row2">${moon.up ? where(moon) : 'below the horizon'}</div><div class="row2">${riseSet(ma)}</div><div class="row2">${pos(moon)}</div>`;
+  const st = sky.stations, nx = st && st.next, lt = st && st.last, name = (e) => LEX.t('station.' + e.name);
+  const soon = nx && Date.parse(nx.at) - Date.now() < 15 * 60e3;
+  $('cStation').innerHTML = `<h2>${esc(LEX.t('sky.stationTitle'))}</h2>${nx ? `<div class="big" style="${soon ? 'color:var(--sun)' : ''}">${esc(name(nx))}</div>
+    <div class="row2">in <b>${until(nx.at)}</b> · at <b>${fmt(nx.at)}</b></div>` : '<div class="big">—</div>'}
+    ${lt ? `<div class="row2" style="margin-top:6px">last: ${esc(name(lt))} at ${fmt(lt.at)}</div>` : ''}
+    <div class="row2">sunrise · solar noon · sunset · solar midnight</div>`;
+  const h = sky.hours;
+  if (!h) { $('cHour').innerHTML = '<h2>Hour</h2><div class="big">—</div><div class="row2">No sunrise here today (polar day or night).</div>'; return; }
+  const hb = BODY[h.hour.body], db = BODY[h.dayBody], left = (Date.parse(h.hour.to) - Date.now()) / 60000;
+  $('cHour').innerHTML = `<h2>${esc(LEX.t('sky.hourTitle'))}</h2><svg class="icon" width="40" height="40" viewBox="-20 -20 40 40"><circle r="12" fill="${hb.color[1]}"/></svg>
+    <div class="big">${lore ? `${S(hb.glyph)} ${h.hour.body}` : `${S(hb.glyph)} ${hb.metal[0].toUpperCase() + hb.metal.slice(1)} hour`}</div>
+    <div class="row2">${h.hour.day ? 'day' : 'night'} hour ${h.hour.n > 12 ? h.hour.n - 12 : h.hour.n} of 12 · ends <b>${fmt(h.hour.to)}</b> (${Math.max(0, Math.round(left))} min)</div>
+    <div class="bar"><i style="width:${(100 * h.progress).toFixed(1)}%"></i></div>
+    <div class="row2">${LEX.t('sky.day', { glyph: S(db.glyph), body: h.dayBody, metal: db.metal, latin: esc(sky.hours.dies || '') })}</div>`;
+}
+
+// ---- today's arcs, like a weather app's sun chart ----
+function arcsPanel(sky) {
+  const A = sky.arcs; if (!A) { $('arcs').innerHTML = '<p class="muted">computing…</p>'; return; }
+  const day0 = Date.parse(A.day0), nowMin = (Date.now() - day0) / 60000, mins = (iso) => (Date.parse(iso) - day0) / 60000;
+  const order = A.bodies.slice(0, 2).concat(A.bodies.slice(2).sort((a, b) => (b.alt > 0) - (a.alt > 0)));   // the Sun, the Moon, then what is up first
+  const rows = order.map((b) => {
+    const big = b.name === 'Sun', W = 600, H = big ? 150 : 46, y = (alt) => H / 2 - (alt / 90) * (H / 2 - 4), x = (m) => (m / 1440) * W;
+    const col = big ? 'var(--sun)' : b.name === 'Moon' ? 'var(--moon)' : '#c9c2b2', up = b.alt > 0;
+    const pts = b.samples.map((a, i) => `${x(i * A.step).toFixed(1)},${y(a).toFixed(1)}`).join(' ');
+    const above = `M0,${y(0)} ` + b.samples.map((a, i) => `L${x(i * A.step).toFixed(1)},${y(Math.max(0, a)).toFixed(1)}`).join(' ') + ` L${W},${y(0)} Z`;
+    const grid = [6, 12, 18].map((h) => `<line x1="${x(h * 60)}" y1="0" x2="${x(h * 60)}" y2="${H}" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join('');
+    const nx = x(Math.max(0, Math.min(1440, nowMin))), ny = y(b.alt);
+    let marks = '';
+    if (big) for (const [iso, w] of [[b.rise, 'sunrise'], [b.set, 'sunset']]) if (iso) marks += `<line x1="${x(mins(iso))}" y1="${y(0) - 6}" x2="${x(mins(iso))}" y2="${y(0) + 6}" stroke="var(--sun)" vector-effect="non-scaling-stroke"/>`;
+    const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">${grid}
+      <path d="${above}" fill="${col}" fill-opacity="${big ? .18 : .1}"/>
+      <line x1="0" y1="${y(0)}" x2="${W}" y2="${y(0)}" stroke="var(--faint)" stroke-width="1" vector-effect="non-scaling-stroke"/>${marks}
+      <polyline points="${pts}" fill="none" stroke="${col}" stroke-opacity="${up ? .95 : .6}" stroke-width="${big ? 2.2 : 1.5}" vector-effect="non-scaling-stroke"/>
+      <line x1="${nx}" y1="0" x2="${nx}" y2="${H}" stroke="#fff" stroke-opacity=".3" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/></svg>`;
+    const dot = `<div style="position:relative;height:0"><div style="position:absolute;left:calc(${(100 * nx / W).toFixed(2)}% - ${big ? 7 : 4}px);top:${ny - H - (big ? 7 : 4)}px;width:${big ? 14 : 8}px;height:${big ? 14 : 8}px;border-radius:50%;background:${col};opacity:${up ? 1 : .55};box-shadow:0 0 ${big ? 12 : 6}px ${col}"></div></div>`;
+    const t = (iso) => (iso ? fmt(iso) : '—');
+    const st = `${up ? `Up · ${where(b)}` : 'Below the horizon'}<small>rises ${t(b.rise)} · highest ${t(b.transit)}${b.transitAlt != null ? ` (${Math.round(b.transitAlt)}°)` : ''} · sets ${t(b.set)}</small>`;
+    return `<div class="arc${up ? '' : ' below'}"><div class="nm" style="${up ? `color:${col}` : ''}">${S(glyphOf(b.name))}${b.name}</div><div>${svg}${dot}</div><div class="st">${st}</div></div>`;
+  });
+  $('arcs').innerHTML = rows.join('') + `<div class="axis"><div></div><div><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div><div></div></div>`;
+}
+
+// ---- the wheel: the ecliptic, its rising point at the left, so the upper half is the sky above you ----
+function wheel(sky) {
+  const rise = sky.rising.lon, ang = (lon) => Math.PI + (lon - rise) * Math.PI / 180, P = (lon, r) => [r * Math.cos(ang(lon)), -r * Math.sin(ang(lon))];
+  const f = (n) => n.toFixed(2);
+  const arc = (l0, l1, r0, r1) => { const [a, b] = P(l0, r1), [c, d] = P(l1, r1), [e, g] = P(l1, r0), [h, k] = P(l0, r0); return `M${f(a)},${f(b)}A${r1},${r1} 0 0 0 ${f(c)},${f(d)}L${f(e)},${f(g)}A${r0},${r0} 0 0 1 ${f(h)},${f(k)}Z`; };
+  let o = `<path d="M-280,0 A280,280 0 0 1 280,0 Z" fill="#ffffff05"/>`;   // above the horizon
+  SECTORS.forEach((sc, i) => {
+    o += `<path d="${arc(i * 30, i * 30 + 30, 236, 280)}" fill="${sc.color}" fill-opacity="${sc.quick ? .62 : .28}" stroke="#07080c" stroke-width="1.2"/>`;
+    const [x, y] = P(i * 30 + 15, 258);
+    o += sky.signs ? `<text x="${f(x)}" y="${f(y)}" font-size="22" text-anchor="middle" dominant-baseline="central" class="sym" fill-opacity="${sc.quick ? 1 : .7}">${sky.signs[i].glyph}︎</text>`
+      : `<text x="${f(x)}" y="${f(y)}" font-size="13" text-anchor="middle" dominant-baseline="central" fill-opacity=".75">${i * 30}°</text>`;
+  });
+  for (let d = 0; d < 360; d++) { const [x0, y0] = P(d, 236), [x1, y1] = P(d, d % 10 ? 231 : d % 30 ? 226 : 214); o += `<line x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" stroke="#fff" stroke-opacity="${d % 10 ? .18 : .4}" stroke-width=".7"/>`; }
+  if (lore) for (let i = 0; i < 12; i++) { const s0 = (sky.rising.sector + i) * 30, [x, y] = P(s0 + 15, 200); o += `<text x="${f(x)}" y="${f(y)}" font-size="11" text-anchor="middle" dominant-baseline="central" fill-opacity=".45">${i + 1}</text>`; const [a, b] = P(s0, 214), [c, d] = P(s0, 120); o += `<line x1="${f(a)}" y1="${f(b)}" x2="${f(c)}" y2="${f(d)}" stroke="#fff" stroke-opacity=".07"/>`; }
+  o += `<circle r="214" fill="none" stroke="#fff" stroke-opacity=".12"/><circle r="120" fill="none" stroke="#fff" stroke-opacity=".08"/>`;
+  const at = Object.fromEntries(sky.bodies.map((b) => [b.name, b.lon]));
+  for (const a of sky.separations) {
+    if (a.angle === 0) continue;
+    const [x0, y0] = P(at[a.a], 118), [x1, y1] = P(at[a.b], 118), hard = a.angle === 90 || a.angle === 180;
+    o += `<line x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" stroke="${hard ? '#e0573f' : '#4fb3c9'}" stroke-opacity="${(0.85 - a.orb / 10).toFixed(2)}" stroke-width="${a.orb < 1 ? 1.6 : 1}" ${a.angle === 60 ? 'stroke-dasharray="4 3"' : ''}/>`;
+  }
+  const pts = lore && lore.view ? lore.view.points(sky) : [['rising', rise, 1], ['setting', rise + 180, .5], ['meridian', sky.culminating.lon, 1]];
+  for (const [k, l, w] of pts) {
+    const [x0, y0] = P(l, 120), [x1, y1] = P(l, 292), [tx, ty] = P(l, 302);
+    o += `<line x1="${f(x0)}" y1="${f(y0)}" x2="${f(x1)}" y2="${f(y1)}" stroke="#e0b95c" stroke-opacity="${w * .8}" stroke-width="1.3"/>`;
+    o += `<text x="${f(tx)}" y="${f(ty)}" font-size="11" fill="#e0b95c" text-anchor="middle" dominant-baseline="central">${k}</text>`;
+  }
+  const items = [...sky.bodies, sky.node].map((b) => ({ b, at: b.lon })).sort((x, y) => x.at - y.at);
+  for (let pass = 0; pass < 6; pass++) for (let i = 0; i < items.length; i++) { const n = items[(i + 1) % items.length], d = (n.at - items[i].at + 360) % 360; if (d < 7.5) { items[i].at -= (7.5 - d) / 2; n.at += (7.5 - d) / 2; } }
+  for (const { b, at: a } of items) {
+    const lum = b.name === 'Sun' || b.name === 'Moon', col = b.name === 'Sun' ? '#ffcf4a' : b.name === 'Moon' ? '#e4eaf4' : '#fff';
+    const [t0x, t0y] = P(b.lon, 214), [t1x, t1y] = P(b.lon, 204), [x, y] = P(a, 184), [lx, ly] = P(a, 158), up = b.up !== false;
+    o += `<line x1="${f(t0x)}" y1="${f(t0y)}" x2="${f(t1x)}" y2="${f(t1y)}" stroke="${col}" stroke-width="1.4"/>`;
+    o += `<text x="${f(x)}" y="${f(y)}" font-size="${lum ? 26 : 19}" text-anchor="middle" dominant-baseline="central" class="sym" style="fill:${col}" fill-opacity="${up ? 1 : .55}">${b.glyph}︎</text>`;
+    o += `<text x="${f(lx)}" y="${f(ly)}" font-size="10.5" text-anchor="middle" dominant-baseline="central" fill-opacity=".75">${lore ? `${b.deg}°${String(b.min).padStart(2, '0')}` : `${b.lon.toFixed(0)}°`}${b.retrograde ? ' r' : ''}</text>`;
+  }
+  $('wheel').innerHTML = o;
+  $('wheelTitle').textContent = LEX.t('sky.wheelTitle'); $('wheelSrc').textContent = LEX.t('sky.wheelSrc');
+}
+
+// ---- the dome: altitude/azimuth, looking up (north up, east left) ----
+function dome(sky) {
+  const R = 180, rad = (alt) => (alt >= 0 ? R * (1 - alt / 90) : R + Math.min(40, -alt * 0.9)), P = (alt, az) => { const r = rad(alt), a = az * Math.PI / 180; return [-r * Math.sin(a), -r * Math.cos(a)]; };
+  let o = `<circle r="${R}" fill="#0b1020" stroke="#2a3150"/>`;
+  for (const a of [30, 60]) o += `<circle r="${R * (1 - a / 90)}" fill="none" stroke="#fff" stroke-opacity=".07"/>`;
+  for (let az = 0; az < 360; az += 30) { const [x, y] = P(0, az); o += `<line x1="0" y1="0" x2="${x}" y2="${y}" stroke="#fff" stroke-opacity=".05"/>`; }
+  for (const [t, az] of [['N', 0], ['E', 90], ['S', 180], ['W', 270]]) { const [x, y] = P(-24, az); o += `<text x="${x}" y="${y}" font-size="14" text-anchor="middle" dominant-baseline="central" fill="#e0b95c">${t}</text>`; }
+  for (const b of sky.bodies) {
+    const [x, y] = P(b.alt, b.az), up = b.alt > 0, lum = b.name === 'Sun' || b.name === 'Moon';
+    if (b.name === 'Sun' && up) o += `<circle cx="${x}" cy="${y}" r="16" fill="#ffcc33" fill-opacity=".18"/>`;
+    o += `<circle cx="${x}" cy="${y}" r="${lum ? 4.5 : 2.8}" fill="${up ? '#fff' : '#667'}"/>`;
+    o += `<text x="${x + 8}" y="${y}" font-size="${lum ? 17 : 14}" dominant-baseline="central" class="sym" fill-opacity="${up ? 1 : .4}">${b.glyph}︎</text>`;
+    if (up) o += `<text x="${x + 8}" y="${y + 14}" font-size="10" fill-opacity=".6">${b.alt.toFixed(0)}° ${compass(b.az)}</text>`;
+  }
+  $('dome').innerHTML = o;
+}
+
+// ---- tables and panels ----
+function bodiesTable(sky) {
+  if (lore && lore.view) { $('bodies').innerHTML = lore.view.bodies(sky, H); return; }   // the local set's own columns
+  $('bodies').innerHTML = `<tr><th></th><th>Longitude</th><th>Constellation</th><th>Motion</th><th>Altitude</th><th>Azimuth</th><th>Rises</th><th>Sets</th></tr>` +
+    sky.bodies.map((b) => `<tr class="${b.up ? '' : 'below'}"><td>${S(b.glyph)} ${b.name}</td><td class="num">${b.lon.toFixed(2)}°</td><td>${esc(b.constellation)}</td>
+      <td class="num">${b.retrograde ? 'r ' : ''}${b.speed.toFixed(3)}°/d</td><td class="num">${b.alt.toFixed(1)}°</td><td class="num">${b.az.toFixed(0)}° ${compass(b.az)}</td>
+      <td class="num">${fmt(b.rise)}</td><td class="num">${fmt(b.set)}</td></tr>`).join('') +
+    `<tr><td>${S('☊')} Moon's node <span class="faint">(mean)</span></td><td class="num">${sky.node.lon.toFixed(2)}°</td><td colspan="6"></td></tr>
+     <tr><td class="muted">Rising point</td><td class="num">${sky.rising.lon.toFixed(2)}°</td><td class="muted" colspan="6">where the ecliptic crosses your eastern horizon</td></tr>
+     <tr><td class="muted">Meridian point</td><td class="num">${sky.culminating.lon.toFixed(2)}°</td><td class="muted" colspan="6">where it crosses your meridian</td></tr>`;
+}
+function pairsList(sky) {
+  $('pairsTitle').textContent = LEX.t('sky.pairsTitle');
+  const list = sky.aspects || sky.separations;   // the local set names them
+  $('pairs').innerHTML = list.length ? list.map((a) => `<span>${S(glyphOf(a.a))} ${a.glyph ? `<span class="sym">${a.glyph}</span>` : '–'} ${S(glyphOf(a.b))} <b>${a.name || `${a.sep.toFixed(1)}°`}</b> <span class="muted">${a.name ? `orb ${a.orb.toFixed(1)}°` : `near ${a.angle}°`}${a.closing ? ', closing' : ''}</span></span>`).join('')
+    : '<span class="muted">none within orb</span>';
+}
+function hourPanel(sky) {
+  const h = sky.hours, title = LEX.t('sky.hoursTitle');
+  if (!h) { $('hour').innerHTML = `<h2>${title}</h2><p class="muted">No sunrise here today (polar day or night).</p>`; return; }
+  const strip = h.hours.map((x) => `<span class="${x.n === h.hour.n ? 'now' : ''}" title="${x.day ? 'Day' : 'Night'} hour ${x.n > 12 ? x.n - 12 : x.n}: ${lore ? x.body : BODY[x.body].metal}, ${fmt(x.from)}–${fmt(x.to)}" style="background:${BODY[x.body].color[1]};opacity:${x.day ? 1 : .55}">${BODY[x.body].glyph}︎</span>`).join('');
+  $('hour').innerHTML = `<h2>${title}</h2>
+    <div class="muted">Sunrise ${fmt(h.sunrise)} · sunset ${fmt(h.sunset)} · day hours ${h.dayHourMinutes} min, night hours ${h.nightHourMinutes} min</div>
+    <div class="strip">${strip}</div>
+    <div class="src">${esc(LEX.t('sky.hoursSrc'))}</div>`;
+}
+function moonPanel(sky) {
+  const m = sky.moon, south = sky.place.lat < 0;
+  $('moon').innerHTML = `<h2>Moon</h2><svg viewBox="-50 -50 100 100" width="96" height="96" style="float:right"><circle r="40" fill="#1a1d28"/><path d="${moonPath(m, south)}" fill="#e8e4d8"/></svg>
+    <h3>${esc(m.name)}</h3><dl><dt>Lit</dt><dd class="num">${(100 * m.illumination).toFixed(1)}%</dd><dt>Age</dt><dd class="num">${m.age} days</dd><dt>Phase angle</dt><dd class="num">${m.phase}°</dd>
+    <dt>Position</dt><dd>${pos(sky.bodies[1])}</dd></dl>
+    <table style="margin-top:8px">${m.next.map((q) => `<tr><td>${esc(q.name)}</td><td class="num">${fmtDay(q.at)}</td></tr>`).join('')}</table>
+    <div class="src">Quarter times within a minute of JPL Horizons; drawn as seen from your hemisphere.</div>`;
+}
+function lorePanel(sky) {   // only the local set has one (being/local/sky-view.mjs)
+  const el = $('lore'), html = lore && lore.view && sky.hours ? lore.view.panel(sky, H) : '';
+  el.hidden = !html; el.innerHTML = html;
+}
+function rngPanel() {
+  const e = C.rng;
+  const col = e && e.rgb ? `rgb(${e.rgb.map((v) => Math.round(v * 255)).join(',')})` : '#888';
+  $('rng').innerHTML = `<h2>${esc(LEX.t('mode.rng').replace(/ \(.*\)$/, ''))}</h2><div class="dot" style="background:${col};color:${col}"></div>
+    <h3>${e && Number.isFinite(e.index) ? (100 * e.index).toFixed(1) + '%' : 'gathering'}</h3>
+    <div class="muted">${esc(e ? LEX.t('rng.' + (e.band || 0)) : '')}</div>
+    <dl style="margin-top:8px"><dt>Trials</dt><dd class="num">${e ? e.n : 0} of 7200 (one per second, 200 bits)</dd><dt>Window</dt><dd class="num">${e && e.window ? e.window / 3600 + ' h' : '—'}</dd>
+    <dt>Quantum</dt><dd class="num">${e ? Math.round(100 * e.quantumShare) : 0}% of trials</dd><dt>Last minute z</dt><dd class="num">${e ? e.zMinute : '—'}</dd></dl>
+    ${feedLine('rng', 'ANU quantum random numbers (vacuum fluctuations), else this machine')}
+    <div class="src">How far the bits stray from chance (chi-square of the trials' variance over one and two hours, as its upper-tail probability). Under chance the index is uniform: one reading in twenty lands in each tail.</div>`;
+}
+function spacePanel() {
+  const s = C.space, G = (n) => (n ? `G${n}` : 'none');
+  $('space').innerHTML = `<h2>Space weather</h2>${s ? `<h3>Kp ${s.kp ?? '—'} <span class="muted">${s.kp >= 5 ? 'geomagnetic storm' : s.kp >= 4 ? 'active' : 'quiet'}</span></h3>
+    <dl><dt>Solar wind</dt><dd class="num">${s.windSpeed ?? '—'} km/s, ${s.density ?? '—'} p/cm³ <span class="faint">(${esc(s.windSource || '')})</span></dd>
+    <dt>Field</dt><dd class="num">Bt ${s.bt ?? '—'} nT, Bz ${s.bz ?? '—'} nT${s.bz < -10 ? ' (southward)' : ''}</dd><dt>X-rays</dt><dd class="num">${s.xray ?? '—'}</dd>
+    <dt>Last flare</dt><dd class="num">${s.lastFlare ? `${s.lastFlare.cls} at ${fmtDay(s.lastFlare.at)}` : '—'}</dd>
+    <dt>NOAA scales</dt><dd class="num">${s.scales ? `R${s.scales.R} S${s.scales.S} ${G(s.scales.G)}` : '—'}</dd></dl>` : '<p class="muted">—</p>'}
+    ${feedLine('space', 'NOAA Space Weather Prediction Center')}`;
+}
+function modesPanel() {
+  $('modes').innerHTML = `<h2>${esc(LEX.t('menu.sky'))}</h2>${LABELS.map(([k, l]) => `<label><input type="checkbox" data-k="${k}" ${C.modes[k] ? 'checked' : ''}> ${esc(l)}</label>`).join('')}
+    <label><input type="checkbox" data-ring ${C.ring ? 'checked' : ''}> ${esc(RING)}</label>
+    <div class="src">All off by default. Each mode lends the body a light, metal, stain, material, pace or glow; the mind still only hears the music.</div>`;
+  $('modes').querySelectorAll('input').forEach((i) => i.onchange = () => (i.dataset.ring !== undefined ? bridge.set('ring', i.checked) : bridge.set('mode', { k: i.dataset.k, v: i.checked })));
+}
+async function render() {
+  if (!C) return;
+  if (C.lex !== LEX.mode) { LEX = lexicon(C.lex); lore = null; if (LEX.mode === 'local') try { lore = { view: await import('./local/sky-view.mjs') }; } catch {} }
+  $('place').textContent = `${C.place.name || 'here'} · ${Math.abs(C.place.lat).toFixed(4)}°${C.place.lat < 0 ? 'S' : 'N'} ${Math.abs(C.place.lon).toFixed(4)}°${C.place.lon < 0 ? 'W' : 'E'}`;
+  modesPanel(); rngPanel(); spacePanel();
+  if (!C.sky) { $('line').textContent = 'Computing the sky…'; return; }
+  const sky = LEX.enrich(C.sky), sun = sky.bodies[0], moon = sky.bodies[1];
+  $('line').innerHTML = lore ? esc(sky.line).replace(/[☉☽]/g, (g) => S(g))
+    : `${S('☉')} ${sun.lon.toFixed(1)}° <span class="muted">in ${esc(sun.constellation)}</span> &nbsp;·&nbsp; ${S('☽')} ${moon.lon.toFixed(1)}° <span class="muted">in ${esc(moon.constellation)}</span>`;
+  nowCards(sky); arcsPanel(sky); wheel(sky); dome(sky); bodiesTable(sky); pairsList(sky); hourPanel(sky); moonPanel(sky); lorePanel(sky);
+}
+setInterval(() => { $('clock').textContent = new Intl.DateTimeFormat('en-GB', { timeZone: tz(), weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' }).format(new Date()); }, 1000);
+setInterval(() => { if (C && C.sky) nowCards(LEX.enrich(C.sky)); }, 30000);   // the countdowns move between sky updates
+
+$('place').onclick = () => { const d = $('placeDlg'), fm = d.querySelector('form'); for (const k of ['name', 'lat', 'lon', 'elevation']) fm.elements[k].value = C.place[k] ?? ''; d.showModal(); };
+$('placeDlg').addEventListener('close', () => { const d = $('placeDlg'); if (d.returnValue !== 'ok') return; const fm = d.querySelector('form'); bridge.set('place', Object.fromEntries(['name', 'lat', 'lon', 'elevation'].map((k) => [k, fm.elements[k].value]))); });
+
+bridge.onCosmos((c) => { C = c; render(); });
+bridge.get().then((r) => { if (!r) return; LABELS = r.labels; RING = r.ring || RING; C = r.cosmos; render(); });
+</script>
+</body>
+</html>

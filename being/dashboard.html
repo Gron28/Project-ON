@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ON · dashboard</title>
+<style>
+  /* dark chart chrome from the dataviz reference palette: categorical slots for series, status colours for states, ink tokens for every label */
+  :root {
+    --page: #0d0d0d; --surface: #1a1a19; --surface2: #222220; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781; --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,.10);
+    --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767;
+    --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --on: #1c3a63; --rail: 330px;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: var(--page); color: var(--ink); font: 12px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  body { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: 100vh; }
+  @media (max-width: 1250px) { :root { --rail: 296px; } }
+  :focus-visible { outline: 2px solid var(--c1); outline-offset: 1px; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--grid); background: var(--surface); min-width: 0; }
+  header .who { min-width: 0; flex: 0 1 auto; }
+  header .song { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .sub { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .grow { flex: 1; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--ring); color: var(--ink2); white-space: nowrap; background: transparent; font: inherit; }
+  .chip i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  button.chip { cursor: pointer; } button.chip:hover { border-color: var(--muted); }
+  button.chip.on { border-color: var(--c1); background: var(--on); color: #fff; }
+  button.chip.pin { border-color: var(--c4); color: var(--ink); }
+  .num { font-variant-numeric: tabular-nums; }
+  aside { overflow-y: auto; border-right: 1px solid var(--grid); background: var(--surface); padding: 2px 0 40px; }
+  main { overflow-y: auto; padding: 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-content: start; }
+  details { border-bottom: 1px solid var(--grid); }
+  summary { cursor: pointer; padding: 8px 14px; font-weight: 600; color: var(--ink); list-style: none; display: flex; justify-content: space-between; user-select: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: '+'; color: var(--muted); }
+  details[open] > summary::after { content: '−'; }
+  .grp { padding: 2px 14px 10px; display: grid; gap: 6px; }
+  .row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 40px; align-items: center; gap: 8px; }
+  .row label { color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row output { text-align: right; color: var(--ink2); }
+  .changed > label::before, .pinned > label::before { content: '• '; color: var(--c1); }
+  .changed > label, .pinned > label { color: var(--ink); } .pinned > label::before { color: var(--c4); }
+  input[type=range] { width: 100%; accent-color: var(--c1); margin: 0; }
+  select, button, input[type=number], input[type=text], textarea { background: var(--surface2); color: var(--ink); border: 1px solid var(--axis); border-radius: 6px; padding: 4px 8px; font: inherit; }
+  select { min-width: 0; width: 100%; }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); }
+  button.on { border-color: var(--c1); color: #fff; background: var(--on); }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .seg { display: inline-flex; border: 1px solid var(--axis); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 2px 7px; background: transparent; color: var(--muted); }
+  .seg button.on { background: var(--on); color: #fff; }
+  .seg button + button { border-left: 1px solid var(--axis); }
+  .sw { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .sw label { color: var(--ink2); }
+  .sw input[type=color] { width: 100%; height: 24px; border: 1px solid var(--axis); border-radius: 6px; background: none; padding: 0; }
+  .sub2 { color: var(--muted); }
+  input.bad { border-color: var(--critical); }
+  .panel { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; min-width: 0; }
+  .panel > h2 { margin: 0; padding: 9px 12px; font-size: 12px; font-weight: 600; display: flex; gap: 8px; align-items: center; color: var(--ink); cursor: pointer; user-select: none; }
+  .panel > h2::before { content: ''; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg) translate(-2px, -2px); transition: transform .12s; }
+  .panel.collapsed > h2::before { transform: rotate(-45deg); }
+  .panel > h2 span { color: var(--muted); font-weight: 400; margin-left: auto; }
+  .panel > .body { padding: 0 12px 12px; }
+  .panel.collapsed > .body { display: none; }
+  .panel.wide { grid-column: 1 / -1; }
+  canvas { width: 100%; display: block; }
+  .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px 10px; margin-top: 4px; }
+  .kv div { display: flex; flex-direction: column; min-width: 0; } .kv b { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .kv small { color: var(--muted); }
+  .bar { display: grid; grid-template-columns: 92px minmax(0, 1fr) 44px; gap: 8px; align-items: center; margin: 3px 0; }
+  .bar span { color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .bar span.win { color: var(--ink); font-weight: 600; } .bar em { font-style: normal; text-align: right; color: var(--ink2); }
+  .bar i { height: 8px; background: var(--grid); border-radius: 0 4px 4px 0; overflow: hidden; display: block; }
+  .bar i u { display: block; height: 100%; border-radius: 0 4px 4px 0; transition: width .12s; }
+  .layer { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 3px 0; }
+  .layer span { color: var(--ink2); } .layer span.win { color: var(--ink); font-weight: 600; }
+  .layer i { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; display: block; } .layer i u { display: block; height: 100%; background: var(--c1); transition: width .12s; }
+  .layer .seg button { font-size: 10px; }
+  .gname { color: var(--muted); margin: 8px 0 2px; }
+  .log { font: 11px/1.5 Consolas, ui-monospace, monospace; color: var(--ink2); max-height: 180px; overflow: auto; white-space: pre-wrap; }
+  .skingrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .skinimg { width: 100%; border-radius: 6px; display: block; aspect-ratio: 2 / 1; background: var(--surface2); object-fit: cover; }
+  .stains { display: flex; gap: 6px; margin-top: 8px; } .stains div { flex: 1; height: 18px; border-radius: 4px; border: 1px solid var(--ring); }
+  .tip { position: fixed; pointer-events: none; background: #000d; border: 1px solid var(--axis); border-radius: 6px; padding: 3px 7px; color: #fff; font-size: 11px; display: none; z-index: 9; white-space: nowrap; }
+  .empty { color: var(--muted); padding: 30px; grid-column: 1 / -1; text-align: center; }
+  textarea { width: 100%; height: 80px; resize: vertical; font: 11px Consolas, monospace; }
+  .frozen header { box-shadow: inset 0 -2px 0 var(--warn); }
+  .hear { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 4px 22px; }
+  .hear h3 { margin: 10px 0 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: 0; }
+  .hear .bar { grid-template-columns: 150px minmax(0, 1fr) 40px; }
+  .hear .bar span small { color: var(--muted); font-size: 10px; margin-left: 4px; }
+  .hearbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 2px; }
+  .hearbar .sub2 { margin-left: auto; }
+  .pinlist { display: grid; gap: 4px; } .pinlist .row { grid-template-columns: 1fr auto; }
+</style>
+</head>
+<body>
+<header>
+  <div class="who"><div class="song" id="song">—</div><div class="sub" id="songsub">waiting for the being</div></div>
+  <div class="grow"></div>
+  <button class="chip pin" id="ovr" title="Clear all overrides" hidden></button>
+  <span class="chip" id="feel">—</span>
+  <span class="chip" id="state"><i></i><b>—</b></span>
+  <span class="chip num" id="perf">— fps</span>
+  <button class="chip" id="freeze" title="Freeze the readouts (space)">Freeze</button>
+</header>
+
+<aside id="rail">
+  <details data-id="look" open><summary>Look</summary><div class="grp" id="look"></div></details>
+  <details data-id="skinctl" open><summary>Skin</summary><div class="grp" id="skinctl"></div></details>
+  <details data-id="systems"><summary>Systems</summary><div class="grp" id="systems"></div></details>
+  <details data-id="actions"><summary>Actions</summary><div class="grp"><div class="btns" id="actions"></div></div></details>
+  <details data-id="rhythmctl"><summary>Rhythm</summary><div class="grp" id="rhythmctl"></div></details>
+  <details data-id="tuning" open><summary>Tuning</summary><div class="grp"><input type="text" id="find" placeholder="Find a control" autocomplete="off"></div></details>
+  <div id="tune"></div>
+  <details data-id="appctl"><summary>Window &amp; audio</summary><div class="grp" id="appctl"></div></details>
+  <details data-id="presets"><summary>Presets</summary><div class="grp" id="presets"></div></details>
+  <details data-id="uniforms"><summary>Uniforms</summary><div class="grp" id="uniforms"></div></details>
+</aside>
+
+<main id="live">
+  <div class="empty" id="empty">Waiting for the being…</div>
+</main>
+<div class="tip" id="tip"></div>
+
+<script>
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const h = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (v === undefined) continue; if (k === 'on') for (const [ev, fn] of Object.entries(v)) e.addEventListener(ev, fn); else if (k === 'class') e.className = v; else if (k === 'data') Object.assign(e.dataset, v); else if (k in e && k !== 'list') e[k] = v; else e.setAttribute(k, v); } for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(String(k))); return e; };
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = { c1: css('--c1'), c2: css('--c2'), c3: css('--c3'), c4: css('--c4'), c5: css('--c5'), c7: css('--c7'), grid: css('--grid'), axis: css('--axis'), muted: css('--muted'), ink: css('--ink'), ink2: css('--ink2'), surface: css('--surface') };
+const fmt = (x, d = 2) => (Number.isFinite(x) ? x.toFixed(d) : '—');
+const toHex = (rgb) => '#' + rgb.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
+const fromHex = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+const tag = (el, name) => { el.dataset.ctl = name; return el; };
+const num = (x) => (Number.isFinite(x) ? x : 0);
+let S = null, frozen = false;   // the latest snapshot; whether the readouts are frozen
+const tip = $('#tip');
+function hover(el, fn) { el.addEventListener('mousemove', (e) => { const r = el.getBoundingClientRect(), t = fn((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height); if (!t) { tip.style.display = 'none'; return; } tip.textContent = t; tip.style.display = 'block'; const w = tip.offsetWidth; tip.style.left = Math.min(e.clientX + 12, innerWidth - w - 6) + 'px'; tip.style.top = e.clientY + 14 + 'px'; }); el.addEventListener('mouseleave', () => { tip.style.display = 'none'; }); }
+// UI state (which rail groups are open, which panels are collapsed) is kept in this window's storage
+const UKEY = 'being-dash-ui';
+const ui = (() => { try { return JSON.parse(localStorage.getItem(UKEY) || '{}') || {}; } catch { return {}; } })();
+ui.open = ui.open || {}; ui.collapsed = ui.collapsed || {};
+const saveUi = () => { try { localStorage.setItem(UKEY, JSON.stringify(ui)); } catch {} };
+
+// ---- canvases ---------------------------------------------------------------------------------------------------------
+function canvas(hpx) { const c = h('canvas'); c.style.height = hpx + 'px'; c._h = hpx; return c; }
+function ctx2d(c) { const dpr = devicePixelRatio || 1, w = c.clientWidth || 300; if (c.width !== Math.round(w * dpr) || c.height !== Math.round(c._h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(c._h * dpr); } const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, c._h); return [g, w, c._h]; }
+const live = (c) => c.offsetParent !== null;   // false inside a collapsed panel
+const HN = 160, DT = .16;   // history length, seconds between snapshots
+// a sparkline: one series on its own scale; the label names it, the end dot marks now, hover reads any point
+function spark(c, arr, color, lo, hi, label, d = 2) {
+  c._arr = arr; c._label = label; c._d = d; if (!live(c) || !arr.length) return;
+  const [g, w, hh] = ctx2d(c), y = (v) => hh - 4 - ((v - lo) / (hi - lo || 1)) * (hh - 8), x = (i) => (HN - arr.length + i) / (HN - 1) * w;
+  g.strokeStyle = C.grid; g.lineWidth = 1; g.beginPath(); g.moveTo(0, hh - .5); g.lineTo(w, hh - .5); g.stroke();
+  if (lo < 0 && hi > 0) { g.beginPath(); g.moveTo(0, Math.round(y(0)) + .5); g.lineTo(w, Math.round(y(0)) + .5); g.stroke(); }
+  g.strokeStyle = color; g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath();
+  arr.forEach((v, i) => { i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v)); }); g.stroke();
+  g.fillStyle = color; g.beginPath(); g.arc(x(arr.length - 1) - 1, y(arr[arr.length - 1]), 3, 0, 7); g.fill();
+  g.fillStyle = C.ink2; g.font = '11px "Segoe UI"'; g.fillText(label + '  ' + fmt(arr[arr.length - 1], d), 4, 12);
+}
+function sparkHover(c) { hover(c, (x) => { const a = c._arr; if (!a || !a.length) return ''; const i = Math.round(x * (HN - 1)) - (HN - a.length); if (i < 0 || i >= a.length) return ''; return `${c._label} ${fmt(a[i], c._d)} · ${fmt((a.length - 1 - i) * DT, 1)} s ago`; }); }
+// a heatmap: rows x columns of 0..1 values on the sequential blue ramp; optional row labels at the left
+const RAMP = [[13, 54, 107], [24, 79, 149], [42, 120, 214], [109, 167, 236], [183, 211, 246]];
+function rampColor(v) { v = Math.max(0, Math.min(1, v)); const x = v * (RAMP.length - 1), i = Math.min(RAMP.length - 2, Math.floor(x)), t = x - i, a = RAMP[i], b = RAMP[i + 1]; return `rgb(${a.map((q, k) => Math.round(q + (b[k] - q) * t)).join(',')})`; }
+function heat(c, cols, rows, get, o = {}) {
+  if (!live(c)) return; const gap = o.gap || 0, left = o.left || 0, bottom = o.bottom || 0;
+  const [g, w0, hh0] = ctx2d(c), w = w0 - left, hh = hh0 - bottom, cw = w / cols, rh = hh / rows;
+  for (let x = 0; x < cols; x++) for (let y = 0; y < rows; y++) { const v = get(x, y); if (v == null) continue; g.fillStyle = v < .02 ? C.surface : rampColor(v); g.fillRect(left + x * cw + gap / 2, (rows - 1 - y) * rh + gap / 2, cw - gap + (gap ? 0 : .6), rh - gap + (gap ? 0 : .6)); }
+  g.fillStyle = C.muted; g.font = '10px "Segoe UI"'; g.textBaseline = 'middle';
+  for (const [r, t] of o.rowLabels || []) g.fillText(t, 0, (rows - 1 - r + .5) * rh);
+  g.textBaseline = 'alphabetic'; for (const [x, t, al] of o.colLabels || []) { g.textAlign = al || 'left'; g.fillText(t, left + x * cw, hh0 - 1); } g.textAlign = 'left';
+}
+// vertical bars on a shared baseline (4 px rounded data end)
+function vbars(c, vals, color, max, labels) {
+  if (!live(c)) return;
+  const [g, w, hh] = ctx2d(c), n = vals.length, bw = w / n;
+  g.strokeStyle = C.axis; g.lineWidth = 1; g.beginPath(); g.moveTo(0, hh - 12.5); g.lineTo(w, hh - 12.5); g.stroke();
+  vals.forEach((v, i) => { const bh = Math.max(0, Math.min(1, v / max)) * (hh - 18); g.fillStyle = color; const x = i * bw + 1, y = hh - 13 - bh; g.beginPath(); g.roundRect(x, y, Math.max(1, bw - 2), bh, [Math.min(4, bw / 2), Math.min(4, bw / 2), 0, 0]); g.fill(); });
+  if (labels) { g.fillStyle = C.muted; g.font = '10px "Segoe UI"'; labels.forEach(([i, t]) => g.fillText(t, i * bw, hh - 1)); }
+}
+
+// ---- history (for sparklines and the cochleagram) --------------------------------------------------------------------
+const hist = {}, push = (k, v) => { const a = hist[k] || (hist[k] = []); a.push(Number.isFinite(v) ? v : 0); if (a.length > HN) a.shift(); };
+const coch = [];   // ear amplitude columns
+let lastGpu = {};   // the page reports GPU timings only when a batch is ready: keep the last ones
+
+// ---- live panels ---------------------------------------------------------------------------------------------------------
+const P = {};
+function panel(id, title, wide) {
+  const body = h('div', { class: 'body' }), hd = h('h2', { tabIndex: 0, title: 'Collapse' }, title);
+  const p = h('section', { class: 'panel' + (wide ? ' wide' : '') + (ui.collapsed[id] ? ' collapsed' : ''), data: { panel: id } }, hd, body);
+  const flip = () => { p.classList.toggle('collapsed'); ui.collapsed[id] = p.classList.contains('collapsed'); saveUi(); if (S) render(true); };
+  hd.addEventListener('click', flip); hd.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } });
+  P[id] = p; $('#live').append(p); return body;
+}
+const kv = (rows) => rows.map(([k, v, d, t]) => h('div', {}, h('b', { class: 'num' }, t ?? fmt(v, d ?? 2)), h('small', {}, k)));
+function bars(el, rows, color) {   // labelled horizontal bars, one hue, text in ink tokens
+  el.replaceChildren(...rows.map(([name, v, max = 1, cls]) => h('div', { class: 'bar' }, h('span', { class: cls || '', title: name }, name), h('i', {}, h('u', { style: `width:${Math.max(0, Math.min(1, v / max)) * 100}%;background:${color}` })), h('em', { class: 'num' }, fmt(v)))));
+}
+const GROUPS = { surface: ['morph', 'skin', 'spikes', 'chaos', 'grain', 'frac', 'intr'], appendages: ['lobes', 'tendrils', 'sats', 'drops'], 'inner light': ['nuc', 'tissue'] };
+const FAMILIES = ['cppn', 'cells', 'pollen', 'turing', 'lace', 'attractor', 'living'];
+const MATERIALS = ['liquid metal', 'glass', 'velvet flesh', 'obsidian', 'iridescent', 'fluorescent', 'fire', 'water', 'air', 'earth',
+  'saturn · lead', 'jupiter · tin', 'mars · iron', 'sun · gold', 'venus · copper', 'mercury · quicksilver', 'moon · silver'];   // being/materials.mjs
+const PITCH = 'C C# D D# E F F# G G# A A# B'.split(' ');
+function buildLive() {
+  $('#empty')?.remove();
+  // ear: a cochleagram (28 hair-cell units, ~25 s) and the ear's own readings
+  let b = panel('hear', 'Hearing', true); P.hearBody = h('div'); P.steer = tag(h('button', { class: 'chip', title: 'Let the genre and mood model steer the being', on: { click: () => dash.cmd({ k: 'brainDrives', v: !(S && S.brain && S.brain.drives) }) } }, 'Steer the being'), 'brain-drives'); P.hearNote = h('span', { class: 'sub2' });
+  P.genreC = canvas(30); P.embC = canvas(16); P.hearGrid = h('div', { class: 'hear' });
+  b.append(h('div', { class: 'hearbar' }, P.steer, P.hearNote), P.hearGrid, h('div', { class: 'sub2', style: 'margin:10px 0 3px' }, 'top genre over time'), P.genreC, h('div', { class: 'sub2', style: 'margin:8px 0 3px' }, 'embedding'), P.embC);
+  hover(P.genreC, (x) => { const a = hearHist; if (!a.length) return ''; const i = Math.floor(x * Math.max(HEARN, a.length)) - (Math.max(HEARN, a.length) - a.length); const e = a[i]; return e ? `${e.g} · ${fmt(e.p, 2)}` : ''; });
+  hover(P.embC, (x) => { const e = S && S.brain && S.brain.emb; return e ? `dim ${Math.floor(x * e.length)} · ${fmt(e[Math.min(e.length - 1, Math.floor(x * e.length))], 2)}` : ''; });
+  b = panel('ear', 'Ear', true); P.earC = canvas(150); P.earKv = h('div', { class: 'kv' }); b.append(P.earC, P.earKv);
+  hover(P.earC, (x, y) => { const w = P.earC.clientWidth, i = Math.floor((x * w - 34) / (w - 34) * HN) - (HN - coch.length), col = coch[i]; if (!col) return ''; const k = Math.max(0, Math.min(27, Math.floor((1 - y * P.earC._h / (P.earC._h - 12)) * 28))); return `${Math.round(55 * 2 ** (k / 4))} Hz · ${fmt(col[k], 2)}`; });
+  // rhythm
+  b = panel('rhythm', 'Rhythm'); P.rhKv = h('div', { class: 'kv' }); P.gridC = canvas(72); P.errC = canvas(44); b.append(P.rhKv, h('div', { class: 'sub2', style: 'margin:10px 0 3px' }, 'learned groove'), P.gridC, P.errC);
+  P.orgKv = h('div', { class: 'kv' }); P.orgC = canvas(84); P.orgBpmC = canvas(40);
+  b.append(h('div', { class: 'sub2', style: 'margin:10px 0 3px' }, 'rhythm organ (Beat This!): beats (light) and downbeats (warm), last 6 s'), P.orgKv, P.orgC, P.orgBpmC);
+  sparkHover(P.orgBpmC);
+  hover(P.gridC, (x, y) => { if (!S) return ''; const w = P.gridC.clientWidth, t = ['kick', 'snare', 'hat'][Math.floor(y * 3)], k = Math.floor((x * w - 40) / (w - 40) * 16); if (k < 0) return ''; return `${t} · slot ${k + 1} · p ${fmt(S.timing.grid[t][k])}`; });
+  sparkHover(P.errC);
+  // affect
+  b = panel('affect', 'Feeling'); P.affC = canvas(150); P.moodC = canvas(40); P.daC = canvas(40); P.surC = canvas(40); b.append(P.affC, P.moodC, P.daC, P.surC);
+  hover(P.affC, (x, y) => `valence ${fmt(x * 2 - 1)} · arousal ${fmt(1 - y)}`);
+  [P.moodC, P.daC, P.surC].forEach(sparkHover);
+  // drives
+  b = panel('drives', 'Drives'); P.drives = h('div'); b.append(P.drives);
+  // resonance
+  b = panel('res', 'Felt pulse bank'); P.resC = canvas(90); P.pitchC = canvas(70); b.append(P.resC, h('div', { class: 'sub2', style: 'margin-top:8px' }, 'pitch classes'), P.pitchC);
+  hover(P.resC, (x) => { if (!S) return ''; const i = Math.min(S.mind.resonance.length - 1, Math.floor(x * S.mind.resonance.length)); return `${fmt(S.mind.resonanceHz[i] * 60, 0)} bpm · ${fmt(S.mind.resonance[i], 3)}`; });
+  hover(P.pitchC, (x) => { const i = Math.min(11, Math.floor(x * 12)); return S ? PITCH[i] + ' · ' + fmt(S.mind.pitch[i], 2) : ''; });
+  // what the analyzer hears
+  b = panel('char', 'Character'); P.charBars = h('div'); P.evC = canvas(76); b.append(P.charBars, h('div', { class: 'sub2', style: 'margin:8px 0 3px' }, 'events'), P.evC);
+  hover(P.evC, (x, y) => { const rows = P.evC._rows || []; return rows.length ? rows[Math.min(rows.length - 1, Math.floor(y * rows.length))] : ''; });
+  // skin: the unrolled picture, and the genome that grows it
+  b = panel('skin', 'Skin', true); P.skinImg = h('img', { class: 'skinimg', alt: 'the grown skin, unrolled' }); P.stains = h('div', { class: 'stains' }); P.skinKv = h('div', { class: 'kv' }); P.famC = canvas(96);
+  b.append(h('div', { class: 'skingrid' }, h('div', {}, P.skinImg, P.stains), h('div', {}, P.skinKv, h('div', { class: 'sub2', style: 'margin:10px 0 3px' }, 'family mix'), P.famC)));
+  hover(P.famC, (x) => { const i = Math.min(6, Math.floor(x * 7)); return S ? FAMILIES[i] + ' · ' + fmt(S.morph.w[FAMILIES[i]], 2) : ''; });
+  // layers (with per-layer control, built once so a click is never lost to a redraw)
+  b = panel('rest', 'Layers'); P.restBody = h('div'); b.append(P.restBody); buildLayers();
+  // paced breathing: ON is the guide; the practice's state comes back in the snapshot
+  b = panel('breathe', 'Paced breathing'); P.breatheTitle = b.parentElement && b.parentElement.querySelector('h2, .ptitle, summary'); P.breatheKv = h('div', { class: 'kv' });
+  P.breatheLevel = h('select', {}, ...[1, 2, 3, 4, 5].map((l) => h('option', { value: l }, `Level ${l}: ${['out 20 · in 10', 'out 30 · in 15', 'out 15 · in 15 · hold 15', 'out 40 · in 20', 'out 20 · in 10 · hold 30'][l - 1]}`)), h('option', { value: 'custom' }, 'Custom'));
+  const num3 = (ph, v) => h('input', { type: 'number', min: 0, max: 600, value: v, title: ph, style: 'width:64px' });
+  P.pOut = num3('exhale s', 20); P.pIn = num3('inhale s', 10); P.pHold = num3('hold s', 0);
+  const pcmd = (o) => dash.app('breathe', o);
+  P.pStart = h('button', { on: { click: () => pcmd({ on: true, paused: false, level: P.breatheLevel.value === 'custom' ? 'custom' : +P.breatheLevel.value, custom: [+P.pOut.value, +P.pIn.value, +P.pHold.value] }) } }, 'Start');
+  P.pPause = h('button', { on: { click: () => pcmd({ paused: !(S && S.breathe && S.breathe.paused) }) } }, 'Pause');
+  P.pStop = h('button', { on: { click: () => pcmd({ on: false, paused: false }) } }, 'Stop');
+  P.pCues = h('button', { on: { click: () => pcmd({ cues: !(S && S.breathe && S.breathe.cues) }) } }, 'Sound cues');
+  b.append(P.breatheKv, h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center' }, P.breatheLevel),
+    h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center' }, h('span', { class: 'sub2' }, 'custom: out / in / hold'), P.pOut, P.pIn, P.pHold),
+    h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px' }, P.pStart, P.pPause, P.pStop, P.pCues));
+  // practice: four calendars (a year, one cell a day, like a commit graph) and today's sky line for the paper diary
+  b = panel('record', 'Practice', true); P.recBody = h('div', { class: 'sub2' }, 'loading…'); P.recSky = h('div', { class: 'sub2', style: 'margin-top:10px' }); P.recWords = h('div', { style: 'display:flex;gap:6px;align-items:center;margin-top:10px' });
+  const pbtn = (k, label) => h('button', { on: { click: async () => { const r = await dash.app('record'); await dash.app('practice', { k, on: !(r && r.practice && r.practice[k]) }); loadRecord(); } } }, label);
+  b.append(h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px' }, pbtn('work', 'Work cycle (3 h): start / stop'), pbtn('body', 'Body activation (5 rounds): start / stop')), P.recBody, P.recSky, P.recWords);
+  b = panel('mat', 'Material'); P.matBars = h('div'); P.propChip = tag(h('button', { class: 'chip', title: 'Show the proposed elements and planets (lab preview) instead of the current ones', on: { click: () => dash.cmd({ k: 'proposals', v: !(S && S.proposals) }) } }, 'Proposal materials (preview)'), 'proposals'); b.append(h('div', { style: 'margin-bottom:8px' }, P.propChip), P.matBars);
+  b = panel('body', 'Body'); P.bodyBars = h('div'); b.append(P.bodyBars);
+  b = panel('mem', 'Memory'); P.memKv = h('div', { class: 'kv' }); b.append(P.memKv);
+  b = panel('perf', 'Performance'); P.perfKv = h('div', { class: 'kv' }); P.frameC = canvas(40); P.gpuBars = h('div', { style: 'margin-top:8px' }); b.append(P.perfKv, P.frameC, P.gpuBars); sparkHover(P.frameC);
+  b = panel('log', 'Log', true); P.log = h('div', { class: 'log' }); b.append(P.log);
+}
+const LAY = {};
+function buildLayers() {
+  const rows = [h('div', { class: 'bar' }, h('span', {}, 'maximalism'), h('i', {}, LAY.M = h('u', { style: `background:${C.c4}` })), LAY.Mv = h('em', { class: 'num' }))];
+  for (const [gname, names] of Object.entries(GROUPS)) {
+    rows.push(h('div', { class: 'gname' }, gname));
+    for (const name of names) {
+      const seg = h('div', { class: 'seg' }, ...['auto', 'on', 'off'].map((m) => h('button', { data: { v: m, ctl: 'layer-' + name + '-' + m }, on: { click: () => dash.cmd({ k: 'layer', name, v: m }) } }, m)));
+      const lbl = h('span', {}, name), bar = h('u', {});
+      LAY[name] = { lbl, bar, seg }; rows.push(h('div', { class: 'layer' }, lbl, h('i', {}, bar), seg));
+    }
+  }
+  P.restBody.replaceChildren(...rows);
+}
+function overrideCount(d) { return (d.stain ? 1 : 0) + (d.light ? 1 : 0) + (d.metal ? 1 : 0) + (d.mat >= 0 ? 1 : 0) + (d.family ? 1 : 0) + (d.maturity != null ? 1 : 0) + (d.M != null ? 1 : 0) + (d.sleep !== 'auto' ? 1 : 0) + Object.keys(d.layer).length + Object.keys(d.uni).length; }
+function render(force) {
+  if (!S || (frozen && !force)) return;
+  const s = S, d = s.dev, tr = s.app && s.app.track;
+  // header
+  $('#song').textContent = s.memory.title || (tr && tr.title) || 'No song';
+  $('#songsub').textContent = [s.memory.artist || (tr && tr.artist), s.memory.album, s.app && s.app.source].filter(Boolean).join(' · ');
+  $('#feel').textContent = s.mind.feeling;
+  const st = s.beads.on ? ['Beads', 'var(--c7)'] : s.sleep > .5 ? ['Asleep', 'var(--muted)'] : s.pressure.p > .7 ? ['Pressured', 'var(--warn)'] : ['Awake', 'var(--good)'];
+  $('#state i').style.background = st[1]; $('#state b').textContent = st[0];
+  if (s.perf.gpu) lastGpu = { ...lastGpu, ...s.perf.gpu };
+  const gpu = lastGpu; $('#perf').textContent = `${s.perf.fps} fps` + (gpu.body ? ` · body ${fmt(gpu.body.median, 1)} ms` : '') + (gpu.bake ? ` · skin ${fmt(gpu.bake.median, 1)} ms` : '');
+  const n = overrideCount(d); $('#ovr').hidden = !n; $('#ovr').textContent = n + (n === 1 ? ' override' : ' overrides') + ' ×';
+  drawHearing(s.brain || null);
+  // ear (the cochleagram history grows only while live)
+  heat(P.earC, HN, 28, (x, y) => { const col = coch[x - (HN - coch.length)]; return col ? col[y] : null; }, { left: 34, bottom: 12, rowLabels: [[0, '55 Hz'], [8, '220'], [16, '880'], [24, '3.5k']], colLabels: [[0, '−' + Math.round(HN * DT) + ' s'], [HN, 'now', 'right']] });
+  P.earKv.replaceChildren(...kv([['level', s.ear && s.ear.level, 4], ['onset', s.ear && s.ear.onset], ['roughness', s.ear && s.ear.rough], ['sub-bass', s.ear && s.ear.sub], ['hum', s.ear && s.ear.hum], ['tissue σ', s.tissue.sigma], ['branching', s.tissue.branching]]));
+  // rhythm
+  P.rhKv.replaceChildren(...kv([['felt bpm', s.mind.pulseBpm, 0], ['tracker bpm', s.engine.beat.bpm, 0], ['lock', s.mind.lock], ['timing ±ms', s.timing.errMs, 0], ['predicted %', s.timing.predicted * 100, 0], [s.timing.horizon > 1 ? 'ahead ms' : 'waits ms', s.timing.horizon > 1 ? s.timing.horizon : s.timing.delay, 0]]));
+  heat(P.gridC, 16, 3, (x, y) => s.timing.grid[['hat', 'snare', 'kick'][y]][x], { gap: 2, left: 40, rowLabels: [[0, 'hat'], [1, 'snare'], [2, 'kick']] });
+  spark(P.errC, hist.err, C.c2, 0, Math.max(40, ...hist.err), 'timing error ms', 0);
+  if (s.organ) {
+    const o = s.organ;
+    P.orgKv.replaceChildren(...kv([['organ bpm', o.bpm, 0], ['beats / bar', o.perBar, 0], ['confidence', o.conf], ['aligned to the one', 0, 0, o.aligned ? 'yes' : 'no'], ['beat in bar', o.aligned ? o.inBar + 1 : 0, 0], ['ms / run', o.ms, 0]]));
+    if (live(P.orgC)) {
+      const [g, w, hh] = ctx2d(P.orgC), n = o.beat.length;
+      g.strokeStyle = C.grid; g.lineWidth = 1; g.beginPath(); g.moveTo(0, hh * .5); g.lineTo(w, hh * .5); g.stroke();   // the 0-logit threshold
+      const curve = (a, col, fill) => { g.beginPath(); a.forEach((v, i) => { const x = i / (n - 1) * w, y = hh - v * (hh - 4) - 2; i ? g.lineTo(x, y) : g.moveTo(x, y); }); if (fill) { g.lineTo(w, hh); g.lineTo(0, hh); g.closePath(); g.globalAlpha = .18; g.fillStyle = col; g.fill(); g.globalAlpha = 1; } else { g.strokeStyle = col; g.lineWidth = 1.5; g.stroke(); } };
+      curve(o.beat, C.ink2, true); curve(o.beat, C.ink2); curve(o.down, C.c2);
+      g.fillStyle = C.muted; g.font = '10px "Segoe UI"'; g.fillText('-6 s', 3, 11); g.textAlign = 'right'; g.fillText(o.age > 3 ? 'stale' : 'now', w - 3, 11); g.textAlign = 'left';
+    }
+  }
+  spark(P.orgBpmC, hist.obpm, C.c5, 40, 220, 'organ bpm', 0);
+  // affect plane: valence (x) by arousal (y), with a trail of recent states
+  if (live(P.affC)) { const [g, w, hh] = ctx2d(P.affC); g.strokeStyle = C.grid; g.lineWidth = 1; g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, hh); g.moveTo(0, hh / 2); g.lineTo(w, hh / 2); g.stroke();
+    g.fillStyle = C.muted; g.font = '10px "Segoe UI"'; g.fillText('excited', 4, 11); g.fillText('calm', 4, hh - 4); g.textAlign = 'right'; g.fillText('positive', w - 4, hh / 2 - 4); g.textAlign = 'left'; g.fillText('negative', 4, hh / 2 - 4);
+    g.strokeStyle = C.c1; g.globalAlpha = .45; g.lineWidth = 2; g.beginPath(); hist.val.forEach((v, i) => { const x = (v + 1) / 2 * w, y = (1 - hist.aro[i]) * hh; i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); g.globalAlpha = 1;
+    if (s.mind.contagion > .05) { const mx = (s.mind.musicV + 1) / 2 * w, my = (1 - s.mind.musicA) * hh; g.strokeStyle = C.c2; g.lineWidth = 2; g.beginPath(); g.arc(mx, my, 7, 0, 7); g.stroke(); g.fillStyle = C.c2; g.font = '10px "Segoe UI"'; g.fillText('music', mx + 9, my + 3); }
+    const x = (s.mind.valence + 1) / 2 * w, y = (1 - s.mind.arousal) * hh; g.fillStyle = C.c1; g.strokeStyle = C.surface; g.lineWidth = 2; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); g.stroke(); }
+  spark(P.moodC, hist.mood, C.c3, -1, 1, 'mood'); spark(P.daC, hist.da, C.c4, -1.5, 1.5, 'dopamine'); spark(P.surC, hist.sur, C.c7, 0, 2, 'surprise');
+  bars(P.drives, [['energy', s.mind.energy], ['boredom', s.mind.bored], ['confusion', s.mind.confused], ['groove', s.mind.groove], ['anticipation', s.mind.daAnt], ['syncopation', s.mind.sync], ['entropy', s.mind.entropy, 3]], C.c1);
+  vbars(P.resC, s.mind.resonance, C.c1, Math.max(.05, ...s.mind.resonance), [[0, '30'], [12, '60'], [24, '120'], [36, '240']]);
+  vbars(P.pitchC, s.mind.pitch, C.c3, 1, PITCH.map((t, i) => [i, t]));
+  // character and events
+  bars(P.charBars, Object.entries(s.engine.character || {}).map(([k, v]) => [k, v]), C.c3);
+  drawEvents(s.events || []);
+  // skin
+  if (s.skinPng) P.skinImg.src = s.skinPng;
+  const sn = s.morph.stainNow; P.stains.replaceChildren(...[['membranes', sn.mem], ['nuclei', sn.nuc], ['cytoplasm', sn.cyto.map((v) => Math.min(1, v * 4))]].map(([nm, c]) => h('div', { title: nm, style: `background:${toHex(c)}` })));
+  const m = s.morph;
+  P.skinKv.replaceChildren(...kv([['maturity', m.t], ['cells', m.cells, 0], ['sections', m.sections, 0], ['symmetry', m.sym, 0], ['mirror', null, 0, m.mirror ? 'yes' : 'no'], ['frequency', m.freq], ['crispness', m.crisp, 1], ['depth', m.depth, 3], ['stains', null, 0, m.stain ? m.stain.names.join(' / ') : 'auto'], ['song', null, 0, m.song || 'its own']]));
+  vbars(P.famC, FAMILIES.map((f) => m.w[f] || 0), C.c1, 1, FAMILIES.map((f, i) => [i, f.slice(0, 4)]));
+  // layers
+  LAY.M.style.width = Math.max(0, Math.min(1, s.rest.M)) * 100 + '%'; LAY.Mv.textContent = fmt(s.rest.M);
+  const winners = Object.values(s.rest.win);
+  for (const names of Object.values(GROUPS)) for (const nm of names) { const L = LAY[nm], f = d.layer[nm] || 'auto'; L.bar.style.width = Math.max(0, Math.min(1, s.rest.g[nm] ?? 1)) * 100 + '%'; L.lbl.className = winners.includes(nm) ? 'win' : ''; for (const bt of L.seg.children) bt.classList.toggle('on', bt.dataset.v === f); }
+  bars(P.matBars, s.materials.names.map((nm, i) => [nm, s.materials.w[i], 1, (s.materials.shown ? s.materials.shown[i] : +(i === s.materials.cur)) > .5 ? 'win' : '']), C.c1);
+  bars(P.bodyBars, [['pressure', s.pressure.p], ['charge', s.pressure.charge], ['tension', s.pressure.tension, 3], ['sleep', s.sleep], ['beads', s.beads.a], ['glow', s.look.glow, 2]], C.c1);
+  P.memKv.replaceChildren(...kv([['plays', s.memory.plays, 0], ['familiar', s.memory.familiarity], ['heard min', s.memory.experience / 60, 1], ['songs known', s.memory.known, 0], ['being', s.seed % 100000, 0], ['listened h', s.mind.life.listenSeconds / 3600, 1]]));
+  P.perfKv.replaceChildren(...kv([['fps', s.perf.fps, 0], ['frame ms', s.perf.frameMs, 1], ['tissue act', s.tissue.act * 1000, 1]]));
+  spark(P.frameC, hist.fps, C.c3, 0, Math.max(60, ...hist.fps), 'fps', 0);
+  bars(P.gpuBars, Object.entries(gpu).map(([k, v]) => [k + ' ms', v.median, 16.7]), C.c2);
+  P.log.textContent = s.log.join('\n');
+  syncControls();
+}
+// history is fed once per snapshot, never by a redraw, so freezing and collapsing cannot distort it
+const CAL = [   // name, field, colour, unit, the amount that shows full
+  ['cal.work', 'work', [0, 20, 137], 'cycles', 3], ['cal.body', 'body', [220, 20, 60], 'activations', 3],
+  ['cal.breath', 'breath', [254, 231, 77], 'min', 40], ['cal.listen', 'listen', [220, 222, 228], 'min', 240]];
+function calendar([nameKey, key, rgb, unit, full], days, names = {}) {
+  const name = names[nameKey] || nameKey;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = new Date(today); start.setDate(start.getDate() - 52 * 7 - ((today.getDay() + 6) % 7));   // a year, weeks starting on Monday
+  const grid = h('div', { style: 'display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,9px);gap:2px;overflow-x:auto;padding-bottom:2px' });
+  let total = 0, active = 0;
+  for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+    const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, v = (days[k] && days[k][key]) || 0;
+    total += v; if (v > 0) active++;
+    const f = v > 0 ? .25 + .75 * Math.min(1, v / full) : 0;
+    grid.append(h('div', { title: `${d.toDateString()}: ${v} ${unit}`, style: `width:9px;height:9px;border-radius:2px;background:${f ? `rgba(${rgb.join(',')},${f.toFixed(2)})` : 'rgba(255,255,255,.05)'}` }));
+  }
+  return h('div', { style: 'margin-bottom:12px' }, h('div', { style: 'display:flex;justify-content:space-between;margin-bottom:4px' }, h('b', { style: `color:rgb(${rgb.join(',')});font-weight:600` }, name), h('span', { class: 'sub2' }, `${active} days · ${total} ${unit} this year`)), grid);
+}
+async function loadRecord() {
+  const r = await dash.app('record'); if (!r || !P.recBody) return;
+  P.recBody.replaceChildren(...CAL.map((c) => calendar(c, r.days || {}, r.names)));
+  if (P.breatheTitle && r.names && r.names['panel.breathe']) P.breatheTitle.textContent = r.names['panel.breathe'];
+  const lx = await dash.app('lexicon');   // the words: a switch only when the local set is present
+  if (P.recWords) P.recWords.replaceChildren(...(lx && lx.hasLocal ? [h('span', { class: 'sub2' }, 'Words: '), ...['plain', 'local'].map((m) => h('button', { class: lx.mode === m ? 'on' : '', on: { click: async () => { await dash.app('lexicon', m); loadRecord(); } } }, m === 'local' ? 'original' : 'plain'))] : []));
+  const line = r.sky && r.sky.line ? r.sky.line : '';
+  const copy = h('button', { on: { click: async () => { try { await navigator.clipboard.writeText(line); copy.textContent = 'copied'; } catch { copy.textContent = 'select it'; } } } }, 'copy');
+  P.recSky.replaceChildren(h('div', { style: 'display:flex;gap:8px;align-items:baseline' }, copy, h('span', {}, line || 'the sky is being computed…')));
+}
+setTimeout(loadRecord, 800); setInterval(loadRecord, 60000);
+function feed(s) {
+  if (s.breathe && P.breatheKv) { const r = s.breathe, word = { ready: 'breathe in', out: 'exhale', in: 'inhale', hold: 'hold' }[r.phase] || r.phase;
+    P.breatheKv.replaceChildren(...kv([['now', 0, 0, r.on ? `${word}${r.phase === 'out' || r.phase === 'in' ? ' · ' + r.side : ''}` : 'off'], ['seconds left', r.on ? r.left : 0, 0], ['cycles', r.cycles, 0], ['minutes', r.total / 60, 1]]));
+    P.pPause.textContent = r.paused ? 'Resume' : 'Pause'; P.pCues.classList.toggle('on', !!r.cues); }
+  P.propChip.classList.toggle('on', !!s.proposals);
+  if (CTL.fx && s.fx) for (const k in CTL.fx) CTL.fx[k].classList.toggle('on', s.fx[k] !== false);
+  if (CTL.prop) { CTL.prop.classList.toggle('on', !!s.proposals); CTL.prop.textContent = s.proposals ? 'Proposal materials: on' : 'Proposal materials: off'; }
+  if (s.ear) { coch.push(s.ear.amp.map((a) => Math.min(1, Math.log1p(a / .015) / 3))); if (coch.length > HN) coch.shift(); }
+  push('err', s.timing.errMs); push('obpm', s.organ ? s.organ.bpm : 0); push('val', s.mind.valence); push('aro', s.mind.arousal); push('mood', s.mind.mood); push('da', s.mind.daPhasic); push('sur', s.mind.surprise); push('fps', s.perf.fps);
+}
+const HEARN = 40, hearHist = [], gcol = new Map(), GC = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c7'];
+let hearKey = '';
+function pairs(x) { return Array.isArray(x) ? x.map((e) => (Array.isArray(e) ? e : [e && e.label || e && e.name || String(e), e && e.p || 0])) : x && typeof x === 'object' ? Object.entries(x) : []; }
+function nameNode(n) { const i = String(n).indexOf('---'); return i < 0 ? String(n).replace(/_/g, ' ') : h('span', {}, n.slice(i + 3).replace(/_/g, ' '), h('small', {}, n.slice(0, i))); }
+function hearBars(title, rows, color, max = 1) { const box = h('div', {}, h('h3', {}, title)); for (const [n, v] of rows) { const lab = nameNode(n); box.append(h('div', { class: 'bar' }, h('span', { title: String(n) }, lab.nodeType ? lab : lab), h('i', {}, h('u', { style: `width:${Math.max(0, Math.min(1, v / max)) * 100}%;background:${color}` })), h('em', { class: 'num' }, fmt(v)))); } return box; }
+function drawHearing(br) {
+  P.steer.classList.toggle('on', !!(br && br.drives));
+  if (!br) { P.hearNote.textContent = 'listening…'; P.hearGrid.replaceChildren(); return; }
+  P.hearNote.textContent = `${fmt(br.ms, 0)} ms · ${br.drives ? 'steering' : 'observing'}`;
+  const key = JSON.stringify([br.genres && br.genres[0], br.styles && br.styles[0], br.ms]);
+  if (key !== hearKey && br.genres && br.genres.length) { hearKey = key; const g = br.genres[0]; if (!gcol.has(g[0])) gcol.set(g[0], GC[gcol.size % GC.length]); hearHist.push({ g: g[0], p: g[1] }); if (hearHist.length > HEARN) hearHist.shift(); }
+  if (!live(P.hearGrid)) return;
+  const genres = pairs(br.genres), styles = pairs(br.styles), moods = pairs(br.moods).sort((a, b) => b[1] - a[1]);
+  P.hearGrid.replaceChildren(hearBars('Genres', genres, C.c1), hearBars('Styles', styles, C.c1), hearBars('Moods', moods, C.c7),
+    hearBars('Instruments', pairs(br.instruments), C.c3), hearBars('Themes', pairs(br.themes), C.c3),
+    ...(br.events ? [hearBars('Sounds heard', br.events.top, C.c2), hearBars('Elements the sounds pull', Object.entries(br.events.pull), C.c5)] : []),
+    hearBars('Character', [['danceability', br.dance], ['voice (vs instrumental)', br.voice], ['tonal', br.tonal], ['bright', br.bright], ['approachable', br.approachable], ['engaging', br.engaging], ['confidence', br.confidence], ['unknown', br.unknown]].filter(([, v]) => Number.isFinite(v)), C.c4));
+  // top genre history: one cell per analysis, one hue per genre (hover names it)
+  { const [g, w, hh] = ctx2d(P.genreC), n = Math.max(HEARN, hearHist.length), cw = w / n; g.font = '10px "Segoe UI"'; g.textBaseline = 'middle';
+    let i = 0; while (i < hearHist.length) { let j = i; while (j + 1 < hearHist.length && hearHist[j + 1].g === hearHist[i].g) j++; const x0 = (n - hearHist.length + i) * cw, x1 = (n - hearHist.length + j + 1) * cw;
+      g.fillStyle = css(gcol.get(hearHist[i].g) || '--c1'); g.globalAlpha = .85; g.beginPath(); g.roundRect(x0 + 1, 2, x1 - x0 - 2, hh - 4, 4); g.fill(); g.globalAlpha = 1;
+      if (x1 - x0 > 60) { g.fillStyle = '#fff'; g.fillText(hearHist[i].g, x0 + 7, hh / 2); } i = j + 1; } }
+  if (br.emb && live(P.embC)) heat(P.embC, br.emb.length, 1, (x) => (br.emb[x] + 1) / 2, { gap: 0 });
+}
+function drawEvents(ev) {   // recent analyzer events: one row per kind, time across, mark size = strength
+  const c = P.evC; if (!live(c)) return; const [g, w, hh] = ctx2d(c), kinds = [...new Set(ev.map((e) => e[1]))].slice(0, 6); c._rows = kinds;
+  if (!ev.length) { g.fillStyle = C.muted; g.font = '11px "Segoe UI"'; g.fillText('none yet', 4, 14); return; }
+  const t1 = ev[ev.length - 1][0], t0 = Math.min(ev[0][0], t1 - 1), left = 48, rh = hh / Math.max(1, kinds.length);
+  g.font = '10px "Segoe UI"'; g.textBaseline = 'middle';
+  kinds.forEach((k, i) => { g.fillStyle = C.muted; g.fillText(k, 0, (i + .5) * rh); g.strokeStyle = C.grid; g.lineWidth = 1; g.beginPath(); g.moveTo(left, Math.round((i + 1) * rh) - .5); g.lineTo(w, Math.round((i + 1) * rh) - .5); g.stroke(); });
+  g.fillStyle = C.c1; for (const [t, k, str] of ev) { const i = kinds.indexOf(k); if (i < 0) continue; const a = Math.min(1, Math.abs(num(str))); g.globalAlpha = .45 + .55 * a; g.beginPath(); g.arc(left + (t - t0) / (t1 - t0) * (w - left - 4), (i + .5) * rh, 2.5 + 2.5 * a, 0, 7); g.fill(); } g.globalAlpha = 1; g.textBaseline = 'alphabetic';
+}
+
+// ---- controls (left rail) -------------------------------------------------------------------------------------------------
+function slider(label, min, max, step, value, onInput, fmtd = 2) {
+  const out = h('output', { class: 'num' }, fmt(value, fmtd)), inp = h('input', { type: 'range', min, max, step, value, on: { input: () => { out.textContent = fmt(+inp.value, fmtd); onInput(+inp.value); } } });
+  const row = h('div', { class: 'row' }, h('label', { title: label }, label), inp, out); row._inp = inp; row._out = out; return row;
+}
+function colorRow(name, label, onPick, onAuto) {
+  const inp = h('input', { type: 'color', value: '#888888', data: { ctl: name }, on: { input: () => onPick(fromHex(inp.value)) } });
+  const auto = h('button', { data: { ctl: name + '-auto' }, on: { click: onAuto } }, 'auto'), row = h('div', { class: 'sw' }, h('label', {}, label), inp, auto); row._inp = inp; return row;
+}
+const CTL = {};
+function buildRail(schema) {
+  for (const d of document.querySelectorAll('aside details[data-id]')) { if (d.dataset.id in ui.open) d.open = !!ui.open[d.dataset.id]; d.addEventListener('toggle', () => { ui.open[d.dataset.id] = d.open; saveUi(); }); }
+  // look
+  CTL.mem = colorRow('stain-mem', 'Membranes', (v) => dash.cmd({ k: 'stain', which: 'mem', v }), () => dash.cmd({ k: 'stainAuto' }));
+  CTL.nuc = colorRow('stain-nuc', 'Nuclei', (v) => dash.cmd({ k: 'stain', which: 'nuc', v }), () => dash.cmd({ k: 'stainAuto' }));
+  CTL.cyto = colorRow('stain-cyto', 'Cytoplasm', (v) => dash.cmd({ k: 'stain', which: 'cyto', v: v.map((x) => x * .25) }), () => dash.cmd({ k: 'stainAuto' }));
+  CTL.stainAmt = slider('Stain strength', 0, 2, .01, .6, (v) => dash.cmd({ k: 'stainAmt', v })); tag(CTL.stainAmt._inp, 'stain-amt');
+  CTL.light = colorRow('light', 'Core light', (v) => dash.cmd({ k: 'light', v }), () => dash.cmd({ k: 'light', v: null }));
+  CTL.metal = colorRow('metal', 'Metal', (v) => dash.cmd({ k: 'metal', v }), () => dash.cmd({ k: 'metal', v: null }));
+  CTL.mat = tag(h('select', { on: { change: () => dash.cmd({ k: 'material', v: +CTL.mat.value }) } }, h('option', { value: -1 }, 'Material: auto'), ...MATERIALS.map((m, i) => h('option', { value: i }, m))), 'material');
+  CTL.prop = tag(h('button', { title: 'Show the proposed elements and planets (lab preview) instead of the current ones', on: { click: () => dash.cmd({ k: 'proposals', v: !(S && S.proposals) }) } }, 'Proposal materials: off'), 'proposals-rail');
+  // edge experiments: each switch takes one candidate for the see-through outline away
+  CTL.fx = {}; const fxRow = h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px' }, h('span', { class: 'sub2' }, 'Outline:'));
+  for (const [k, label, tip] of [['aura', 'aura echo', 'the feedback trail: each frame echoed slightly larger behind the body'], ['rim', 'edge sheen', 'fresnel: the bright reflective rim at grazing angles'], ['halo', 'halo', 'the core light glowing round the silhouette'], ['thin', 'thin-metal light', 'light bleeding through where the shell is thin']]) {
+    CTL.fx[k] = tag(h('button', { class: 'on', title: tip, on: { click: () => dash.cmd({ k: 'fx', name: k, v: !(S && S.fx && S.fx[k] !== false) }) } }, label), 'fx-' + k); fxRow.append(CTL.fx[k]);
+  }
+  $('#look').append(CTL.mem, CTL.nuc, CTL.cyto, CTL.stainAmt, CTL.light, CTL.metal, CTL.mat, CTL.prop, fxRow);
+  // skin: family mix override, maturity
+  CTL.famAuto = tag(h('button', { class: 'on', on: { click: () => dash.cmd({ k: 'family', v: null }) } }, 'auto'), 'family-auto');
+  CTL.fam = {};
+  const famSend = () => dash.cmd({ k: 'family', v: Object.fromEntries(FAMILIES.map((f) => [f, +CTL.fam[f]._inp.value])) });
+  for (const f of FAMILIES) { CTL.fam[f] = slider(f, 0, 1, .01, 0, famSend); tag(CTL.fam[f]._inp, 'family-' + f); }
+  CTL.maturity = slider('Maturity', 0, 1, .01, 0, (v) => dash.cmd({ k: 'maturity', v })); tag(CTL.maturity._inp, 'maturity');
+  CTL.matAuto = tag(h('button', { on: { click: () => dash.cmd({ k: 'maturity', v: null }) } }, 'auto'), 'maturity-auto');
+  $('#skinctl').append(h('div', { class: 'btns' }, h('span', { class: 'sub2' }, 'Family mix'), CTL.famAuto, tag(h('button', { on: { click: () => dash.cmd({ k: 'songGenome' }) } }, 'random song'), 'song-genome'), tag(h('button', { on: { click: () => dash.cmd({ k: 'section' }) } }, 'evolve'), 'section')),
+    ...FAMILIES.map((f) => CTL.fam[f]), CTL.maturity, h('div', { class: 'btns' }, CTL.matAuto, h('span', { class: 'sub2' }, 'maturity')));
+  // systems
+  CTL.M = slider('Maximalism', 0, 1, .01, .15, (v) => dash.cmd({ k: 'M', v })); tag(CTL.M._inp, 'M');
+  CTL.MAuto = tag(h('button', { on: { click: () => dash.cmd({ k: 'M', v: null }) } }, 'auto'), 'M-auto');
+  CTL.voice = h('div', { class: 'seg' }, ...['off', 'whisper', 'sing'].map((m) => h('button', { data: { v: m, ctl: 'voice-' + m }, on: { click: () => dash.cmd({ k: 'voice', v: m }) } }, m))); CTL.voiceNote = h('span', { class: 'sub2' });
+  CTL.sleep = h('div', { class: 'seg' }, ...['auto', 'awake', 'asleep'].map((m) => h('button', { data: { v: m, ctl: 'sleep-' + m }, on: { click: () => dash.cmd({ k: 'sleep', v: m }) } }, m)));
+  $('#systems').append(CTL.M, h('div', { class: 'btns' }, CTL.MAuto, h('span', { class: 'sub2' }, 'maximalism')), h('div', { class: 'row' }, h('label', {}, 'Sleep'), CTL.sleep, h('span')), h('div', { class: 'row', style: 'grid-template-columns:104px auto 1fr' }, h('label', {}, 'Voice'), CTL.voice, CTL.voiceNote),
+    h('div', { class: 'btns' }, tag(h('button', { on: { click: () => dash.cmd({ k: 'clearOverrides' }) } }, 'clear all overrides'), 'clear')));
+  // actions
+  const act = (label, name, fn) => tag(h('button', { on: { click: fn } }, label), name);
+  $('#actions').append(act('Beads / melt', 'beads', () => dash.cmd({ k: 'beads' })), act('New form', 'reseed', () => dash.app('action', 'reseed')), act('Love', 'love', () => dash.app('action', 'feedback+')), act('Not this', 'notthis', () => dash.app('action', 'feedback-')),
+    act('Memories', 'memories', () => dash.app('action', 'open-memories')), act('New being…', 'newseed', () => { if (confirm('Hatch a new being? The current one keeps its memories but stops being shown.')) dash.app('action', 'new-seed'); }));
+  // rhythm dials
+  CTL.rhythm = slider('Beat lock', 0, 1, .01, .6, (v) => dash.cmd({ k: 'dial', key: 'rhythm', v })); tag(CTL.rhythm._inp, 'dial-rhythm');
+  CTL.sync = slider('Speaker delay', 0, 400, 5, 30, (v) => dash.cmd({ k: 'dial', key: 'sync', v }), 0); tag(CTL.sync._inp, 'dial-sync');
+  $('#rhythmctl').append(CTL.rhythm, CTL.sync);
+  // tuning, from the schema
+  CTL.tune = {}; CTL.tuneGroups = [];
+  for (const [group, rows] of schema || []) {
+    const grp = h('div', { class: 'grp' }), det = h('details', { data: { id: 'tune-' + group } }, h('summary', {}, group), grp);
+    if (('tune-' + group) in ui.open) det.open = !!ui.open['tune-' + group];
+    det.addEventListener('toggle', () => { ui.open['tune-' + group] = det.open; saveUi(); });
+    for (const [key, label, help, min, max] of rows) {
+      const row = slider(label, min, max, .01, 1, (v) => dash.cmd({ k: 'tune', key, v }));
+      row.title = (help ? help + ' · ' : '') + 'double-click to reset'; tag(row._inp, 'tune-' + key); row._text = (group + ' ' + label + ' ' + key + ' ' + (help || '')).toLowerCase();
+      row.addEventListener('dblclick', () => dash.cmd({ k: 'tuneReset', key }));
+      CTL.tune[key] = row; grp.append(row);
+    }
+    CTL.tuneGroups.push([det, grp]); $('#tune').append(det);
+  }
+  $('#tune').append(h('div', { class: 'grp', style: 'padding-top:8px' }, h('div', { class: 'btns' }, tag(h('button', { on: { click: () => dash.cmd({ k: 'tuneReset' }) } }, 'reset tuning'), 'tune-reset'))));
+  $('#find').addEventListener('input', () => { const q = $('#find').value.trim().toLowerCase(); for (const [det, grp] of CTL.tuneGroups) { let any = false; for (const row of grp.children) { const ok = !q || row._text.includes(q); row.style.display = ok ? '' : 'none'; any ||= ok; } det.style.display = any ? '' : 'none'; if (q && any) det.open = true; } });
+  // window and audio
+  CTL.src = h('select', { on: { change: () => dash.app('source', CTL.src.value) } });
+  CTL.src.addEventListener('mousedown', refreshSources);
+  CTL.pet = h('div', { class: 'seg' }, h('button', { data: { v: 'pet', ctl: 'form-pet' }, on: { click: () => dash.app('pet', true) } }, 'pet'), h('button', { data: { v: 'window', ctl: 'form-window' }, on: { click: () => dash.app('pet', false) } }, 'window'));
+  CTL.size = h('div', { class: 'seg' }, ...[['S', 380], ['M', 520], ['L', 720]].map(([t, v]) => h('button', { data: { v, ctl: 'size-' + t }, on: { click: () => dash.app('size', v) } }, t)));
+  CTL.top = tag(h('input', { type: 'checkbox', on: { change: () => dash.app('top', CTL.top.checked) } }), 'top');
+  $('#appctl').append(h('div', { class: 'row' }, h('label', {}, 'Listen to'), tag(CTL.src, 'source'), h('span')), h('div', { class: 'row' }, h('label', {}, 'Form'), CTL.pet, h('span')),
+    h('div', { class: 'row' }, h('label', {}, 'Size'), CTL.size, h('span')), h('div', { class: 'row' }, h('label', {}, 'Always on top'), CTL.top, h('span')));
+  refreshSources();
+  buildPresets();
+  // raw uniforms (numbers only), for experiments
+  CTL.uName = tag(h('input', { type: 'text', placeholder: 'uGlow', list: 'unames', autocomplete: 'off', style: 'width:100%' }), 'uni-name'); CTL.uVal = tag(h('input', { type: 'number', step: .01, style: 'width:100%' }), 'uni-value'); CTL.uList = h('datalist', { id: 'unames' }); CTL.uPins = h('div', { class: 'pinlist' });
+  CTL.uName.addEventListener('input', () => { CTL.uName.classList.toggle('bad', !!(CTL.uNames && CTL.uName.value && !CTL.uNames.has(CTL.uName.value.trim()))); });
+  $('#uniforms').append(CTL.uList, h('div', { class: 'row' }, h('label', {}, 'Name'), CTL.uName, h('span')), h('div', { class: 'row' }, h('label', {}, 'Value'), CTL.uVal, h('span')),
+    h('div', { class: 'btns' }, tag(h('button', { on: { click: () => { const name = CTL.uName.value.trim(); if (name && CTL.uVal.value !== '') dash.cmd({ k: 'uniform', name, v: +CTL.uVal.value }); } } }, 'pin'), 'uni-pin'), tag(h('button', { on: { click: () => dash.cmd({ k: 'uniform', name: CTL.uName.value.trim(), v: null }) } }, 'release'), 'uni-release')), CTL.uPins);
+}
+async function refreshSources() { const r = await dash.app('sources'); if (!r || !CTL.src) return; const cur = r.current; CTL.src.replaceChildren(...r.sources.map(([v, t]) => h('option', { value: v, selected: v === cur }, t))); }
+const focused = (el) => el && (document.activeElement === el || el.matches(':active'));
+const mark = (row, on) => row.classList.toggle('pinned', !!on);
+function syncControls() {   // reflect the being's current values unless the control is being used
+  if (!CTL.mem || !CTL.sleep) return;
+  const s = S, d = s.dev;
+  const setCol = (row, v, on) => { if (!focused(row._inp)) row._inp.value = toHex(v); mark(row, on); };
+  setCol(CTL.mem, s.morph.stainNow.mem, d.stain); setCol(CTL.nuc, s.morph.stainNow.nuc, d.stain); setCol(CTL.cyto, s.morph.stainNow.cyto.map((v) => v * 4), d.stain);
+  setCol(CTL.light, s.look.light, d.light); setCol(CTL.metal, s.look.metal, d.metal);
+  if (!focused(CTL.stainAmt._inp) && Number.isFinite(s.look.stainAmt)) { CTL.stainAmt._inp.value = s.look.stainAmt; CTL.stainAmt._out.textContent = fmt(s.look.stainAmt); }
+  if (!focused(CTL.mat)) CTL.mat.value = d.mat; CTL.mat.style.borderColor = d.mat >= 0 ? C.c4 : '';
+  CTL.famAuto.classList.toggle('on', !d.family);
+  for (const f of FAMILIES) { mark(CTL.fam[f], d.family); if (!focused(CTL.fam[f]._inp)) { const v = d.family ? d.family[f] : s.morph.w[f]; CTL.fam[f]._inp.value = v; CTL.fam[f]._out.textContent = fmt(v); } }
+  if (!focused(CTL.maturity._inp)) { CTL.maturity._inp.value = s.morph.t; CTL.maturity._out.textContent = fmt(s.morph.t); } mark(CTL.maturity, d.maturity != null); CTL.matAuto.classList.toggle('on', d.maturity == null);
+  if (!focused(CTL.M._inp)) { CTL.M._inp.value = s.rest.M; CTL.M._out.textContent = fmt(s.rest.M); } mark(CTL.M, d.M != null); CTL.MAuto.classList.toggle('on', d.M == null);
+  for (const b of CTL.sleep.children) b.classList.toggle('on', b.dataset.v === d.sleep);
+  if (s.voice) { for (const b of CTL.voice.children) b.classList.toggle('on', b.dataset.v === s.voice.mode); CTL.voiceNote.textContent = `${s.voice.stage} · ${s.voice.moments}`; CTL.voiceNote.title = 'stage · remembered moments'; }
+  if (!focused(CTL.rhythm._inp)) { CTL.rhythm._inp.value = s.dials.rhythm; CTL.rhythm._out.textContent = fmt(s.dials.rhythm); }
+  if (!focused(CTL.sync._inp)) { CTL.sync._inp.value = s.dials.sync; CTL.sync._out.textContent = fmt(s.dials.sync, 0); }
+  for (const [k, row] of Object.entries(CTL.tune)) { const u = s.tune.user[k], v = Number.isFinite(u) ? u : 1; row.classList.toggle('changed', Number.isFinite(u) && Math.abs(u - 1) > .001); if (!focused(row._inp)) { row._inp.value = v; row._out.textContent = fmt(v); } }
+  const st = s.app && s.app.settings; if (st) { for (const b of CTL.pet.children) b.classList.toggle('on', (b.dataset.v === 'pet') === !!st.pet); for (const b of CTL.size.children) b.classList.toggle('on', +b.dataset.v === st.size); CTL.top.checked = !!st.top; }
+  if (s.uniNames && !CTL.uNames) { CTL.uNames = new Set(s.uniNames); CTL.uList.replaceChildren(...s.uniNames.map((n) => h('option', { value: n }))); }
+  const pins = Object.entries(d.uni), key = JSON.stringify(pins);
+  if (CTL.uPinKey !== key) { CTL.uPinKey = key; CTL.uPins.replaceChildren(...pins.map(([n, v]) => h('div', { class: 'row' }, h('span', { class: 'num' }, n + ' = ' + fmt(v, 3)), h('button', { title: 'release', data: { pin: n }, on: { click: () => dash.cmd({ k: 'uniform', name: n, v: null }) } }, '×')))); }
+}
+// presets: tuning plus look overrides, stored in this dashboard
+const PKEY = 'being-dash-presets';
+const loadPresets = () => { try { return JSON.parse(localStorage.getItem(PKEY) || '{}') || {}; } catch { return {}; } };
+function currentPreset() { const s = S, d = s.dev; return { tune: s.tune.user, stains: d.stain ? s.morph.stainNow : null, stainAmt: s.look.stainAmt, light: d.light, metal: d.metal, material: d.mat, family: d.family, maturity: d.maturity, layer: d.layer, M: d.M, sleep: d.sleep, uni: d.uni, dials: s.dials }; }
+function applyPreset(p) {
+  dash.cmd({ k: 'clearOverrides' }); dash.cmd({ k: 'tuneReset' });
+  for (const [key, v] of Object.entries(p.tune || {})) dash.cmd({ k: 'tune', key, v });
+  if (p.stains) for (const w of ['mem', 'nuc', 'cyto']) dash.cmd({ k: 'stain', which: w, v: p.stains[w] });
+  if (Number.isFinite(p.stainAmt)) dash.cmd({ k: 'stainAmt', v: p.stainAmt });
+  if (p.light) dash.cmd({ k: 'light', v: p.light }); if (p.metal) dash.cmd({ k: 'metal', v: p.metal });
+  if (Number.isInteger(p.material)) dash.cmd({ k: 'material', v: p.material }); if (p.family) dash.cmd({ k: 'family', v: p.family });
+  if (Number.isFinite(p.maturity)) dash.cmd({ k: 'maturity', v: p.maturity });
+  for (const [name, v] of Object.entries(p.layer || {})) dash.cmd({ k: 'layer', name, v }); if (Number.isFinite(p.M)) dash.cmd({ k: 'M', v: p.M });
+  if (p.sleep) dash.cmd({ k: 'sleep', v: p.sleep });
+  for (const [name, v] of Object.entries(p.uni || {})) dash.cmd({ k: 'uniform', name, v });
+  if (p.dials) { dash.cmd({ k: 'dial', key: 'rhythm', v: p.dials.rhythm }); dash.cmd({ k: 'dial', key: 'sync', v: p.dials.sync }); }
+}
+function buildPresets() {
+  const box = $('#presets'); const name = tag(h('input', { type: 'text', placeholder: 'name', style: 'flex:1;min-width:0' }), 'preset-name'); const list = h('div', { class: 'btns' }); const io = tag(h('textarea', { placeholder: 'preset JSON' }), 'preset-json');
+  const draw = () => list.replaceChildren(...Object.keys(loadPresets()).map((n) => h('span', { class: 'seg' }, h('button', { data: { preset: n }, on: { click: () => applyPreset(loadPresets()[n]) } }, n), h('button', { title: 'delete', on: { click: () => { const p = loadPresets(); delete p[n]; try { localStorage.setItem(PKEY, JSON.stringify(p)); } catch {} draw(); } } }, '×'))));
+  const save = () => { if (!S || !name.value.trim()) return; const p = loadPresets(); p[name.value.trim()] = currentPreset(); try { localStorage.setItem(PKEY, JSON.stringify(p)); } catch {} name.value = ''; draw(); };
+  name.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  box.append(h('div', { class: 'btns' }, name, tag(h('button', { on: { click: save } }, 'save'), 'preset-save')), list,
+    io, h('div', { class: 'btns' }, tag(h('button', { on: { click: () => { if (S) io.value = JSON.stringify(currentPreset(), null, 1); } } }, 'export'), 'preset-export'), tag(h('button', { on: { click: () => { try { const p = JSON.parse(io.value); if (!p || typeof p !== 'object') throw new Error('not an object'); applyPreset(p); } catch (e) { io.value = ''; io.placeholder = 'Not a preset: ' + e.message; } } } }, 'import'), 'preset-import')));
+  draw();
+}
+
+// ---- freeze, overrides, start ------------------------------------------------------------------------------------------------
+function setFrozen(f) { frozen = f; document.body.classList.toggle('frozen', f); $('#freeze').classList.toggle('on', f); $('#freeze').textContent = f ? 'Frozen' : 'Freeze'; if (!f) render(); }
+$('#freeze').addEventListener('click', () => setFrozen(!frozen));
+$('#ovr').addEventListener('click', () => dash.cmd({ k: 'clearOverrides' }));
+addEventListener('keydown', (e) => { if (e.code === 'Space' && !/^(INPUT|TEXTAREA|SELECT|BUTTON|SUMMARY)$/.test(document.activeElement.tagName) && !document.activeElement.closest('h2')) { e.preventDefault(); setFrozen(!frozen); } });
+// fields that arrive only now and then are applied on arrival, so a coalesced redraw cannot drop them
+function sticky(s) {
+  if (s.skinPng) { P.skinImg && (P.skinImg.src = s.skinPng); sticky.png = s.skinPng; }
+  if (s.uniNames && CTL.uList && !CTL.uNames) { CTL.uNames = new Set(s.uniNames); CTL.uList.replaceChildren(...s.uniNames.map((n) => h('option', { value: n }))); }
+  if (!s.skinPng && sticky.png) s.skinPng = sticky.png;
+}
+let built = false, pending = false;
+dash.schema().then((schema) => { buildRail(schema); });
+dash.onSnap((s) => { S = s; sticky(s); if (!built) { built = true; buildLive(); } if (!frozen) feed(s); if (!frozen && !pending) { pending = true; requestAnimationFrame(() => { pending = false; try { render(); } catch (e) { console.error(e); } }); } });
+addEventListener('resize', () => { if (S) render(true); });
+</script>
+</body>
+</html>

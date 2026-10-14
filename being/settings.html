@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>ON</title>
+<style>
+  :root { --bg: #111110; --ink: #f4f4f2; --ink2: #a9a8a1; --line: #2c2c2a; --accent: #e8e6df; color-scheme: dark; }
+  :focus-visible { outline: 2px solid #3987e5; outline-offset: 1px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; user-select: none; }
+  body { padding: 22px 22px 18px; -webkit-app-region: drag; border: 1px solid var(--line); border-radius: 12px; height: 100vh; display: flex; flex-direction: column; }
+  h1 { margin: 0 0 2px; font-size: 18px; font-weight: 600; }
+  .hint { color: var(--ink2); margin: 0 0 16px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); -webkit-app-region: no-drag; }
+  .row span { color: var(--ink2); }
+  select { background: #1b1b1a; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; max-width: 190px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { font: inherit; border: 0; background: transparent; color: var(--ink2); padding: 3px 10px; cursor: pointer; }
+  .seg button.on { background: #2a2a28; color: var(--ink); }
+  label.row { cursor: pointer; }
+  input[type=checkbox] { cursor: pointer; width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+  footer { margin-top: auto; display: flex; gap: 8px; padding-top: 14px; -webkit-app-region: no-drag; }
+  footer button { flex: 1; font: inherit; font-weight: 600; padding: 8px; border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--ink); }
+  footer button.main { background: var(--accent); border-color: var(--accent); color: #111; }
+</style>
+</head>
+<body>
+  <h1>ON</h1>
+  <p class="hint">Drag it anywhere. Right-click it for options.</p>
+  <div class="row"><span>Listen to</span><select id="source"></select></div>
+  <div class="row"><span>Size</span><div class="seg" id="size"><button data-v="380">S</button><button data-v="520">M</button><button data-v="720">L</button></div></div>
+  <label class="row"><span>Always on top</span><input type="checkbox" id="top"></label>
+  <label class="row"><span id="startupLabel">Start with Windows</span><input type="checkbox" id="startup"></label>
+  <footer><button id="dash">Dashboard</button><button id="done" class="main">Done</button></footer>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+async function load() {
+  const s = await being.get();
+  $('source').replaceChildren(...s.sources.map(([v, t]) => Object.assign(document.createElement('option'), { value: v, textContent: t, selected: v === s.current })));
+  for (const b of $('size').children) b.classList.toggle('on', +b.dataset.v === s.settings.size);
+  $('top').checked = s.settings.top; $('startup').checked = s.startup; if (s.startupLabel) $('startupLabel').textContent = s.startupLabel;
+}
+$('source').addEventListener('change', () => being.set('source', $('source').value));
+$('source').addEventListener('mousedown', load);
+for (const b of $('size').children) b.addEventListener('click', async () => { await being.set('size', +b.dataset.v); load(); });
+$('top').addEventListener('change', () => being.set('top', $('top').checked));
+$('startup').addEventListener('change', () => being.set('startup', $('startup').checked));
+$('dash').addEventListener('click', () => being.set('dashboard', true));
+$('done').addEventListener('click', () => being.set('done', true));
+addEventListener('keydown', (e) => { if (e.key === 'Escape') being.set('done', true); });
+load();
+</script>
+</body>
+</html>

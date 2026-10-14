@@ -1,0 +1,21 @@
+const { app, BrowserWindow, ipcMain } = require('electron'); const path = require('node:path');
+const ROOT = path.join(__dirname, '..');
+require(path.join(ROOT, 'being', 'memory-store.cjs')).registerMemoryIpc(ipcMain, app);
+app.whenReady().then(async () => {
+  const w = new BrowserWindow({ show: true, x: -3000, y: 0, width: 600, height: 600, backgroundColor: '#000', skipTaskbar: true, focusable: false, webPreferences: { preload: path.join(ROOT, 'being', 'preload.cjs'), contextIsolation: true, sandbox: false, backgroundThrottling: false } });
+  w.webContents.on('console-message', (e) => { const m = e.message || ''; if (/rror/.test(m) && !/brain/.test(m)) console.log('[page]', m.slice(0, 300)); });
+  await w.loadFile(path.join(ROOT, 'being', 'index.html'), { query: { local: '1' } });
+  await new Promise((r) => setTimeout(r, 2500));
+  const run = async (label, opts, wts) => console.log(label.padEnd(40), await w.webContents.executeJavaScript(`window.__morphBench(${JSON.stringify(opts)}, ${JSON.stringify(wts)})`), 'ms');
+  await run('empty (no family)', { size: 384 }, { living: 1 });
+  await run('cppn 384 half mips', { size: 384 }, { cppn: 1 });
+  await run('cppn 384 half no mips', { size: 384, mipmaps: false }, { cppn: 1 });
+  await run('cppn 384 byte no mips', { size: 384, mipmaps: false, half: false }, { cppn: 1 });
+  await run('cppn 256 half mips', { size: 256 }, { cppn: 1 });
+  await run('cells 384', { size: 384 }, { cells: 1 });
+  await run('pollen 384', { size: 384 }, { pollen: 1 });
+  await run('turing 384', { size: 384 }, { turing: 1 });
+  await run('lace 384', { size: 384 }, { lace: 1 });
+  await run('attractor 384', { size: 384 }, { attractor: 1 });
+  app.quit();
+});
