@@ -10,7 +10,7 @@ import { createEar, SR, NE, DELTA } from './ear.mjs';
 import { createTissue } from './tissue.mjs';
 
 const ear = createEar();
-const tissue = createTissue({ earUnits: NE });
+const tissue = createTissue({ earUnits: NE, wander: 0.7 });   // in silence its set point wanders: slow up and down states (lab E09)
 const drive = new Float64Array(NE);
 let toEar = 0, toTissue = 0, toTex = 0;
 const TEX_BYTES = 128 * 64 * 4, pool = [];   // tissue texture buffers handed back by the page
