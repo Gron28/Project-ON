@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('pet', {
   onReseed: (fn) => on('reseed', fn),
   onBurst: (fn) => on('burst', fn),
   onBounce: (fn) => on('bounce', fn),             // true: it bounces to the beat; false: it stays still
+  onRetro: (fn) => on('retro', fn),               // { pix: block size in px (1 off), lev: levels a channel (0 off), dith: 0..1 }: the pixelated / PS1 look
+  mlLayers: () => { try { return ipcRenderer.sendSync('ml-get'); } catch { return null; } },   // which local models run: { style, feel, world, beat }, read once at start
+  onMl: (fn) => on('ml', fn),
+  onQuality: (fn) => on('quality', fn),           // { res: 0.4..1, auto }: render resolution scale, and whether it lowers itself when frames run long
   onPractice: (fn) => on('practice', fn),          // { work: { start, ms } | null, body: { start, ms, rounds } | null }: the practices running now
   onPracticeDone: (fn) => on('practice-done', fn),  // 'work' | 'body': one just completed
   onRecord: (fn) => on('record', fn),               // { last, n }: an entry was added to the record
@@ -41,6 +45,8 @@ contextBridge.exposeInMainWorld('pet', {
   dragEnd: () => ipcRenderer.send('drag-end'),
   // the dashboard: is anyone looking, what the being reports, what the dashboard changes
   onDev: (fn) => on('dev', fn),
+  onDevPause: (fn) => on('dev-pause', fn),          // true while the dashboard is minimized or hidden: no snapshots
+  onCalm: (fn) => on('calm', fn),                   // true: no glints or stars (with the bounce off, from main.cjs)
   devSnap: (snap) => ipcRenderer.send('dev-snap', snap),
   onDevCmd: (fn) => on('dev-cmd', fn),
   // inert parts of the original API

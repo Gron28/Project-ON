@@ -11,7 +11,12 @@
 
 export const TW = 128, TH = 64;
 
-export function createTissue({ earUnits = 28, rng = Math.random, seed = 99, target = 0.0035 } = {}) {
+// `wander` (0 = off, the default): the rate set point itself wanders on seconds to a minute (three Ornstein-Uhlenbeck
+// processes, tau 2 / 9 / 40 s, summed to unit variance; the set point is multiplied by exp(wander * w)). Homeostasis alone
+// flattens everything slower than its own time constant (~4 s), so silent activity fizzed without any slow waves; a
+// wandering set point is what gives it up and down states with a 1/f-like spectrum (lab E09). It has its own random
+// stream, so the main one (and everything `wander = 0` computes) is untouched.
+export function createTissue({ earUnits = 28, rng = Math.random, seed = 99, target = 0.0035, wander = 0 } = {}) {
   const NT = TW * TH, NSTATE = 5, LR = 2, NB = 8 + LR;
   const nb = new Int32Array(NT * NB), wnb = new Float32Array(NT * NB);
   {
@@ -34,6 +39,11 @@ export function createTissue({ earUnits = 28, rng = Math.random, seed = 99, targ
   const trace = new Float32Array(NT), flash = new Float32Array(NT), memory = new Float32Array(NT);
   let G = 0.16;                    // coupling scale: sigma ~ G * NB * 0.5
   let actEMA = target, prevExc = 0, brSum = 0, brN = 0, branching = 1, kickBurst = 0;
+  const WT = [2, 9, 40], wx = new Float64Array(3);
+  let ws = (seed ^ 0x5bd1e995) | 0, wSpare = null;
+  const wr = () => { ws = (Math.imul(ws, 1664525) + 1013904223) | 0; return ((ws >>> 0) + 0.5) / 4294967296; };
+  const wgauss = () => { if (wSpare !== null) { const g = wSpare; wSpare = null; return g; } const r = Math.sqrt(-2 * Math.log(wr())), a = 2 * Math.PI * wr(); wSpare = r * Math.sin(a); return r * Math.cos(a); };
+  let setPoint = target, stillness = 1;   // the target rate now (equals `target` unless it wanders); 1 in silence, 0 under sound
   const rowUnit = Int32Array.from({ length: TH }, (_, y) => Math.min(earUnits - 1, ((1 - (y + 0.5) / TH) * earUnits) | 0));
 
   /** one 4 ms step. drive[k] = excitation probability per cell and step for the rows of ear unit k */
@@ -65,11 +75,19 @@ export function createTissue({ earUnits = 28, rng = Math.random, seed = 99, targ
     const t = exc; exc = nx; nx = t; nExc = nNext;
     const act = nExc / NT;
     actEMA += 0.004 * (act - actEMA);
-    G *= Math.exp(0.0025 * (target - act) / target);                      // rate homeostasis, tau ~ 4 s
+    if (wander) {
+      // it wanders only in silence (the ear drives no cell), over ~2 s in and out, so music is never pushed around by it
+      let d = 0; if (drive) for (let k = 0; k < drive.length; k++) d += drive[k];
+      stillness += ((d < 2e-3 ? 1 : 0) - stillness) * 0.002;
+      let w = 0; for (let i = 0; i < 3; i++) { wx[i] += -wx[i] * 0.004 / WT[i] + Math.sqrt(2 * 0.004 / WT[i]) * wgauss(); w += wx[i]; }
+      setPoint = target * Math.exp(wander * stillness * w / Math.sqrt(3));
+    }
+    G *= Math.exp(0.0025 * (setPoint - act) / setPoint);                  // rate homeostasis, tau ~ 4 s
     if (G < 0.05) G = 0.05; if (G > 0.25) G = 0.25;
     if (prevExc > 0) { brSum += nExc / prevExc; brN++; }
     prevExc = nExc;
     for (let a = 0; a < nExc; a++) { const j = exc[a]; trace[j] += 0.25; memory[j] += 0.01; }
+    return nExc;   // the cells that fired this step (lab: avalanche and complexity measures)
   }
   const tex = new Uint8Array(NT * 4);
   /** decay the traces one display frame (~33 ms) and return the texture plus statistics */

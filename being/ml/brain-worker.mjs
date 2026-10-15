@@ -55,14 +55,14 @@ onMessage((msg) => {
 async function handle(msg) {
   if (msg.type === 'init') {
     const t0 = performance.now();
-    core = new BrainCore({ ort, loadModel: makeLoader(msg.baseUrl), inputRate: msg.inputRate || 48000, patches: msg.patches });
+    core = new BrainCore({ ort, loadModel: makeLoader(msg.baseUrl), inputRate: msg.inputRate || 48000, patches: msg.patches, layers: msg.layers });
     await core.init();
     post({ type: 'ready', loadMs: performance.now() - t0 });
   } else if (msg.type === 'audio') {
     if (!core || !core.ready) return;
     for (const r of await core.push(msg.samples)) {
       if (r.silent) post({ type: 'silent', rms: r.rms });
-      else post({ ...r, audioEnd: msg.audioEnd }, [r.embedding.buffer]);
+      else post({ ...r, audioEnd: msg.audioEnd }, r.embedding ? [r.embedding.buffer] : []);
     }
   } else if (msg.type === 'dispose') {
     if (core) await core.dispose();

@@ -29,7 +29,7 @@ test('steps have an id and a short label', () => {
 test('BEING_SHORTCUTS_DIR keeps every shortcut inside one folder', () => {
   const dir = path.join(os.tmpdir(), 'being-sc');
   process.env.BEING_SHORTCUTS_DIR = dir;
-  try { for (const p of Object.values(shortcutPaths())) assert.ok(p.startsWith(dir) && p.endsWith('Being.lnk')); }
+  try { for (const p of Object.values(shortcutPaths())) assert.ok(p.startsWith(dir) && p.endsWith('ON.lnk')); }
   finally { delete process.env.BEING_SHORTCUTS_DIR; }
 });
 

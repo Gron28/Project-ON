@@ -113,11 +113,13 @@
   <details data-id="systems"><summary>Systems</summary><div class="grp" id="systems"></div></details>
   <details data-id="actions"><summary>Actions</summary><div class="grp"><div class="btns" id="actions"></div></div></details>
   <details data-id="rhythmctl"><summary>Rhythm</summary><div class="grp" id="rhythmctl"></div></details>
-  <details data-id="tuning" open><summary>Tuning</summary><div class="grp"><input type="text" id="find" placeholder="Find a control" autocomplete="off"></div></details>
-  <div id="tune"></div>
-  <details data-id="appctl"><summary>Window &amp; audio</summary><div class="grp" id="appctl"></div></details>
-  <details data-id="presets"><summary>Presets</summary><div class="grp" id="presets"></div></details>
-  <details data-id="uniforms"><summary>Uniforms</summary><div class="grp" id="uniforms"></div></details>
+  <details data-id="experimental"><summary>Experimental</summary><div class="grp" id="experimental"></div></details>
+  <details data-id="developer"><summary>Developer</summary>
+    <details data-id="tuning" open><summary>Tuning</summary><div class="grp"><input type="text" id="find" placeholder="Find a control" aria-label="Find a control" autocomplete="off"></div></details>
+    <div id="tune"></div>
+    <details data-id="presets"><summary>Presets</summary><div class="grp" id="presets"></div></details>
+    <details data-id="uniforms"><summary>Uniforms</summary><div class="grp" id="uniforms"></div></details>
+  </details>
 </aside>
 
 <main id="live">
@@ -257,7 +259,8 @@ function buildLive() {
   // practice: four calendars (a year, one cell a day, like a commit graph) and today's sky line for the paper diary
   b = panel('record', 'Practice', true); P.recBody = h('div', { class: 'sub2' }, 'loading…'); P.recSky = h('div', { class: 'sub2', style: 'margin-top:10px' }); P.recWords = h('div', { style: 'display:flex;gap:6px;align-items:center;margin-top:10px' });
   const pbtn = (k, label) => h('button', { on: { click: async () => { const r = await dash.app('record'); await dash.app('practice', { k, on: !(r && r.practice && r.practice[k]) }); loadRecord(); } } }, label);
-  b.append(h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px' }, pbtn('work', 'Work cycle (3 h): start / stop'), pbtn('body', 'Body activation (5 rounds): start / stop')), P.recBody, P.recSky, P.recWords);
+  P.pracBtns = h('div', { style: 'display:none;gap:6px;flex-wrap:wrap;margin-bottom:10px' }, pbtn('work', 'Work cycle (3 h): start / stop'), pbtn('body', 'Body activation (5 rounds): start / stop'));
+  b.append(P.pracBtns, P.recBody, P.recSky, P.recWords);
   b = panel('mat', 'Material'); P.matBars = h('div'); P.propChip = tag(h('button', { class: 'chip', title: 'Show the proposed elements and planets (lab preview) instead of the current ones', on: { click: () => dash.cmd({ k: 'proposals', v: !(S && S.proposals) }) } }, 'Proposal materials (preview)'), 'proposals'); b.append(h('div', { style: 'margin-bottom:8px' }, P.propChip), P.matBars);
   b = panel('body', 'Body'); P.bodyBars = h('div'); b.append(P.bodyBars);
   b = panel('mem', 'Memory'); P.memKv = h('div', { class: 'kv' }); b.append(P.memKv);
@@ -362,7 +365,8 @@ function calendar([nameKey, key, rgb, unit, full], days, names = {}) {
 }
 async function loadRecord() {
   const r = await dash.app('record'); if (!r || !P.recBody) return;
-  P.recBody.replaceChildren(...CAL.map((c) => calendar(c, r.days || {}, r.names)));
+  const shown = { work: EXP.practice, body: EXP.practice, breath: EXP.breathe, listen: true };   // a calendar shows only while its feature is on
+  P.recBody.replaceChildren(...CAL.filter((c) => shown[c[1]]).map((c) => calendar(c, r.days || {}, r.names)));
   if (P.breatheTitle && r.names && r.names['panel.breathe']) P.breatheTitle.textContent = r.names['panel.breathe'];
   const lx = await dash.app('lexicon');   // the words: a switch only when the local set is present
   if (P.recWords) P.recWords.replaceChildren(...(lx && lx.hasLocal ? [h('span', { class: 'sub2' }, 'Words: '), ...['plain', 'local'].map((m) => h('button', { class: lx.mode === m ? 'on' : '', on: { click: async () => { await dash.app('lexicon', m); loadRecord(); } } }, m === 'local' ? 'original' : 'plain'))] : []));
@@ -416,11 +420,11 @@ function drawEvents(ev) {   // recent analyzer events: one row per kind, time ac
 
 // ---- controls (left rail) -------------------------------------------------------------------------------------------------
 function slider(label, min, max, step, value, onInput, fmtd = 2) {
-  const out = h('output', { class: 'num' }, fmt(value, fmtd)), inp = h('input', { type: 'range', min, max, step, value, on: { input: () => { out.textContent = fmt(+inp.value, fmtd); onInput(+inp.value); } } });
+  const out = h('output', { class: 'num' }, fmt(value, fmtd)), inp = h('input', { type: 'range', min, max, step, value, 'aria-label': label, on: { input: () => { out.textContent = fmt(+inp.value, fmtd); onInput(+inp.value); } } });
   const row = h('div', { class: 'row' }, h('label', { title: label }, label), inp, out); row._inp = inp; row._out = out; return row;
 }
 function colorRow(name, label, onPick, onAuto) {
-  const inp = h('input', { type: 'color', value: '#888888', data: { ctl: name }, on: { input: () => onPick(fromHex(inp.value)) } });
+  const inp = h('input', { type: 'color', value: '#888888', 'aria-label': label, data: { ctl: name }, on: { input: () => onPick(fromHex(inp.value)) } });
   const auto = h('button', { data: { ctl: name + '-auto' }, on: { click: onAuto } }, 'auto'), row = h('div', { class: 'sw' }, h('label', {}, label), inp, auto); row._inp = inp; return row;
 }
 const CTL = {};
@@ -440,7 +444,13 @@ function buildRail(schema) {
   for (const [k, label, tip] of [['aura', 'aura echo', 'the feedback trail: each frame echoed slightly larger behind the body'], ['rim', 'edge sheen', 'fresnel: the bright reflective rim at grazing angles'], ['halo', 'halo', 'the core light glowing round the silhouette'], ['thin', 'thin-metal light', 'light bleeding through where the shell is thin']]) {
     CTL.fx[k] = tag(h('button', { class: 'on', title: tip, on: { click: () => dash.cmd({ k: 'fx', name: k, v: !(S && S.fx && S.fx[k] !== false) }) } }, label), 'fx-' + k); fxRow.append(CTL.fx[k]);
   }
-  $('#look').append(CTL.mem, CTL.nuc, CTL.cyto, CTL.stainAmt, CTL.light, CTL.metal, CTL.mat, CTL.prop, fxRow);
+  // pixelated / PS1 look (moved here from the Settings card): block size, colour levels, dither
+  const retro = (k, v) => dash.app('retro', { k, v });
+  CTL.pix = slider('Pixelate (px)', 1, 24, 1, 1, (v) => retro('pix', v), 0);
+  CTL.lev = slider('Colour levels', 1, 32, 1, 1, (v) => retro('lev', v), 0);
+  CTL.dith = slider('Dither', 0, 1, .05, 0, (v) => retro('dith', v));
+  dash.app('retro').then((r) => { if (!r) return; for (const [row, v] of [[CTL.pix, r.pix], [CTL.lev, r.lev >= 2 ? r.lev : 1], [CTL.dith, r.dith]]) { row._inp.value = v; row._out.textContent = fmt(v, row === CTL.dith ? 2 : 0); } });
+  $('#look').append(CTL.mem, CTL.nuc, CTL.cyto, CTL.stainAmt, CTL.light, CTL.metal, CTL.mat, CTL.prop, fxRow, CTL.pix, CTL.lev, CTL.dith);
   // skin: family mix override, maturity
   CTL.famAuto = tag(h('button', { class: 'on', on: { click: () => dash.cmd({ k: 'family', v: null }) } }, 'auto'), 'family-auto');
   CTL.fam = {};
@@ -460,7 +470,8 @@ function buildRail(schema) {
   // actions
   const act = (label, name, fn) => tag(h('button', { on: { click: fn } }, label), name);
   $('#actions').append(act('Beads / melt', 'beads', () => dash.cmd({ k: 'beads' })), act('New form', 'reseed', () => dash.app('action', 'reseed')), act('Love', 'love', () => dash.app('action', 'feedback+')), act('Not this', 'notthis', () => dash.app('action', 'feedback-')),
-    act('Memories', 'memories', () => dash.app('action', 'open-memories')), act('New being…', 'newseed', () => { if (confirm('Hatch a new being? The current one keeps its memories but stops being shown.')) dash.app('action', 'new-seed'); }));
+    act('Memories', 'memories', () => dash.app('action', 'open-memories')), act('Showcase (silent test run)', 'showcase', () => dash.app('action', 'showcase')),
+    (CTL.bounce = act('Bounce to the beat', 'bounce', async () => { CTL.bounce.classList.toggle('on', await dash.app('bounce', !CTL.bounce.classList.contains('on'))); })), act('New being…', 'newseed', () => { if (confirm('Hatch a new being? The current one keeps its memories but stops being shown.')) dash.app('action', 'new-seed'); }));
   // rhythm dials
   CTL.rhythm = slider('Beat lock', 0, 1, .01, .6, (v) => dash.cmd({ k: 'dial', key: 'rhythm', v })); tag(CTL.rhythm._inp, 'dial-rhythm');
   CTL.sync = slider('Speaker delay', 0, 400, 5, 30, (v) => dash.cmd({ k: 'dial', key: 'sync', v }), 0); tag(CTL.sync._inp, 'dial-sync');
@@ -481,15 +492,7 @@ function buildRail(schema) {
   }
   $('#tune').append(h('div', { class: 'grp', style: 'padding-top:8px' }, h('div', { class: 'btns' }, tag(h('button', { on: { click: () => dash.cmd({ k: 'tuneReset' }) } }, 'reset tuning'), 'tune-reset'))));
   $('#find').addEventListener('input', () => { const q = $('#find').value.trim().toLowerCase(); for (const [det, grp] of CTL.tuneGroups) { let any = false; for (const row of grp.children) { const ok = !q || row._text.includes(q); row.style.display = ok ? '' : 'none'; any ||= ok; } det.style.display = any ? '' : 'none'; if (q && any) det.open = true; } });
-  // window and audio
-  CTL.src = h('select', { on: { change: () => dash.app('source', CTL.src.value) } });
-  CTL.src.addEventListener('mousedown', refreshSources);
-  CTL.pet = h('div', { class: 'seg' }, h('button', { data: { v: 'pet', ctl: 'form-pet' }, on: { click: () => dash.app('pet', true) } }, 'pet'), h('button', { data: { v: 'window', ctl: 'form-window' }, on: { click: () => dash.app('pet', false) } }, 'window'));
-  CTL.size = h('div', { class: 'seg' }, ...[['S', 380], ['M', 520], ['L', 720]].map(([t, v]) => h('button', { data: { v, ctl: 'size-' + t }, on: { click: () => dash.app('size', v) } }, t)));
-  CTL.top = tag(h('input', { type: 'checkbox', on: { change: () => dash.app('top', CTL.top.checked) } }), 'top');
-  $('#appctl').append(h('div', { class: 'row' }, h('label', {}, 'Listen to'), tag(CTL.src, 'source'), h('span')), h('div', { class: 'row' }, h('label', {}, 'Form'), CTL.pet, h('span')),
-    h('div', { class: 'row' }, h('label', {}, 'Size'), CTL.size, h('span')), h('div', { class: 'row' }, h('label', {}, 'Always on top'), CTL.top, h('span')));
-  refreshSources();
+  buildExperimental();
   buildPresets();
   // raw uniforms (numbers only), for experiments
   CTL.uName = tag(h('input', { type: 'text', placeholder: 'uGlow', list: 'unames', autocomplete: 'off', style: 'width:100%' }), 'uni-name'); CTL.uVal = tag(h('input', { type: 'number', step: .01, style: 'width:100%' }), 'uni-value'); CTL.uList = h('datalist', { id: 'unames' }); CTL.uPins = h('div', { class: 'pinlist' });
@@ -497,7 +500,35 @@ function buildRail(schema) {
   $('#uniforms').append(CTL.uList, h('div', { class: 'row' }, h('label', {}, 'Name'), CTL.uName, h('span')), h('div', { class: 'row' }, h('label', {}, 'Value'), CTL.uVal, h('span')),
     h('div', { class: 'btns' }, tag(h('button', { on: { click: () => { const name = CTL.uName.value.trim(); if (name && CTL.uVal.value !== '') dash.cmd({ k: 'uniform', name, v: +CTL.uVal.value }); } } }, 'pin'), 'uni-pin'), tag(h('button', { on: { click: () => dash.cmd({ k: 'uniform', name: CTL.uName.value.trim(), v: null }) } }, 'release'), 'uni-release')), CTL.uPins);
 }
-async function refreshSources() { const r = await dash.app('sources'); if (!r || !CTL.src) return; const cur = r.current; CTL.src.replaceChildren(...r.sources.map(([v, t]) => h('option', { value: v, selected: v === cur }, t))); }
+// ---- experimental features: each switched on its own; off, it has no menu entry, panel, calendar or effect ----------------
+let EXP = { sky: false, practice: false, breathe: false };
+const EXPERIMENTS = [['sky', 'Sky', 'The sky leans the being: hours, planets, Moon, space weather, randomness'],
+  ['practice', 'Practices', 'Work cycle (3 h) and Body activation, with their calendars'],
+  ['breathe', 'Paced breathing', 'Alternate-nostril breathing guide']];
+function buildExperimental() {
+  CTL.exp = {};
+  const rows = EXPERIMENTS.map(([k, name, tip]) => h('div', { class: 'row', title: tip }, h('label', {}, name),
+    (CTL.exp[k] = h('input', { type: 'checkbox', 'aria-label': name, on: { change: async () => { setExp(await dash.app('experimental', { k, on: CTL.exp[k].checked })); } } })), h('span')));
+  CTL.skyBox = h('div', { style: 'display:none' });
+  $('#experimental').append(h('div', { class: 'sub2', style: 'margin-bottom:6px' }, 'Off by default. Each one appears in the menu and the dashboard only while it is on.'), ...rows, CTL.skyBox);
+  dash.app('experimental').then(setExp);
+}
+function setExp(e) { if (e) { EXP = e; applyExp(); } }
+async function sky(v) {   // the sky's own switches (modes, ring, chart), shown while the sky is on
+  const r = await dash.app('cosmos', v); if (!r || !r.modes) return;
+  CTL.skyBox.replaceChildren(...r.labels.map(([k, label]) => h('div', { class: 'row' }, h('label', {}, label), h('input', { type: 'checkbox', checked: !!r.modes[k], 'aria-label': label, on: { change: (e) => sky({ k: 'mode', v: { k, v: e.target.checked } }) } }), h('span'))),
+    h('div', { class: 'row' }, h('label', {}, r.ringLabel), h('input', { type: 'checkbox', checked: !!r.ring, 'aria-label': r.ringLabel, on: { change: (e) => sky({ k: 'ring', v: e.target.checked }) } }), h('span')),
+    h('div', { class: 'btns' }, h('button', { on: { click: () => dash.app('cosmos', { k: 'chart' }) } }, 'Open the sky')));
+}
+function applyExp() {
+  if (!CTL.exp) return;
+  for (const [k] of EXPERIMENTS) CTL.exp[k].checked = !!EXP[k];
+  CTL.skyBox.style.display = EXP.sky ? '' : 'none'; if (EXP.sky) sky({ k: 'get' });
+  if (P.breathe) P.breathe.style.display = EXP.breathe ? '' : 'none';
+  if (P.pracBtns) P.pracBtns.style.display = EXP.practice ? '' : 'none';
+  if (P.recSky) P.recSky.style.display = EXP.sky ? '' : 'none';
+  loadRecord();
+}
 const focused = (el) => el && (document.activeElement === el || el.matches(':active'));
 const mark = (row, on) => row.classList.toggle('pinned', !!on);
 function syncControls() {   // reflect the being's current values unless the control is being used
@@ -517,7 +548,7 @@ function syncControls() {   // reflect the being's current values unless the con
   if (!focused(CTL.rhythm._inp)) { CTL.rhythm._inp.value = s.dials.rhythm; CTL.rhythm._out.textContent = fmt(s.dials.rhythm); }
   if (!focused(CTL.sync._inp)) { CTL.sync._inp.value = s.dials.sync; CTL.sync._out.textContent = fmt(s.dials.sync, 0); }
   for (const [k, row] of Object.entries(CTL.tune)) { const u = s.tune.user[k], v = Number.isFinite(u) ? u : 1; row.classList.toggle('changed', Number.isFinite(u) && Math.abs(u - 1) > .001); if (!focused(row._inp)) { row._inp.value = v; row._out.textContent = fmt(v); } }
-  const st = s.app && s.app.settings; if (st) { for (const b of CTL.pet.children) b.classList.toggle('on', (b.dataset.v === 'pet') === !!st.pet); for (const b of CTL.size.children) b.classList.toggle('on', +b.dataset.v === st.size); CTL.top.checked = !!st.top; }
+  if (CTL.bounce && s.app && s.app.settings) CTL.bounce.classList.toggle('on', s.app.settings.bounce !== false);
   if (s.uniNames && !CTL.uNames) { CTL.uNames = new Set(s.uniNames); CTL.uList.replaceChildren(...s.uniNames.map((n) => h('option', { value: n }))); }
   const pins = Object.entries(d.uni), key = JSON.stringify(pins);
   if (CTL.uPinKey !== key) { CTL.uPinKey = key; CTL.uPins.replaceChildren(...pins.map(([n, v]) => h('div', { class: 'row' }, h('span', { class: 'num' }, n + ' = ' + fmt(v, 3)), h('button', { title: 'release', data: { pin: n }, on: { click: () => dash.cmd({ k: 'uniform', name: n, v: null }) } }, '×')))); }

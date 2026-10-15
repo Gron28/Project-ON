@@ -49,11 +49,12 @@ function desktop() {
   }
   return desktopDir;
 }
-export const shortcutPaths = () => {
+export const LNK = 'ON.lnk', OLD_LNK = 'Being.lnk';   // the name the shortcuts had before they were called ON
+export const shortcutPaths = (name = LNK) => {
   const only = process.env.BEING_SHORTCUTS_DIR;   // tests: keep every shortcut inside one folder
-  if (only) return { desktop: path.join(only, 'desktop', 'Being.lnk'), start: path.join(only, 'start', 'Being.lnk'), startup: path.join(only, 'startup', 'Being.lnk') };
+  if (only) return { desktop: path.join(only, 'desktop', name), start: path.join(only, 'start', name), startup: path.join(only, 'startup', name) };
   const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-  return { desktop: path.join(desktop(), 'Being.lnk'), start: path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Being.lnk'), startup: path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Being.lnk') };
+  return { desktop: path.join(desktop(), name), start: path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', name), startup: path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', name) };
 };
 
 export class Installer {
@@ -89,9 +90,11 @@ export class Installer {
   async shortcuts(opts) {
     const icons = await writeIcons(this.root);
     const p = shortcutPaths(), target = this.electronExe(), sc = { target, args: `"${this.root.replace(/[\\/]$/, '')}"`, cwd: this.root, icon: icons.ico };
+    const old = shortcutPaths(OLD_LNK);
     for (const k of ['desktop', 'start', 'startup']) {
       if (opts[k]) { await fs.mkdir(path.dirname(p[k]), { recursive: true }); shortcut(p[k], sc); }
       else await fs.rm(p[k], { force: true });
+      await fs.rm(old[k], { force: true });   // the shortcut it made before it was called ON
     }
   }
   /** @param options { desktop, start, startup } shortcuts to create; { force } reinstalls even when ready */
