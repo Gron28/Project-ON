@@ -13,3 +13,4 @@ scratch/*
 !scratch/*.mjs
 !scratch/*.sh
 !scratch/*.py
+!scratch/README.md

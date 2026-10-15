@@ -44,5 +44,5 @@ The earlier fly-connectome experiment still runs with `ENTITY_PAGE=fly` (`render
 
 The code is the author's own. Some data and models it ships carry their own terms: the fly-connectome experiment's data
 (FlyWire, CC BY-NC 4.0) and the Essentia/Discogs-EffNet models (CC BY-NC-SA) are for non-commercial use; check
-`lab/NOTEBOOK.md` §8 before any commercial use. Astronomy by [astronomy-engine](https://github.com/cosinekitty/astronomy)
+`lab/NOTEBOOK.md` §8 before any commercial use; `THIRD_PARTY.md` lists everything that is not the author's own, with its terms. Astronomy by [astronomy-engine](https://github.com/cosinekitty/astronomy)
 (MIT), checked against NASA JPL Horizons. No licence is granted for the rest yet.
