@@ -9,7 +9,7 @@
 
 const CHUNK = 4800; // 0.1 s at 48 kHz
 
-export function createBrain(baseUrl, { onSilent, onError, patches } = {}) {
+export function createBrain(baseUrl, { onSilent, onError, patches, layers } = {}) {
   const worker = new Worker(new URL('./brain-worker.mjs', import.meta.url), { type: 'module' });
   const listeners = new Set();
   let ready = false;
@@ -26,7 +26,7 @@ export function createBrain(baseUrl, { onSilent, onError, patches } = {}) {
     else if (m.type === 'error') { rejectReady(new Error(m.message)); onError ? onError(m.message) : console.error('[brain]', m.message); }
   };
   worker.onerror = (e) => { rejectReady(e); onError ? onError(e.message) : console.error('[brain] worker error', e.message); };
-  worker.postMessage({ type: 'init', baseUrl: new URL(baseUrl, location.href).href, patches });
+  worker.postMessage({ type: 'init', baseUrl: new URL(baseUrl, location.href).href, patches, layers });
 
   // re-chunk to ~0.1 s so the worker sees steady, small messages whatever the capture callback size is
   let acc = new Float32Array(CHUNK * 2), fill = 0;

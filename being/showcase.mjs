@@ -3,7 +3,7 @@
 // speakers), in styles that pull its feelings around (silence, ambient, groove, aggressive, dub, bright, frantic, a
 // build-up), while a timeline forces each material, the mixes, the rings, the serpent, glints and stars, every kind of
 // particle, the drop, chills, a startle, beads, love, a station of the Sun, a flare, the sky ring, a new form, a section, and sleep.
-// A caption says what is being shown. The tour loops. Keys: → next step, ← previous, space pause.
+// A caption says what is being shown. The tour loops. Keys: → next step, ← previous, space pause, P old / proposed look of the 11 elements and planets.
 import { MATERIALS } from './materials.mjs';
 
 const SR = 48000, CHUNK = 960;   // 20 ms
@@ -83,7 +83,7 @@ function timeline(a) {
   step(9, 'silence: it falls asleep, breathing slowly', 'silence', clear);
   step(10, 'a quiet pad: it wakes', 'ambient');
   step(14, 'a groove: it finds the beat, locks in and dances', 'groove');
-  MATERIALS.forEach((m, i) => step(5, `material ${i + 1}/17 · ${m} · ${TEMPER[m][1]}`, TEMPER[m][0], () => a.devCommand({ k: 'material', v: i })));
+  MATERIALS.forEach((m, i) => step(5, `material ${i + 1}/17 · ${m} · ${TEMPER[m][1]}${i >= 6 && i <= 16 ? ' (proposed look; P compares)' : ''}`, TEMPER[m][0], () => a.devCommand({ k: 'material', v: i })));
   step(8, 'mixing: fire, water, the Sun and the Moon marbled together', 'groove', () => { a.devCommand({ k: 'material', v: -1 }); window.__matSlots = { ids: [6, 7, 13, 16], w: [.3, .3, .2, .2] }; a.DEV.matMix = 1; });
   step(8, 'mixing: earth, Venus, Mercury and air', 'frantic', () => { window.__matSlots = { ids: [9, 14, 15, 8], w: [.3, .25, .25, .2] }; a.DEV.matMix = .9; });
   step(8, 'an even blend instead of territories', 'ambient', () => { a.DEV.matMix = 0; });
@@ -122,6 +122,7 @@ function timeline(a) {
 
 export function startShowcase(a) {
   const synth = createSynth(), steps = timeline(a);
+  let proposed = true; window.__proposals?.(true);   // the tour shows the proposed look of fire, water, air, earth and the seven metals (materials 7-17)
   window.__noBurst = true;   // beads only at their own step, not whenever the synthetic music excites it
   // the caption
   const box = document.createElement('div');
@@ -138,7 +139,7 @@ export function startShowcase(a) {
     cap.textContent = `${i + 1}/${steps.length} · ${s.caption}`;
     console.log('[showcase]', cap.textContent);
   };
-  addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') go(i + 1); else if (e.key === 'ArrowLeft') go(i - 1); else if (e.key === ' ') paused = !paused; });
+  addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') go(i + 1); else if (e.key === 'ArrowLeft') go(i - 1); else if (e.key === ' ') paused = !paused; else if (e.key === 'p' || e.key === 'P') window.__proposals?.(proposed = !proposed); });
   go(0);
   setInterval(() => {
     a.takePcm(synth.chunk());

@@ -65,7 +65,9 @@ export class BrainCore {
    * @param {{ort:any, loadModel:(name:string, kind:'onnx'|'json')=>Promise<any>, inputRate?:number, patches?:1|2|3}} opts
    *   patches: EffNet patches per analysis (~100 ms each on one WASM thread); 2 is the default
    */
-  constructor({ ort, loadModel, inputRate = 48000, patches = DEFAULT_PATCHES }) {
+  constructor({ ort, loadModel, inputRate = 48000, patches = DEFAULT_PATCHES, layers = {} }) {
+    // layers: which models run. style = genre / mood / instruments / embedding (Discogs-EffNet + heads), feel = arousal / valence (MusiCNN + heads), world = sounds of the world (YAMNet). Off means not loaded and not run.
+    this.layers = { style: layers.style !== false, feel: layers.feel !== false, world: layers.world !== false };
     this.nPatches = Math.max(1, Math.min(3, patches | 0));
     this.ort = ort;
     this.loadModel = loadModel;
@@ -87,35 +89,43 @@ export class BrainCore {
     const opts = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' };
     const mk = async (name) => ort.InferenceSession.create(new Uint8Array(await this.loadModel(name, 'onnx')), opts);
 
-    const meta = await this.loadModel(EFFNET, 'json');
-    this.styles = meta.classes; // 400 labels "Parent---Style"
-    this.parents = this.styles.map((s) => s.split('---')[0]);
-    this.parentNames = [...new Set(this.parents)];
-    this.parentIdx = Int32Array.from(this.parents, (p) => this.parentNames.indexOf(p));
-    this.effnet = await mk(EFFNET);
+    if (this.layers.style) {
+      const meta = await this.loadModel(EFFNET, 'json');
+      this.styles = meta.classes; // 400 labels "Parent---Style"
+      this.parents = this.styles.map((s) => s.split('---')[0]);
+      this.parentNames = [...new Set(this.parents)];
+      this.parentIdx = Int32Array.from(this.parents, (p) => this.parentNames.indexOf(p));
+      this.effnet = await mk(EFFNET);
 
-    this.heads = [];
-    for (const [key, file, label] of SCALAR_HEADS) {
-      const json = await this.loadModel(file, 'json');
-      const idx = label ? json.classes.indexOf(label) : 0;
-      if (idx < 0) throw new Error(`${file}: label ${label} not in ${json.classes}`);
-      this.heads.push({ key, idx, width: json.classes.length, regression: !label, session: await mk(file) });
+      this.heads = [];
+      for (const [key, file, label] of SCALAR_HEADS) {
+        const json = await this.loadModel(file, 'json');
+        const idx = label ? json.classes.indexOf(label) : 0;
+        if (idx < 0) throw new Error(`${file}: label ${label} not in ${json.classes}`);
+        this.heads.push({ key, idx, width: json.classes.length, regression: !label, session: await mk(file) });
+      }
+      this.tagHeads = [];
+      for (const [key, file] of TAG_HEADS) {
+        const json = await this.loadModel(file, 'json');
+        this.tagHeads.push({ key, labels: json.classes, session: await mk(file) });
+      }
     }
-    this.tagHeads = [];
-    for (const [key, file] of TAG_HEADS) {
-      const json = await this.loadModel(file, 'json');
-      this.tagHeads.push({ key, labels: json.classes, session: await mk(file) });
+    if (this.layers.world) {
+      this.yamnet = await mk(YAMNET); this.yamClasses = (await this.loadModel(YAMNET, 'json')).classes;
+      this.vgg = new VGGishMel(); this.yamBuf = new Float32Array(3 * YPATCH * YBANDS);
     }
-    this.yamnet = await mk(YAMNET); this.yamClasses = (await this.loadModel(YAMNET, 'json')).classes;
-    this.vgg = new VGGishMel(); this.yamBuf = new Float32Array(3 * YPATCH * YBANDS);
-    this.musicnn = await mk(MUSICNN);
-    this.avHeads = [];
-    for (const f of AV_HEADS) this.avHeads.push(await mk(f));   // tensor names differ between the two exports: used by position
-    this.avBuf = new Float32Array(MUSICNN_PATCH * BANDS);
-    // warm-up so the first real analysis is not paying for graph optimisation / WASM page-in
-    const z = new ort.Tensor('float32', new Float32Array(PATCH * BANDS), [1, PATCH, BANDS]);
-    const o = await this.effnet.run({ melspectrogram: z });
-    await this.heads[0].session.run({ embeddings: new ort.Tensor('float32', o.embeddings.data, [1, 1280]) });
+    if (this.layers.feel) {
+      this.musicnn = await mk(MUSICNN);
+      this.avHeads = [];
+      for (const f of AV_HEADS) this.avHeads.push(await mk(f));   // tensor names differ between the two exports: used by position
+      this.avBuf = new Float32Array(MUSICNN_PATCH * BANDS);
+    }
+    if (this.layers.style) {
+      // warm-up so the first real analysis is not paying for graph optimisation / WASM page-in
+      const z = new ort.Tensor('float32', new Float32Array(PATCH * BANDS), [1, PATCH, BANDS]);
+      const o = await this.effnet.run({ melspectrogram: z });
+      await this.heads[0].session.run({ embeddings: new ort.Tensor('float32', o.embeddings.data, [1, 1280]) });
+    }
     this.ready = true;
   }
 
@@ -185,15 +195,8 @@ export class BrainCore {
     return { ...groups, top };
   }
 
-  /** Analyse the latest window now. Returns a result, or {silent:true, rms} when gated. */
-  async analyse() {
-    const t0 = performance.now();
-    const x = this._latestWindow();
-    let e = 0;
-    for (let i = 0; i < x.length; i++) e += x[i] * x[i];
-    const rms = Math.sqrt(e / x.length);
-    if (rms < SILENCE_RMS) return { silent: true, rms };
-
+  /** The style layer: EffNet over the window, then the mood / tag heads. */
+  async _style(x) {
     const { ort } = this;
     const patchHop = this.nPatches > 1 ? Math.floor((199 - PATCH) / (this.nPatches - 1)) : 1; // 199 frames in 3.2 s: 2 patches at 0,71 / 3 at 0,35,70
     const n = this.mel.patches(x, 0, x.length, patchHop, this.nPatches, this.patchBuf);
@@ -226,9 +229,26 @@ export class BrainCore {
       for (let k = 0; k < n; k++) for (let i = 0; i < w; i++) m[i] += o[k * w + i] / n;
       tags[h.key] = topK(m, h.labels, 5);
     }
+    return { p, n, scalars, tags, embedding };
+  }
 
+  /** Analyse the latest window now. Returns a result, or {silent:true, rms} when gated. */
+  async analyse() {
+    const t0 = performance.now();
+    const x = this._latestWindow();
+    let e = 0;
+    for (let i = 0; i < x.length; i++) e += x[i] * x[i];
+    const rms = Math.sqrt(e / x.length);
+    if (rms < SILENCE_RMS) return { silent: true, rms };
+
+    const { ort } = this;
+    const style = this.layers.style ? await this._style(x) : null;
+    if (this.layers.style && !style) return null;   // no complete patch yet
     const av = await this._av(x);
     const events = await this._events(x);
+    if (!style) return { type: 'result', av, events, embedding: null, rms, patches: 0, ms: performance.now() - t0 };
+    const { p, n, scalars, tags, embedding } = style;
+    const NS = p.length;
     const stats = styleStats(p);
     const gsum = new Float64Array(this.parentNames.length);
     for (let i = 0; i < NS; i++) gsum[this.parentIdx[i]] += p[i];

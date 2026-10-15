@@ -851,11 +851,20 @@ const fbScene = new THREE.Scene(); fbScene.add(new THREE.Mesh(new THREE.PlaneGeo
       vec3 emit = max(sc.rgb - .08, 0.) * uGain * (1. - .5 * sc.a);
       gl_FragColor = vec4(max(prev - .002, 0.) + emit, 1.);
     }` })));
-const CO = { uFb: { value: null }, uScene: { value: null }, uFbAmt: { value: 1 } };
+const CO = { uFb: { value: null }, uScene: { value: null }, uFbAmt: { value: 1 }, uRes: { value: new THREE.Vector2(1, 1) }, uPix: { value: 1 }, uLev: { value: 0 }, uDith: { value: 0 } };
 const coScene = new THREE.Scene(); coScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms: CO, depthTest: false, depthWrite: false, transparent: true,
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
-  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D uFb, uScene; uniform float uFbAmt;
-    void main(){ vec4 sc = texture2D(uScene, vUv); vec3 fb = texture2D(uFb, vUv).rgb * uFbAmt; vec3 col = sc.rgb + fb * (1. - sc.a); float a = max(sc.a, clamp(max(fb.r, max(fb.g, fb.b)) * 1.5, 0., 1.)); gl_FragColor = vec4(col, a); }` })));
+  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D uFb, uScene; uniform float uFbAmt, uPix, uLev, uDith; uniform vec2 uRes;
+    void main(){
+      vec2 uv = vUv, cell = floor(vUv * uRes / uPix);                   // retro: uPix buffer pixels per block (1 = off)
+      if (uPix > 1.) uv = (cell + .5) * uPix / uRes;
+      vec4 sc = texture2D(uScene, uv); vec3 fb = texture2D(uFb, uv).rgb * uFbAmt; vec3 col = sc.rgb + fb * (1. - sc.a); float a = max(sc.a, clamp(max(fb.r, max(fb.g, fb.b)) * 1.5, 0., 1.));
+      if (uLev > 1.) {                                                  // colour depth: uLev levels a channel, a 4x4 ordered dither between them
+        vec2 q = mod(cell, 4.); float b = mod(q.x * 4. + q.y * 7. + floor(q.y * .5) * 3., 16.) / 16. - .5;   // a 16-step ordered pattern
+        vec4 v = vec4(col, a) * (uLev - 1.) + b * uDith;
+        gl_FragColor = floor(v + .5) / (uLev - 1.);
+      } else gl_FragColor = vec4(col, a);
+    }` })));
 /* lab: GPU time per pass (EXT_disjoint_timer_query_webgl2), only while window.__gpuT is set */
 const GT = { ext: null, q: [], res: {} };
 function gpuTime(label, fn) {
@@ -877,8 +886,14 @@ function renderBeing() {
   CO.uFb.value = fbA.texture; CO.uScene.value = sceneRT.texture;
   renderer.setRenderTarget(null); renderer.render(coScene, camera);
 }
-const resize = () => { renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5) * T.res); renderer.setSize(innerWidth, innerHeight, false); renderer.getDrawingBufferSize(U.uRes.value);
-  const w = U.uRes.value.x, h = U.uRes.value.y; sceneRT.setSize(w, h); fbA.setSize(w >> 1, h >> 1); fbB.setSize(w >> 1, h >> 1); FB.uAspect.value = w / h; };
+// render resolution: the Settings slider (QUAL.res) is the ceiling; with 'auto' the governor lowers QUAL.k when frames run long and raises it back when there is room
+// retro / PS1 look (Settings): RETRO.pix = block size in window pixels (1 off), lev = levels a channel (0 off), dith 0..1
+const RETRO = { pix: 1, lev: 0, dith: 0 };
+const retroApply = () => { CO.uPix.value = Math.max(1, RETRO.pix * U.uRes.value.x / Math.max(1, innerWidth)); CO.uLev.value = RETRO.lev; CO.uDith.value = RETRO.dith; CO.uRes.value.copy(U.uRes.value); };
+const QUAL = { res: 1, auto: true, k: 1, slow: 0, fast: 0, last: 0 };
+window.__qual = QUAL;   // lab: the resolution governor's state
+const resize = () => { renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5) * T.res * QUAL.k); renderer.setSize(innerWidth, innerHeight, false); renderer.getDrawingBufferSize(U.uRes.value);
+  const w = U.uRes.value.x, h = U.uRes.value.y; sceneRT.setSize(w, h); fbA.setSize(w >> 1, h >> 1); fbB.setSize(w >> 1, h >> 1); FB.uAspect.value = w / h; retroApply(); };
 addEventListener('resize', resize); resize();
 
 /* ---------- the analysis engine and audio in ---------- */
@@ -1461,6 +1476,8 @@ function danceFrame(dt) {
 }
 const BOUNCE = { on: true, k: 1 };   // bounce to the beat (pulse, kick jolt, jitter, bass bounce and sway); the menu switches it
 pet.onBounce(v => { BOUNCE.on = v !== false; });
+pet.onRetro?.(v => { RETRO.pix = Math.min(24, Math.max(1, +v?.pix || 1)); RETRO.lev = +v?.lev >= 2 ? Math.min(64, +v.lev) : 0; RETRO.dith = Math.min(1, Math.max(0, +v?.dith || 0)); retroApply(); });
+pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
 /* ---------- paced breathing (alternate nostrils; the order and levels of the user's own breathing timer) ----------
    ON is the guide: breathe in, then exhale left, inhale left, hold (if the level has one), switch, exhale right, inhale
    right, hold, switch... It draws in and dims on the exhale, swells and fills with light from the nucleus on the inhale,
@@ -1920,9 +1937,22 @@ pet.tuneSchema().then(groups => {
   taste = createTaste({ keys: ML.keys, ranges: Object.fromEntries(rows.map(r => [r[0], [r[3], r[4]]])), dim: 1280 });
   return pet.mlLoad();
 }).then(s => { ML.saved = s || {}; if (s && s.taste) taste.deserialize(s.taste); }).catch(e => console.warn('[ml]', e));
-try { beatOrgan = createBeat(new URL('./models/', location.href).href, { onError: m => console.warn('[beat]', m) }); beatOrgan.onResult(onRhythm); } catch (e) { console.warn('[beat] not available', e); }
-try { brain = createBrain(new URL('./models/', location.href).href, { onError: m => console.warn('[brain]', m) }); brain.onResult(onBrain); }
-catch (e) { console.warn('[brain] unavailable', e); }
+// the local models, layer by layer (Settings): style = genre / mood / instruments, feel = arousal / valence, world = sounds of the world, beat = the beat tracker. A layer that is off is not loaded and not run.
+let MLL = { style: true, feel: true, world: true, beat: true };
+try { Object.assign(MLL, pet.mlLayers?.() || {}); } catch {}
+let brainKey = '';
+function startMl() {
+  const base = new URL('./models/', location.href).href, key = [MLL.style, MLL.feel, MLL.world].join();
+  if (key !== brainKey) {   // the brain's layers changed: a fresh worker that loads only what is on
+    brainKey = key;
+    if (brain) { try { brain.dispose(); } catch {} brain = null; }
+    if (MLL.style || MLL.feel || MLL.world) { try { brain = createBrain(base, { layers: MLL, onError: m => console.warn('[brain]', m) }); brain.onResult(onBrain); } catch (e) { console.warn('[brain] not available', e); } }
+  }
+  if (beatOrgan && !MLL.beat) { try { beatOrgan.dispose(); } catch {} beatOrgan = null; RHY.aligned = false; }
+  else if (!beatOrgan && MLL.beat) { try { beatOrgan = createBeat(base, { onError: m => console.warn('[beat]', m) }); beatOrgan.onResult(onRhythm); } catch (e) { console.warn('[beat] not available', e); } }
+}
+pet.onMl?.(v => { MLL = { ...MLL, ...(v || {}) }; startMl(); });
+startMl();
 const skin = createSkin(renderer, THREE, { width: 192, height: 96 });   // its living skin: one Lenia species per song (species-lenia.mjs)
 U.uSkin.value = skin.texture; U.uTissue.value = tissueTex;
 const charOf = (arr) => (arr ? Object.fromEntries(CHAR_KEYS.map((k, i) => [k, arr[i]])) : null);
@@ -1941,10 +1971,10 @@ function seededReseed(seed) {   // the species' own form: the same orientation, 
   try { reseed(true); } finally { Math.random = r0; }
 }
 function onBrain(r) {
-  if (!r.embedding) return;
-  ML.brain = r;
   if (r.av) { ML.av = r.av; ML.avT = performance.now(); }
   if (r.events) { ML.events = r.events; ML.evT = performance.now(); }   // the sounds of the world it hears (YAMNet groups)   // the music's perceived arousal / valence: the mind always catches it (contagion)
+  if (!r.embedding) return;   // the genre / mood layer is off: nothing more to read
+  ML.brain = r;
   if (!ML.brainDrives) return;   // the genre / mood model is shown in the dashboard; it steers the being only when enabled there
   // A result is usable only after its complete 3.2 s window belongs to this listen.
   if (r.audioEnd > historyBrainBoundary + 4.3) historyBrain = { styles:r.styles, genres:r.genres, moods:r.moods, instruments:r.instruments, confidence:r.confidence, unknown:r.unknown, sequence:++historySequence };
@@ -2054,7 +2084,8 @@ function mlLine() {
   return style + (r && r.unknown > .5 ? ' · unknown' : '') + (ML.mind ? ' · ' + ML.mind.archetype : '') + (ML.skin !== 'none' ? ' · ' + ML.skin : '');
 }
 /* ---------- dev vision: a snapshot of everything it hears, recognises and decides, ~6 times a second, only while that window is open ---------- */
-let devOn = false, devAt = 0, fps = 0, fpsN = 0, fpsT = 0;
+let devOn = false, devPaused = false, devAt = 0, fps = 0, fpsN = 0, fpsT = 0;
+pet.onDevPause?.(p => { devPaused = !!p; });
 const DEV_EV = [];
 pet.onDev(on => { devOn = on; if (!on) { window.__gpuT = false; Object.assign(DEV, { stain: false, mat: -1, family: null, layer: {}, M: null, sleep: 'auto', maturity: null, light: null, metal: null, uni: {} }); MORPH.next = 0; } });   // overrides do not outlive the dashboard: the pet has no UI to undo a forced sleep
 function devEvent(type, strength) { DEV_EV.push([an.total / SR, type, strength]); if (DEV_EV.length > 60) DEV_EV.shift(); }
@@ -2067,7 +2098,7 @@ function embSummary(E) {   // 1280 dims as 64 bands, centred and scaled to -1..1
 }
 function devFrame(now) {
   fpsN++; if (now - fpsT > 1000) { fps = fpsN; fpsN = 0; fpsT = now; }
-  if (!devOn || now - devAt < 160) return;
+  if (!devOn || devPaused || now - devAt < 160) return;
   devAt = now;
   const st = an.state, r = ML.brain, sug = ML.sug;
   const top = sug ? Object.entries(sug.values).filter(([, v]) => Math.abs(v - 1) > .03).sort((a, b) => Math.abs(Math.log(b[1])) - Math.abs(Math.log(a[1]))).slice(0, 10) : [];
@@ -2318,7 +2349,10 @@ function bodyPoint() {   // a point on the body's visible face, in window coordi
   const x = Math.sin(b) * Math.cos(a) * R, y = Math.sin(b) * Math.sin(a) * R, z = Math.cos(b) * R, k = 1.6 / (4.2 * U.uZoom.value - z) * U.uScale.value;
   return [x * k + U.uShift.value.x, y * k + U.uShift.value.y];
 }
+let CALM = false;   // Settings > Calm: no sudden flashes (the dance is switched off from main.cjs through the bounce)
+pet.onCalm?.(v => { CALM = !!v; });
 function flourish(kind, strength = 1, force = false) {   // ask for a glint, a star or glistening; a granted one sheds star-dust
+  if (CALM) return false;
   const ok = FLO.g.ask(kind, beingClock.t, bodyPoint, strength, force);
   if (ok && kind !== 'glisten') particles.burst('stardust', kind === 'star' ? 40 : 10, U.uShellR.value);
   return ok;
@@ -2528,6 +2562,18 @@ function restApply(dt) {
   if (DEV.light) U.uLight.value.setRGB(DEV.light[0], DEV.light[1], DEV.light[2]);
   if (DEV.metal) U.uMetal.value.setRGB(DEV.metal[0], DEV.metal[1], DEV.metal[2]);
 }
+// Dreaming: asleep, every layer fades (restApply), so the tissue's own silent activity was never seen. The tissue wanders in
+// silence (tissue.mjs `wander`: slow up and down states, a 1/f-like spectrum), and while asleep those states glow faintly
+// under the surface: bright in an up state, nearly dark in a down state, relative to its own slow average.
+const DREAM = { base: 0, a: 0 };
+function dreamFrame(dt) {
+  const act = tissueStats.act || 0;
+  DREAM.base += (act - DREAM.base) * (1 - Math.exp(-dt / 25)); if (DREAM.base <= 0) DREAM.base = act;
+  const rel = DREAM.base > 0 ? act / DREAM.base : 1, up = c01((rel - .75) / .9);
+  DREAM.a = SLEEP.z > .3 ? SLEEP.z * (.12 + .75 * up) : 0;
+  U.uTissueA.value = Math.max(U.uTissueA.value, DREAM.a);
+}
+window.__dream = () => ({ ...DREAM, sleep: SLEEP.z, act: tissueStats.act });   // lab
 window.__probeShift = () => [U.uShift.value.x, U.uShift.value.y];   // lab
 window.__probeU = (k) => (U[k].value).toFixed(3);   // lab
 window.__behave = () => ({ SLEEP, REST, MAT, BEAD, SHOW, LATM, MORPH, SKIN, B, S, MEM, U, mind, pressure, timing, DIALS, an });   // lab: live organs
@@ -2729,6 +2775,12 @@ renderer.setAnimationLoop(ts => {
   S.enL += (S.en - S.enL) * (1 - Math.exp(-dt / 12));
   const contrast = (st.level - S.lvAvg) * cu.dynamics * .35; S.lvAvg += (st.level - S.lvAvg) * (1 - Math.exp(-dt / 5));
   BOUNCE.k += ((BOUNCE.on ? 1 : 0) - BOUNCE.k) * (1 - Math.exp(-dt / .3));
+  { const now = performance.now(), ft = now - QUAL.last; QUAL.last = now;   // governor: wall-clock frame time (asleep, the page draws every other frame, so only judge awake)
+    if (QUAL.auto && SLEEP.z < .5 && ft > 0 && ft < 1000) {
+      if (ft > 24) { QUAL.slow += ft; QUAL.fast = 0; } else if (ft < 14) { QUAL.fast += ft; QUAL.slow = Math.max(0, QUAL.slow - ft); } else { QUAL.slow = Math.max(0, QUAL.slow - ft); QUAL.fast = 0; }
+      if (QUAL.slow > 2000 && QUAL.k > .5) { QUAL.k = Math.max(.5, QUAL.k - .1); QUAL.slow = 0; resize(); }
+      else if (QUAL.fast > 8000 && QUAL.k < QUAL.res) { QUAL.k = Math.min(QUAL.res, QUAL.k + .05); QUAL.fast = 0; resize(); }
+    } else if (!QUAL.auto && QUAL.k !== QUAL.res) { QUAL.k = QUAL.res; resize(); } }
   const rawScale = ((.80 + .12 * loudF + .2 * loudF * X + BOUNCE.k * (S.grid * pulseBeat * (.05 + .06 * S.down) * lockF + (1 - S.grid * Math.min(1, lockF)) * kickV * .04) * S.awake * (.3 + 1.3 * X) * T.pulse + S.drop * .06 + (swell + contrast) * S.awake) * T.size);
   // a soft ceiling: above 1 the size compresses smoothly toward 1.18 (beats still show), so it never outgrows the window
   const quiet = c01(S.quiet / 4);
@@ -2768,6 +2820,7 @@ renderer.setAnimationLoop(ts => {
   mlFrame(dt, f0, kickV, snareV, hatV, st);
   devFrame(f0);
   restApply(dt);
+  dreamFrame(dt);
   matShape();
   voiceOrgan(dt, st);
   breatheFrame(dt);

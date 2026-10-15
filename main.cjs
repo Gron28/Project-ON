@@ -5,11 +5,14 @@
 //   ENTITY_PAGE=fly    the earlier fly-connectome + MilkDrop experiment (renderer/index.html)
 // Audio: one app via Windows per-process loopback (checksum-verified native addon in native/), or all system audio.
 // On Linux both come from PulseAudio / PipeWire through parec (native/capture-linux.cjs), sent to the page as 'pcm'.
-const { app, BrowserWindow, session, desktopCapturer, ipcMain, dialog, Menu, Tray, nativeImage, screen, shell } = require('electron');
+const { app, BrowserWindow, session, desktopCapturer, ipcMain, dialog, globalShortcut, Menu, Tray, nativeImage, screen, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// Windows: ANGLE's default D3D11 backend spends minutes compiling the ray-marched body shader (and can crash the renderer);
+// the native OpenGL driver compiles it at once. ENTITY_ANGLE overrides (d3d11, vulkan, ...).
+if (process.platform === 'win32') app.commandLine.appendSwitch('use-angle', process.env.ENTITY_ANGLE || 'gl');
 const PAGE = process.env.ENTITY_PAGE === 'fly' ? 'fly' : 'being';
 
 // --showcase: a separate test instance (its own profile, so the real being's memories are never touched), an ordinary
@@ -28,9 +31,21 @@ const SETTINGS = path.join(app.getPath('userData'), 'being-settings.json');
 const SIZES = { Small: 380, Medium: 520, Large: 720 };
 const COSMOS_MODES = ['hours', 'heavens', 'moon', 'rng', 'space'];   // labels: being/lexicon.mjs 'mode.<key>'
 const COSMOS_DEFAULT = () => ({ modes: Object.fromEntries(COSMOS_MODES.map((k) => [k, false])), ring: false, place: { lat: -34.6037, lon: -58.3816, elevation: 25, name: 'Buenos Aires' } });
-const settings = { pet: true, size: SIZES.Medium, x: null, y: null, top: true, onboarded: false, bounce: true, cosmos: COSMOS_DEFAULT() };
+const settings = { pet: true, size: SIZES.Medium, x: null, y: null, top: true, onboarded: false, bounce: true, quality: 1, adaptive: true, pix: 1, lev: 0, dith: 0, ml: { style: true, feel: true, world: true, beat: true }, cosmos: COSMOS_DEFAULT() };
 try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS, 'utf8'))); } catch {}
+settings.ml = { style: true, feel: true, world: true, beat: true, ...(settings.ml || {}) };   // the local models, layer by layer
 settings.cosmos = { ...COSMOS_DEFAULT(), ...(settings.cosmos || {}) };
+// experimental features, each on its own (dashboard, "Experimental"): off by default; anyone already using one keeps it
+const EXPERIMENTAL = ['sky', 'practice', 'breathe'];
+{
+  const had = settings.experimental || {}, c = settings.cosmos, p = settings.practice || {};
+  settings.experimental = {
+    sky: had.sky ?? !!(c.ring || Object.values(c.modes || {}).some(Boolean)),
+    practice: had.practice ?? !!(p.work || p.body),
+    breathe: had.breathe ?? !!settings.breathe,
+  };
+}
+const experimental = (k) => !!settings.experimental[k];
 const knownModes = () => { settings.cosmos.modes = Object.fromEntries(COSMOS_MODES.map((k) => [k, !!(settings.cosmos.modes || {})[k]])); };   // known modes only, once the lexicon has renamed old keys
 if (process.env.ENTITY_WINDOW === '1' || SHOWCASE) settings.pet = false;
 if (SHOWCASE) settings.onboarded = true;
@@ -72,6 +87,7 @@ function applyBreatheSettings() { const sp = settings.breathe; if (!sp) return; 
 applyBreatheSettings();
 const breatheCfg = () => { const c = breathe.level === 'custom' ? breathe.custom : BREATHE_LEVELS[breathe.level] || BREATHE_LEVELS[1]; return { out: c[0], in: c[1], hold: c[2] }; };
 function setBreathe(o) {
+  if (o.on && !settings.experimental.breathe) return;
   Object.assign(breathe, o);
   settings.breathe = { level: breathe.level, cues: breathe.cues, custom: breathe.custom }; save();
   send('breathe', { ...breathe, cfg: breatheCfg() }); refreshTray();
@@ -108,6 +124,7 @@ function importExtensions() {
 }
 const practiceState = () => ({ work: practice.work && { start: practice.work.start, ms: PRACTICE.work.ms }, body: practice.body && { start: practice.body.start, ms: PRACTICE.body.ms, rounds: PRACTICE.body.rounds } });
 function setPractice(k, on) {
+  if (on && !settings.experimental.practice) return;
   practice[k] = on ? { start: Date.now() } : null;
   settings.practice = { work: practice.work, body: practice.body }; save();
   send('practice', practiceState()); refreshTray();
@@ -149,6 +166,8 @@ function startSystem(wc) {
   } else wc.send('system', true);
   wc.send('source', 'All system audio');
 }
+// the source chosen by hand is remembered and picked again at launch (when that app is running): { app: name } | { system: true }
+const remember = (s) => { settings.source = s; save(); };
 const sourceName = () => (capturing !== null ? capturingName : systemOn ? 'All system audio' : 'nothing');
 
 const LOOK = (hud) => ({ light: 'being', finish: 'chrome', fx: { spikes: true, rings: true, film: false, sparks: true }, lobes: 'being', offset: 40, hud, tune: {} });
@@ -179,7 +198,10 @@ function createWindow() {
     win.webContents.once('did-finish-load', () => {
       const wc = win.webContents;
       wc.send('look', LOOK(false));
-      wc.send('bounce', settings.bounce !== false);
+      sendMotion();
+      wc.send('ml', settings.ml);
+      wc.send('retro', { pix: settings.pix, lev: settings.lev, dith: settings.dith });
+      wc.send('quality', { res: settings.quality, auto: settings.adaptive });
       wc.send('breathe', { ...breathe, cfg: breatheCfg() });
       wc.send('practice', practiceState());
       if (process.env.BEING_READY_FILE) { try { fs.writeFileSync(process.env.BEING_READY_FILE, 'ready'); } catch {} }
@@ -188,7 +210,7 @@ function createWindow() {
       sendCosmos();
       // prefer a running Spotify (per-app capture does not depend on the default output device), else all system audio
       if (SHOWCASE) return;   // it hears only the showcase's own silent music
-      const sp = apps().find((a) => /spotify/i.test(a.name));
+      const want = settings.source, sp = (want && want.app && apps().find((a) => a.name === want.app)) || (!(want && want.system) && apps().find((a) => /spotify/i.test(a.name)));
       if (sp) startApp(wc, sp.pid, sp.name); else startSystem(wc);
       watchMedia(wc);
     });
@@ -256,9 +278,9 @@ require('./being/memory-store.cjs').registerMemoryIpc(ipcMain, app);
 // ---- menus: right-click on the being, and the tray -------------------------------------------------------------
 function listenItems(wc) {
   return [
-    ...apps().map((a) => ({ label: `${a.name}: ${a.title.slice(0, 50)}`, type: 'radio', checked: capturing === a.pid, click: () => startApp(wc, a.pid, a.name) })),
+    ...apps().map((a) => ({ label: `${a.name}: ${a.title.slice(0, 50)}`, type: 'radio', checked: capturing === a.pid, click: () => { remember({ app: a.name }); startApp(wc, a.pid, a.name); } })),
     ...(loopback ? [] : [{ label: `Per-app capture unavailable: ${captureError}`, enabled: false }]),
-    { label: 'All system audio', type: 'radio', checked: systemOn, click: () => startSystem(wc) },
+    { label: 'All system audio', type: 'radio', checked: systemOn, click: () => { remember({ system: true }); startSystem(wc); } },
   ];
 }
 function menuTemplate() {
@@ -266,12 +288,23 @@ function menuTemplate() {
   return [
     { label: 'Listen to', enabled: !!wc, submenu: wc ? listenItems(wc) : [] },
     { type: 'separator' },
-    { label: 'Love this', click: () => send('feedback', 1) },
-    { label: 'Not this', click: () => send('feedback', -1) },
     { label: 'Turn to beads / melt', click: () => send('burst') },
     { label: 'Grow a new form', click: () => send('reseed') },
+    ...experimentalItems(),
     { type: 'separator' },
-    { label: L('menu.sky'), submenu: [
+    { label: 'Settings', click: openSettings },
+    { label: 'Dashboard', click: openDashboard },
+    { label: 'Size', submenu: Object.entries(SIZES).map(([k, v]) => ({ label: k, type: 'radio', checked: settings.size === v, click: () => setSize(v) })) },
+    { label: 'Always on top', type: 'checkbox', checked: settings.top, click: (i) => { settings.top = i.checked; save(); if (win) win.setAlwaysOnTop(i.checked); } },
+    { label: 'Show in a window', type: 'checkbox', checked: !settings.pet, click: (i) => { settings.pet = !i.checked; save(); recreate(); } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+  ];
+}
+// the experimental features appear in the menu only while switched on (dashboard, "Experimental")
+function experimentalItems() {
+  const out = [];
+  if (experimental('sky')) out.push({ label: L('menu.sky'), submenu: [
       ...COSMOS_MODES.map((k) => ({ label: L('mode.' + k), type: 'checkbox', checked: !!settings.cosmos.modes[k], click: (i) => setCosmos('mode', { k, v: i.checked }) })),
       { type: 'separator' },
       { label: 'All of them', click: () => setCosmos('all', true) },
@@ -280,31 +313,32 @@ function menuTemplate() {
       { label: L('menu.ring'), type: 'checkbox', checked: !!settings.cosmos.ring, click: (i) => setCosmos('ring', i.checked) },
       { label: L('menu.chart'), click: openSky },
       ...(LEXM && LEXM.hasLocal ? [{ type: 'separator' }, { label: L('menu.names'), type: 'checkbox', checked: lexMode() === 'local', click: (i) => setLexicon(i.checked ? 'local' : 'plain') }] : []),
-    ] },
+  ] });
+  if (experimental('practice')) out.push(
     { label: practice.work ? L('menu.work.on', { left: Math.round((PRACTICE.work.ms - (Date.now() - practice.work.start)) / 60e3) }) : L('menu.work'), click: () => setPractice('work', !practice.work) },
-    { label: practice.body ? L('menu.body.on') : L('menu.body'), click: () => setPractice('body', !practice.body) },
-    { label: L('menu.breathe'), submenu: [
-      ...Object.entries(BREATHE_LEVELS).map(([l, c]) => ({ label: `Level ${l}: ${breatheLabel(c)}`, type: 'radio', checked: breathe.on && String(breathe.level) === l, click: () => setBreathe({ on: true, paused: false, level: +l }) })),
-      { label: `Custom: ${breatheLabel(breathe.custom)} (set in the dashboard)`, type: 'radio', checked: breathe.on && breathe.level === 'custom', click: () => setBreathe({ on: true, paused: false, level: 'custom' }) },
-      { type: 'separator' },
-      { label: breathe.paused ? 'Resume' : 'Pause', enabled: breathe.on, click: () => setBreathe({ paused: !breathe.paused }) },
-      { label: 'Stop', enabled: breathe.on, click: () => setBreathe({ on: false, paused: false }) },
-      { label: 'Sound cues', type: 'checkbox', checked: breathe.cues, click: (i) => setBreathe({ cues: i.checked }) },
-    ] },
+    { label: practice.body ? L('menu.body.on') : L('menu.body'), click: () => setPractice('body', !practice.body) });
+  if (experimental('breathe')) out.push({ label: L('menu.breathe'), submenu: [
+    ...Object.entries(BREATHE_LEVELS).map(([l, c]) => ({ label: `Level ${l}: ${breatheLabel(c)}`, type: 'radio', checked: breathe.on && String(breathe.level) === l, click: () => setBreathe({ on: true, paused: false, level: +l }) })),
+    { label: `Custom: ${breatheLabel(breathe.custom)} (set in the dashboard)`, type: 'radio', checked: breathe.on && breathe.level === 'custom', click: () => setBreathe({ on: true, paused: false, level: 'custom' }) },
     { type: 'separator' },
-    { label: 'Settings', click: openSettings },
-    { label: 'Dashboard', click: openDashboard },
-    { label: 'Open memories', click: () => send('open-memories') },
-    { label: 'Size', submenu: Object.entries(SIZES).map(([k, v]) => ({ label: k, type: 'radio', checked: settings.size === v, click: () => setSize(v) })) },
-    { label: 'Bounce to the beat', type: 'checkbox', checked: settings.bounce !== false, click: (i) => { settings.bounce = i.checked; save(); send('bounce', i.checked); } },
-    { label: 'Always on top', type: 'checkbox', checked: settings.top, click: (i) => { settings.top = i.checked; save(); if (win) win.setAlwaysOnTop(i.checked); } },
-    { label: 'Show in a window', type: 'checkbox', checked: !settings.pet, click: (i) => { settings.pet = !i.checked; save(); recreate(); } },
-    { type: 'separator' },
-    { label: 'Showcase (silent test run)', click: openShowcase },
-    { label: 'Hatch a new ON', click: () => send('new-seed') },
-    { label: 'Quit', click: () => app.quit() },
-  ];
+    { label: breathe.paused ? 'Resume' : 'Pause', enabled: breathe.on, click: () => setBreathe({ paused: !breathe.paused }) },
+    { label: 'Stop', enabled: breathe.on, click: () => setBreathe({ on: false, paused: false }) },
+    { label: 'Sound cues', type: 'checkbox', checked: breathe.cues, click: (i) => setBreathe({ cues: i.checked }) },
+  ] });
+  return out.length ? [{ type: 'separator' }, ...out] : out;
 }
+function setExperimental(k, on) {
+  if (!EXPERIMENTAL.includes(k)) return false;
+  settings.experimental[k] = !!on;
+  if (!on) {   // switching one off leaves nothing of it running or drawn
+    if (k === 'sky') { setCosmos('all', false); setCosmos('ring', false); if (skyWin && !skyWin.isDestroyed()) skyWin.close(); }
+    if (k === 'practice') { for (const p of ['work', 'body']) if (practice[p]) setPractice(p, false); }
+    if (k === 'breathe') setBreathe({ on: false, paused: false });
+  }
+  save(); refreshTray(); return true;
+}
+// motion: "Calm" (Settings) stills the dance, the beat pulse and the glints; "Bounce to the beat" (dashboard) is the finer switch
+function sendMotion() { send('bounce', settings.bounce !== false && !settings.calm); send('calm', !!settings.calm); }
 function setSize(v) {
   settings.size = v; save();
   if (win && !win.isDestroyed() && settings.pet) { const b = win.getBounds(); win.setBounds({ x: Math.round(b.x + (b.width - v) / 2), y: Math.round(b.y + (b.height - v) / 2), width: v, height: v }); }
@@ -337,7 +371,8 @@ function createTray() {
 // ---- the settings card: first run, and "Settings" (being/settings.html) --------------------------------------------
 const STARTUP = process.platform === 'linux'
   ? path.join(process.env.XDG_CONFIG_HOME || path.join(app.getPath('home'), '.config'), 'autostart', 'being.desktop')
-  : path.join(process.env.APPDATA || app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Being.lnk');
+  : path.join(process.env.APPDATA || app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'ON.lnk');
+if (process.platform === 'win32') { try { const old = path.join(path.dirname(STARTUP), 'Being.lnk'); if (fs.existsSync(old)) { if (fs.existsSync(STARTUP)) fs.rmSync(old, { force: true }); else fs.renameSync(old, STARTUP); } } catch {} }   // the name before it was called ON
 const STARTUP_LABEL = process.platform === 'linux' ? 'Start on login' : 'Start with Windows';
 // Linux: an XDG autostart entry (the same launcher setup.sh puts in the applications menu)
 function linuxStartup() {
@@ -350,7 +385,7 @@ function linuxStartup() {
 }
 function openSettings() {
   if (settingsWin && !settingsWin.isDestroyed()) { settingsWin.show(); settingsWin.focus(); return; }
-  const b = win && !win.isDestroyed() ? win.getBounds() : screen.getPrimaryDisplay().workArea, W = 320, H = 330;
+  const b = win && !win.isDestroyed() ? win.getBounds() : screen.getPrimaryDisplay().workArea, W = 320, H = 500;
   const wa = screen.getDisplayMatching(b).workArea;
   const x = Math.max(wa.x, Math.min(wa.x + wa.width - W, b.x - W - 10 > wa.x ? b.x - W - 10 : b.x + b.width + 10)), y = Math.max(wa.y, Math.min(wa.y + wa.height - H, b.y + (b.height - H) / 2));
   settingsWin = new BrowserWindow({ width: W, height: H, x: Math.round(x), y: Math.round(y), frame: false, resizable: false, maximizable: false, minimizable: false, transparent: true, backgroundColor: '#00000000',
@@ -362,16 +397,41 @@ function openSettings() {
   settingsWin.on('closed', () => { settingsWin = null; if (!settings.onboarded) { settings.onboarded = true; save(); } });
 }
 const fromSettings = (e) => settingsWin && !settingsWin.isDestroyed() && e.sender === settingsWin.webContents;
-ipcMain.handle('settings-get', (e) => fromSettings(e) ? { settings, startup: fs.existsSync(STARTUP), startupLabel: STARTUP_LABEL, sources: [['system', 'All system audio'], ...apps().map((a) => [String(a.pid), a.name])], current: capturing !== null ? String(capturing) : systemOn ? 'system' : '' } : null);
+// render cost in one choice: auto lowers the resolution itself when frames run long
+const PERFORMANCE = { auto: { quality: 1, adaptive: true }, sharp: { quality: 1, adaptive: false }, light: { quality: .6, adaptive: false } };
+const performanceNow = () => (settings.adaptive !== false ? 'auto' : (settings.quality ?? 1) >= .9 ? 'sharp' : 'light');
+function setRetro(key, value) {   // the pixelated / PS1 look (dashboard, Look)
+  if (!['pix', 'lev', 'dith'].includes(key) || !Number.isFinite(value)) return false;
+  settings[key] = key === 'pix' ? Math.min(24, Math.max(1, Math.round(value))) : key === 'lev' ? (value >= 2 ? Math.min(64, Math.round(value)) : 0) : Math.min(1, Math.max(0, value));
+  save(); send('retro', { pix: settings.pix, lev: settings.lev, dith: settings.dith }); return true;
+}
+ipcMain.on('ml-get', (e) => { e.returnValue = settings.ml; });
+ipcMain.handle('settings-get', (e) => fromSettings(e) ? { settings, performance: performanceNow(), startup: fs.existsSync(STARTUP), startupLabel: STARTUP_LABEL, sources: [['system', 'All system audio'], ...apps().map((a) => [String(a.pid), a.name])], current: capturing !== null ? String(capturing) : systemOn ? 'system' : '' } : null);
 ipcMain.handle('settings-set', (e, key, value) => {
   if (!fromSettings(e)) return false;
-  if (key === 'source') { const wc = page(); if (!wc) return false; if (value === 'system') startSystem(wc); else { const a = apps().find((x) => String(x.pid) === String(value)); if (a) startApp(wc, a.pid, a.name); } return true; }
+  if (key === 'source') { const wc = page(); if (!wc) return false; if (value === 'system') { remember({ system: true }); startSystem(wc); } else { const a = apps().find((x) => String(x.pid) === String(value)); if (a) { remember({ app: a.name }); startApp(wc, a.pid, a.name); } } return true; }
   if (key === 'size' && Object.values(SIZES).includes(value)) { setSize(value); return true; }
+  if (key === 'calm' && typeof value === 'boolean') { settings.calm = value; save(); sendMotion(); return true; }
+  if (key === 'reset') {   // every setting back to its default; the window's place, the form (pet / window) and the memories stay
+    dialog.showMessageBox({ type: 'question', buttons: ['Reset', 'Cancel'], defaultId: 1, cancelId: 1, title: 'ON', message: 'Reset all settings to their defaults?', detail: 'Memories and the record of practices are kept. ON restarts.' }).then((r) => {
+      if (r.response !== 0) return;
+      const keep = { pet: settings.pet, x: settings.x, y: settings.y, onboarded: true };
+      for (const k of Object.keys(settings)) delete settings[k];
+      Object.assign(settings, keep); save(); app.relaunch(); app.exit(0);
+    });
+    return true;
+  }
   if (key === 'top' && typeof value === 'boolean') { settings.top = value; save(); if (win) win.setAlwaysOnTop(value); return true; }
   if (key === 'startup' && typeof value === 'boolean') {
     if (value && process.platform === 'linux') { try { return linuxStartup(); } catch { return false; } }
     if (value) { const exe = process.execPath, ico = path.join(__dirname, '.setup', 'being.ico'); fs.mkdirSync(path.dirname(STARTUP), { recursive: true }); return shell.writeShortcutLink(STARTUP, { target: exe, args: `"${__dirname}"`, cwd: __dirname, icon: fs.existsSync(ico) ? ico : exe, iconIndex: 0, description: 'ON' }); }
     try { fs.rmSync(STARTUP, { force: true }); } catch {} return true;
+  }
+  if (key === 'performance' && PERFORMANCE[value]) { const p = PERFORMANCE[value]; settings.quality = p.quality; settings.adaptive = p.adaptive; save(); send('quality', { res: settings.quality, auto: settings.adaptive }); return true; }
+  if (key === 'ml:all' && typeof value === 'boolean') { for (const k of Object.keys(settings.ml)) settings.ml[k] = value; save(); send('ml', settings.ml); return true;   // the four local models together
+  }
+  if (typeof key === 'string' && key.startsWith('ml:') && typeof value === 'boolean' && Object.hasOwn(settings.ml, key.slice(3))) {
+    settings.ml[key.slice(3)] = value; save(); send('ml', settings.ml); return true;
   }
   if (key === 'dashboard') { openDashboard(); return true; }
   if (key === 'done') { settings.onboarded = true; save(); settingsWin.close(); return true; }
@@ -388,6 +448,7 @@ function openDashboard() {
   dash.webContents.on('will-navigate', (e) => e.preventDefault());
   dash.webContents.once('did-finish-load', () => send('dev', true));
   dash.on('closed', () => { dash = null; send('dev', false); });   // the being stops reporting when nobody is looking
+  for (const [ev, hidden] of [['minimize', true], ['hide', true], ['restore', false], ['show', false]]) dash.on(ev, () => send('dev-pause', hidden));   // ...or when the window is minimized
   if (process.env.ENTITY_LOG) dash.webContents.on('console-message', (e) => console.log('[dash]', e.message));
 }
 const fromDash = (e) => dash && !dash.isDestroyed() && e.sender === dash.webContents;
@@ -396,9 +457,7 @@ ipcMain.on('dev-cmd', (e, cmd) => { if (fromDash(e)) send('dev-cmd', cmd); });
 ipcMain.handle('dash-schema', (e) => (fromDash(e) ? require('./being/tune.cjs').TUNE : null));
 ipcMain.handle('dash-app', (e, key, value) => {
   if (!fromDash(e)) return null;
-  if (key === 'sources') return { sources: [['system', 'All system audio'], ...apps().map((a) => [String(a.pid), `${a.name}: ${a.title.slice(0, 40)}`])], current: capturing !== null ? String(capturing) : systemOn ? 'system' : '' };
-  if (key === 'source') { const wc = page(); if (!wc) return false; if (value === 'system') startSystem(wc); else { const a = apps().find((x) => String(x.pid) === String(value)); if (!a) return false; startApp(wc, a.pid, a.name); } return true; }
-  if (key === 'pet' && typeof value === 'boolean') { settings.pet = value; save(); recreate(); return true; }
+  if (key === 'bounce') { if (typeof value === 'boolean') { settings.bounce = value; save(); sendMotion(); } return settings.bounce !== false; }
   if (key === 'record') {   // daily totals for the calendars (a year), and today's sky line for the paper diary
     const day = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
     const days = {}, at = (k) => (days[k] = days[k] || { work: 0, body: 0, breath: 0, listen: 0 });
@@ -414,6 +473,16 @@ ipcMain.handle('dash-app', (e, key, value) => {
     if (value === 'plain' || value === 'local') setLexicon(value);
     return { mode: lexMode(), hasLocal: !!(LEXM && LEXM.hasLocal) };
   }
+  if (key === 'experimental') {   // { k, on } switches one experimental feature; always answers with all of them
+    if (value && typeof value.k === 'string') setExperimental(value.k, value.on);
+    return { ...settings.experimental };
+  }
+  if (key === 'cosmos' && value) {   // the sky's modes from the dashboard: { k: 'mode'|'all'|'ring'|'chart', v }
+    if (value.k === 'chart') { openSky(); return true; }
+    const r = setCosmos(value.k, value.v);
+    return { ok: r, modes: { ...settings.cosmos.modes }, ring: settings.cosmos.ring, labels: COSMOS_MODES.map((m) => [m, L('mode.' + m)]), ringLabel: L('menu.ring') };
+  }
+  if (key === 'retro') { if (value) setRetro(value.k, value.v); return { pix: settings.pix || 1, lev: settings.lev || 0, dith: settings.dith || 0 }; }
   if (key === 'practice' && value && (value.k === 'work' || value.k === 'body')) { setPractice(value.k, !!value.on); return practiceState(); }
   if (key === 'breathe' && value && typeof value === 'object') {   // from the dashboard: start / pause / stop / level / custom timings / cues
     const o = {};
@@ -422,8 +491,7 @@ ipcMain.handle('dash-app', (e, key, value) => {
     for (const k of ['on', 'paused', 'cues']) if (typeof value[k] === 'boolean') o[k] = value[k];
     setBreathe(o); return { ...breathe, cfg: breatheCfg() };
   }
-  if (key === 'top' && typeof value === 'boolean') { settings.top = value; save(); if (win) win.setAlwaysOnTop(value); return true; }
-  if (key === 'size' && Object.values(SIZES).includes(value)) { setSize(value); return true; }
+  if (key === 'action' && value === 'showcase') { openShowcase(); return true; }
   if (key === 'action' && ['feedback+', 'feedback-', 'burst', 'reseed', 'new-seed', 'open-memories'].includes(value)) { if (value === 'feedback+') send('feedback', 1); else if (value === 'feedback-') send('feedback', -1); else send(value); return true; }
   return false;
 });
@@ -444,7 +512,7 @@ function startCosmos() {
 }
 function setCosmos(key, value) {
   const c = settings.cosmos;
-  if (key === 'mode' && value && Object.hasOwn(c.modes, value.k)) c.modes[value.k] = !!value.v;
+  if (!experimental('sky') && value) return false;   // while the sky is off it can only be switched off  if (key === 'mode' && value && Object.hasOwn(c.modes, value.k)) c.modes[value.k] = !!value.v;
   else if (key === 'all') for (const k in c.modes) c.modes[k] = !!value;
   else if (key === 'ring') c.ring = !!value;
   else if (key === 'place' && value && Number.isFinite(+value.lat) && Number.isFinite(+value.lon) && Math.abs(+value.lat) <= 90 && Math.abs(+value.lon) <= 180) {
@@ -454,6 +522,7 @@ function setCosmos(key, value) {
   save(); sendCosmos(); refreshTray(); return true;
 }
 function openSky() {
+  if (!experimental('sky')) return;
   if (skyWin && !skyWin.isDestroyed()) { skyWin.show(); skyWin.focus(); return; }
   skyWin = new BrowserWindow({ width: 1280, height: 900, minWidth: 900, minHeight: 640, title: 'ON · the sky', backgroundColor: '#07080c', autoHideMenuBar: true, icon: iconImage() || undefined,
     webPreferences: { preload: path.join(__dirname, 'being', 'sky-preload.cjs'), contextIsolation: true, sandbox: true } });
@@ -492,7 +561,10 @@ app.on('second-instance', (_e, argv, _cwd, data) => {
   const f = data && data.readyFile;
   if (f && path.dirname(f) === path.join(__dirname, '.setup') && /^launch-\d+-\d+\.ready$/.test(path.basename(f))) { try { fs.writeFileSync(f, 'running'); } catch {} }
 });
-app.whenReady().then(() => { createWindow(); if (PAGE === 'being') { if (!SHOWCASE) { createTray(); importExtensions(); } startCosmos(); } if (process.argv.includes('--dashboard')) openDashboard(); if (process.argv.includes('--sky')) openSky(); });
+// a way to the menu without right-clicking the pet (it is click-through, and a mouse is not for everyone): Ctrl+Alt+O opens it at the pointer
+const MENU_KEY = 'CommandOrControl+Alt+O';
+app.on('will-quit', () => globalShortcut.unregisterAll());
+app.whenReady().then(() => { createWindow(); if (PAGE === 'being') { if (!SHOWCASE) { createTray(); importExtensions(); try { globalShortcut.register(MENU_KEY, () => Menu.buildFromTemplate(menuTemplate()).popup()); } catch {} } startCosmos(); } if (process.argv.includes('--dashboard')) openDashboard(); if (process.argv.includes('--sky')) openSky(); });
 // lab: ENTITY_SHOT=<dir> saves the dashboard and the being after a while and quits (scratch/ harnesses)
 if (process.env.ENTITY_SHOT) app.whenReady().then(() => setTimeout(async () => {
   try { if (skyWin && !skyWin.isDestroyed()) { await skyWin.webContents.executeJavaScript(`scrollTo(0, ${+process.env.ENTITY_SHOT_SCROLL || 0})`); await new Promise((r) => setTimeout(r, 300)); }

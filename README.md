@@ -19,7 +19,7 @@ shortcut, `--autostart` starts it on login, `--uninstall` removes them all), the
 - **Dashboard** (right-click or tray) shows what it hears, feels and decides, and controls colours, layers and tuning.
 - It listens to Spotify when Spotify is running, otherwise to all system audio.
 
-- **Showcase**: right-click → *Showcase (silent test run)*, or `./showcase.sh`: a separate window that plays silent synthetic
+- **Showcase**: dashboard → Actions → *Showcase (silent test run)*, or `./showcase.sh`: a separate window that plays silent synthetic
   music and walks through every state and animation, captioned (→ ← to step, space to pause). Your being is not touched.
 
 ## How it works

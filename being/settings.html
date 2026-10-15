@@ -9,7 +9,7 @@
   :focus-visible { outline: 2px solid #3987e5; outline-offset: 1px; }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; user-select: none; }
-  body { padding: 22px 22px 18px; -webkit-app-region: drag; border: 1px solid var(--line); border-radius: 12px; height: 100vh; display: flex; flex-direction: column; }
+  body { overflow-y: auto; padding: 22px 22px 18px; -webkit-app-region: drag; border: 1px solid var(--line); border-radius: 12px; height: 100vh; display: flex; flex-direction: column; }
   h1 { margin: 0 0 2px; font-size: 18px; font-weight: 600; }
   .hint { color: var(--ink2); margin: 0 0 16px; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); -webkit-app-region: no-drag; }
@@ -19,6 +19,8 @@
   .seg button { font: inherit; border: 0; background: transparent; color: var(--ink2); padding: 3px 10px; cursor: pointer; }
   .seg button.on { background: #2a2a28; color: var(--ink); }
   label.row { cursor: pointer; }
+  input[type=range] { width: 130px; accent-color: var(--accent); cursor: pointer; }
+  .val { color: var(--ink); min-width: 34px; text-align: right; }
   input[type=checkbox] { cursor: pointer; width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
   footer { margin-top: auto; display: flex; gap: 8px; padding-top: 14px; -webkit-app-region: no-drag; }
   footer button { flex: 1; font: inherit; font-weight: 600; padding: 8px; border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--ink); }
@@ -28,10 +30,14 @@
 <body>
   <h1>ON</h1>
   <p class="hint">Drag it anywhere. Right-click it for options.</p>
-  <div class="row"><span>Listen to</span><select id="source"></select></div>
+  <div class="row"><span>Listen to</span><select id="source" aria-label="Listen to"></select></div>
   <div class="row"><span>Size</span><div class="seg" id="size"><button data-v="380">S</button><button data-v="520">M</button><button data-v="720">L</button></div></div>
+  <div class="row"><span>Performance</span><div class="seg" id="performance" title="Auto lowers the resolution by itself when it lags"><button data-v="auto">Auto</button><button data-v="sharp">Sharp</button><button data-v="light">Light</button></div></div>
+  <label class="row" title="Genre, mood, feeling, sounds of the world and the beat tracker. Off saves CPU."><span>Understand the music</span><input type="checkbox" id="ml-all"></label>
+  <label class="row" title="No dance, no beat pulse, no glints or stars"><span>Calm (less motion and flashes)</span><input type="checkbox" id="calm"></label>
   <label class="row"><span>Always on top</span><input type="checkbox" id="top"></label>
   <label class="row"><span id="startupLabel">Start with Windows</span><input type="checkbox" id="startup"></label>
+  <p class="hint" style="margin:10px 0 0">Ctrl+Alt+O opens the menu anywhere. <a href="#" id="reset" style="color:var(--ink2);-webkit-app-region:no-drag">Reset all settings</a></p>
   <footer><button id="dash">Dashboard</button><button id="done" class="main">Done</button></footer>
 <script>
 'use strict';
@@ -40,11 +46,17 @@ async function load() {
   const s = await being.get();
   $('source').replaceChildren(...s.sources.map(([v, t]) => Object.assign(document.createElement('option'), { value: v, textContent: t, selected: v === s.current })));
   for (const b of $('size').children) b.classList.toggle('on', +b.dataset.v === s.settings.size);
-  $('top').checked = s.settings.top; $('startup').checked = s.startup; if (s.startupLabel) $('startupLabel').textContent = s.startupLabel;
+  for (const b of $('performance').children) b.classList.toggle('on', b.dataset.v === s.performance);
+  $('ml-all').checked = ['style', 'feel', 'world', 'beat'].some((k) => s.settings.ml?.[k] !== false);
+  $('calm').checked = !!s.settings.calm; $('top').checked = s.settings.top; $('startup').checked = s.startup; if (s.startupLabel) $('startupLabel').textContent = s.startupLabel;
 }
 $('source').addEventListener('change', () => being.set('source', $('source').value));
 $('source').addEventListener('mousedown', load);
 for (const b of $('size').children) b.addEventListener('click', async () => { await being.set('size', +b.dataset.v); load(); });
+for (const b of $('performance').children) b.addEventListener('click', async () => { await being.set('performance', b.dataset.v); load(); });
+$('ml-all').addEventListener('change', () => being.set('ml:all', $('ml-all').checked));
+$('calm').addEventListener('change', () => being.set('calm', $('calm').checked));
+$('reset').addEventListener('click', (e) => { e.preventDefault(); being.set('reset', true); });
 $('top').addEventListener('change', () => being.set('top', $('top').checked));
 $('startup').addEventListener('change', () => being.set('startup', $('startup').checked));
 $('dash').addEventListener('click', () => being.set('dashboard', true));
