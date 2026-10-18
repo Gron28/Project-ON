@@ -208,7 +208,8 @@ export function createSerpents(rand = Math.random) {
     show(shellR, pulseHz, over = {}) { begin(shellR, 0.9, over.bars || 8, pulseHz, 'shown', over); },
     /**
      * @param {number} dt; @param {number} t seconds
-     * @param {{ lock, groove, regularity, change, pulseHz, beat (0..1 pulse), drop (0..1), mercury (0..1), awake, shellR, force }} c
+     * @param {{ lock, groove, regularity, change, pulseHz, beat (0..1 pulse), drop (0..1), mercury (0..1), awake, shellR, force,
+     *   bars?, perBar? }} c  bars: the felt bar position (cumulative, 0 on a downbeat); given, the journeys lock to it
      */
     step(dt, t, c) {
       dt = Math.min(0.1, Math.max(0, dt || 0));
@@ -233,8 +234,23 @@ export function createSerpents(rand = Math.random) {
           sn.phase += sn.dir * dt * (Math.max(0.6, c.pulseHz) / sn.ratio) * accel * (1 + 1.2 * c.beat);
           sn.a = amt; sn.reach = reach;
           if (sn.j) {   // the journey, quick: out of the nucleus, round the outside, back in, in 3-5 s; then another pass on a new route
-            sn.pt += dt * (1 + 0.6 * c.beat) * (0.8 + 0.4 * c01(c.pulseHz / 2.5));
-            if (sn.pt > sn.P) { sn.pt -= sn.P; sn.P = 3 + 2 * rand(); sn.j = sn.twin && snakes[0].j ? { ...snakes[0].j, wob: -snakes[0].j.wob } : route(0.6); }
+            let v = (1 + 0.6 * c.beat) * (0.8 + 0.4 * c01(c.pulseHz / 2.5)) / sn.P;   // its own pace, in passes per second
+            // a pass is a phase oscillator (Kuramoto): with a felt bar it is pulled to take a whole number of bars and to
+            // dive back into the nucleus on the one; a twin is also pulled onto its leader
+            if (sn.pt >= 0 && Number.isFinite(c.bars) && c.pulseHz > 0) {
+              const K = 1.2 * c01((c.lock - 0.3) / 0.4), barSec = (c.perBar || 4) / c.pulseHz;
+              if (!sn.nb) sn.nb = [1, 2, 4].reduce((a, b) => (Math.abs(b * barSec - sn.P) < Math.abs(a * barSec - sn.P) ? b : a));
+              const th = sn.pt / sn.P, target = c.bars / sn.nb + 1 / (1 + sn.j.len);   // the head is back in at th = 1 / (1 + len)
+              v += (K / TAU) * Math.sin(TAU * (target - th));
+              sn.P += (sn.nb * barSec - sn.P) * (1 - Math.exp(-dt * 0.5 * K));
+            }
+            if (sn.twin && snakes[0].on && snakes[0].j) v += (1.5 / TAU) * Math.sin(TAU * (snakes[0].pt / snakes[0].P - sn.pt / sn.P));
+            sn.pt += dt * v * sn.P;
+            if (sn.pt > sn.P) {
+              sn.pt -= sn.P; sn.nb = 0;
+              if (!sn.twin) { sn.P = Number.isFinite(c.bars) ? sn.P : 3 + 2 * rand(); sn.j = route(0.6); }
+              if (sn === snakes[0]) for (const tw of snakes) if (tw.on && tw.twin) tw.j = { ...sn.j, wob: -sn.j.wob };   // twins follow their leader's new route
+            }
             sn.x = Math.max(0, sn.pt / sn.P) * (1 + sn.j.len) - sn.lag;
           }
         }

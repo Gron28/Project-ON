@@ -35,6 +35,7 @@ const settings = { pet: true, size: SIZES.Medium, x: null, y: null, top: true, o
 try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS, 'utf8'))); } catch {}
 settings.ml = { style: true, feel: true, world: true, beat: true, ...(settings.ml || {}) };   // the local models, layer by layer
 settings.cosmos = { ...COSMOS_DEFAULT(), ...(settings.cosmos || {}) };
+delete settings.driver; delete settings.blobs;   // experimental drivers that were tried and removed
 // experimental features, each on its own (dashboard, "Experimental"): off by default; anyone already using one keeps it
 const EXPERIMENTAL = ['sky', 'practice', 'breathe'];
 {
@@ -175,8 +176,11 @@ const LOOK = (hud) => ({ light: 'being', finish: 'chrome', fx: { spikes: true, r
 function createWindow() {
   const pet = PAGE === 'being' && settings.pet;
   const wa = screen.getPrimaryDisplay().workArea, s = settings.size;
+  // the saved place only counts while its centre is on a connected screen (a monitor may have been unplugged since)
+  const onScreen = Number.isFinite(settings.x) && Number.isFinite(settings.y) && screen.getAllDisplays().some(({ workArea: d }) => {
+    const cx = settings.x + s / 2, cy = settings.y + s / 2; return cx >= d.x && cx < d.x + d.width && cy >= d.y && cy < d.y + d.height; });
   win = new BrowserWindow(pet ? {
-    width: s, height: s, x: settings.x ?? wa.x + wa.width - s - 40, y: settings.y ?? wa.y + wa.height - s - 20,
+    width: s, height: s, x: onScreen ? settings.x : wa.x + wa.width - s - 40, y: onScreen ? settings.y : wa.y + wa.height - s - 20,
     transparent: true, frame: false, resizable: false, maximizable: false, hasShadow: false, skipTaskbar: true,
     alwaysOnTop: settings.top, backgroundColor: '#00000000', title: 'ON', icon: iconImage() || undefined,
     webPreferences: { preload: path.join(__dirname, 'being/preload.cjs'), contextIsolation: true, sandbox: false, backgroundThrottling: false },
@@ -211,6 +215,7 @@ function createWindow() {
       // prefer a running Spotify (per-app capture does not depend on the default output device), else all system audio
       if (SHOWCASE) return;   // it hears only the showcase's own silent music
       const want = settings.source, sp = (want && want.app && apps().find((a) => a.name === want.app)) || (!(want && want.system) && apps().find((a) => /spotify/i.test(a.name)));
+      if (process.env.ENTITY_LOG) console.log('[capture]', sp ? `app ${sp.name} (${sp.pid})` : 'system audio', '| apps:', apps().map((a) => a.name).join(', ') || 'none', captureError ? '| ' + captureError : '');
       if (sp) startApp(wc, sp.pid, sp.name); else startSystem(wc);
       watchMedia(wc);
     });
@@ -554,7 +559,7 @@ ipcMain.handle('start-app', (e, pid) => (loopback ? startApp(e.sender, pid, Stri
 ipcMain.handle('stop-app', () => { stopApp(); return { ok: true }; });
 
 // one being at a time: a second launch opens the dashboard of the first
-if (!process.env.ENTITY_MULTI && !app.requestSingleInstanceLock({ readyFile: process.env.BEING_READY_FILE || null })) app.exit(0);
+if (!process.env.ENTITY_MULTI && PAGE === 'being' && !app.requestSingleInstanceLock({ readyFile: process.env.BEING_READY_FILE || null })) app.exit(0);
 app.on('second-instance', (_e, argv, _cwd, data) => {
   if (argv.includes('--dashboard')) openDashboard(); else if (argv.includes('--sky')) openSky(); else openSettings();
   // the launcher (setup/core.mjs) waits for a ready file: the running instance answers for the second launch
@@ -564,7 +569,7 @@ app.on('second-instance', (_e, argv, _cwd, data) => {
 // a way to the menu without right-clicking the pet (it is click-through, and a mouse is not for everyone): Ctrl+Alt+O opens it at the pointer
 const MENU_KEY = 'CommandOrControl+Alt+O';
 app.on('will-quit', () => globalShortcut.unregisterAll());
-app.whenReady().then(() => { createWindow(); if (PAGE === 'being') { if (!SHOWCASE) { createTray(); importExtensions(); try { globalShortcut.register(MENU_KEY, () => Menu.buildFromTemplate(menuTemplate()).popup()); } catch {} } startCosmos(); } if (process.argv.includes('--dashboard')) openDashboard(); if (process.argv.includes('--sky')) openSky(); });
+app.whenReady().then(() => { createWindow(); if (PAGE === 'being') { if (!SHOWCASE) { createTray(); importExtensions(); try { globalShortcut.register(MENU_KEY, () => Menu.buildFromTemplate(menuTemplate()).popup()); } catch {} } if (PAGE === 'being') startCosmos(); } if (process.argv.includes('--dashboard')) openDashboard(); if (process.argv.includes('--sky')) openSky(); });
 // lab: ENTITY_SHOT=<dir> saves the dashboard and the being after a while and quits (scratch/ harnesses)
 if (process.env.ENTITY_SHOT) app.whenReady().then(() => setTimeout(async () => {
   try { if (skyWin && !skyWin.isDestroyed()) { await skyWin.webContents.executeJavaScript(`scrollTo(0, ${+process.env.ENTITY_SHOT_SCROLL || 0})`); await new Promise((r) => setTimeout(r, 300)); }

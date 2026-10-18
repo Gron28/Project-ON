@@ -139,6 +139,7 @@ import { createGlints, ringGeometry, createSerpents } from './flourish.mjs';
 import { createParticles } from './particles.mjs';
 import { SECTORS } from './cosmos/tables.mjs';
 import { lexicon } from './lexicon.mjs';
+import { createInputGain } from './input-gain.mjs';
 
 /* tuning: multipliers from the Tune window (1 = the designed look) */
 const T = { sens: 1, curve: 1, react: 1, size: 1, thick: 1, visc: 1, turb: 1, turbSpeed: 1, turbDetail: 1, wobble: 1, lobes: 1, reach: 1, spin: 1, sway: 1, pulse: 1, jolt: 1, jitter: 1, drops: 1, dropSize: 1, fall: 1, swirl: 1, burst: 1, core: 1, bright: 1, halo: 1, glow: 1, open: 1, vibrato: 1, tremble: 1, spikes: 1, spikeDetail: 1, ring: 1, ringSpeed: 1, motes: 1, glints: 1, film: 1, tint: 1, reflect: 1, zoom: 1, res: 1, mixKick: 1, mixSnare: 1, mixHat: 1, mixBass: 1, mixLead: 1, mixPads: 1, mixNotes: 1, pan: 1, width: 1, height: 1, absRel: 1, flow: 1, grain: 1, frac: 1, harmony: 1, drift: 1, detail: 1, weight: 1, voice: 1, reorg: 1 };
@@ -172,7 +173,7 @@ const U = {
   uBreathe: { value: new THREE.Vector4() }, uPract: { value: new THREE.Vector4(-1, -1, 0, 0) },   // practices: work progress, body progress (-1: none), and their completion glows   // paced breathing: side (-1 left .. 1 right), breath fullness, hold, mode
   uMid: { value: [0, 0, 0, 0] }, uMw: { value: [1, 0, 0, 0] }, uMatMix: { value: 0 }, uMatScale: { value: 2.2 },
   uWR: { value: [new THREE.Vector4(0, 1, 0, .6), new THREE.Vector4(.3, .95, 0, .7)] }, uWRA: { value: 0 }, uSer: { value: Array.from({ length: 48 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uSerA: { value: [0, 0, 0] }, uSerB: { value: Array.from({ length: 3 }, () => new THREE.Vector4(0, 0, 0, 0)) },
-  uGl: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, .05, 0)) }, uGlR: { value: [0, 0, 0, 0, 0, 0] }, uGlisten: { value: 0 }, uBeatPulse: { value: 0 }
+  uGl: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, .05, 0)) }, uGlR: { value: [0, 0, 0, 0, 0, 0] }, uGlisten: { value: 0 }, uBeatPulse: { value: 0 }, uRegP: { value: new Array(8).fill(0) }, uRegA: { value: 0 }
 };
 
 /* ---------- one shader: a liquid-metal mass with lobes and falling drops, ray-marched around an analytic core of light ---------- */
@@ -230,7 +231,7 @@ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial
   uniform float uSH[ 21 ]; uniform vec4 uJc; uniform float uJw; uniform float uNuc; uniform float uNucRot; uniform vec3 uTissueC;
   uniform sampler2D uSongTex; uniform sampler2D uSongGlow; uniform float uSongAmt; uniform float uSongRot;
   uniform float uProp; uniform float uAro; uniform float uEcho; uniform vec4 uBreathe; uniform vec4 uPract; uniform vec4 uPWa; uniform vec4 uPWb; uniform vec4 uPWc;
-  uniform sampler2D uSongGene; uniform vec3 uDnaOff; uniform float uMid[ 4 ]; uniform float uMw[ 4 ]; uniform float uMatMix; uniform float uMatScale; uniform vec4 uWR[ 2 ]; uniform float uWRA; uniform vec4 uSer[ 48 ]; uniform float uSerA[ 3 ]; uniform vec4 uSerB[ 3 ]; uniform vec4 uGl[ 6 ]; uniform float uGlR[ 6 ]; uniform float uGlisten; uniform float uBeatPulse; uniform sampler2D uTissue; uniform float uTissueA; uniform samplerCube uMorph; uniform float uMorphA; uniform float uMorphD; uniform float uHide; uniform vec3 uStainM, uStainN, uStainC, uStainO; uniform float uStainA;
+  uniform sampler2D uSongGene; uniform vec3 uDnaOff; uniform float uMid[ 4 ]; uniform float uMw[ 4 ]; uniform float uMatMix; uniform float uMatScale; uniform vec4 uWR[ 2 ]; uniform float uWRA; uniform vec4 uSer[ 48 ]; uniform float uSerA[ 3 ]; uniform vec4 uSerB[ 3 ]; uniform vec4 uGl[ 6 ]; uniform float uGlR[ 6 ]; uniform float uGlisten; uniform float uBeatPulse; uniform float uRegP[ 8 ]; uniform float uRegA; uniform sampler2D uTissue; uniform float uTissueA; uniform samplerCube uMorph; uniform float uMorphA; uniform float uMorphD; uniform float uHide; uniform vec3 uStainM, uStainN, uStainC, uStainO; uniform float uStainA;
   vec2 songUV( vec3 d ) { vec2 uv = vec2( atan( d.z, d.x ) * .15915494 + .5 + uSongRot, asin( clamp( d.y, -1., 1. ) ) * .31830989 + .5 );
     uv += .006 * vec2( sin( uv.y * 31. + uTime * .9 ), sin( uv.x * 27. - uTime * .7 ) );   // the remembered skin boils a little
     return vec2( fract( uv.x ), clamp( uv.y, 0., 1. ) ); }
@@ -359,6 +360,14 @@ ${SKIN_GLSL}
         disp += uIntr * .011 * sin( p.x * 17. + uTime * 1.1 + sin( p.y * 9. ) ) * sin( p.y * 15. - uTime * .9 ) * sin( p.z * 13. + uTime * .7 ) * smoothstep( .2, 0., d );
       }
       disp += shDisp( normalize( p ) ) * smoothstep( .3, 0., d );
+      if ( uRegA > .001 ) {   // the motor population's eight regions (being/kuramoto.mjs): each swells on its own pulse where it is out of step with the rest
+        vec3 n = normalize( p ); float rs = 0., rw = 1e-3;
+        for ( int g = 0; g < 8; g++ ) {
+          vec3 rd = vec3( mod( float( g ), 2. ), mod( floor( float( g ) * .5 ), 2. ), floor( float( g ) * .25 ) ) * 2. - 1.;
+          float k = max( dot( n, rd ) * .57735, 0. ); k *= k * k; rs += k * uRegP[ g ]; rw += k;
+        }
+        disp += uRegA * rs / rw * smoothstep( .3, 0., d );
+      }
       if ( uSongAmt > .01 ) { vec3 sn = normalize( p ); float hgt = textureLod( uSongTex, songUV( sn ), 0. ).a, gl = textureLod( uSongGlow, songUV( sn ), 0. ).r;
         disp += ( ( hgt - .45 ) * .09 + gl * .025 ) * uSongAmt * smoothstep( .25, 0., d ) * ( 1. - smoothstep( .85, .99, abs( sn.y ) ) ); }   // the remembered song raises and carves the metal
       if ( uMorphA > .01 ) disp += ( textureLod( uMorph, normalize( p ), 1. ).r - .5 ) * 2. * uMorphD * uMorphA * smoothstep( .15, 0., d );   // the song's grown form (morph.mjs)
@@ -851,14 +860,63 @@ const fbScene = new THREE.Scene(); fbScene.add(new THREE.Mesh(new THREE.PlaneGeo
       vec3 emit = max(sc.rgb - .08, 0.) * uGain * (1. - .5 * sc.a);
       gl_FragColor = vec4(max(prev - .002, 0.) + emit, 1.);
     }` })));
-const CO = { uFb: { value: null }, uScene: { value: null }, uFbAmt: { value: 1 }, uRes: { value: new THREE.Vector2(1, 1) }, uPix: { value: 1 }, uLev: { value: 0 }, uDith: { value: 0 } };
+const CO = { uFb: { value: null }, uScene: { value: null }, uFbAmt: { value: 1 }, uRes: { value: new THREE.Vector2(1, 1) }, uPix: { value: 1 }, uLev: { value: 0 }, uDith: { value: 0 },
+  uGS: { value: 0 }, uGA: { value: 0 }, uGT: { value: 0 }, uGTm: { value: 0 } };   // glitch (GLX): style, amount, seed held for a glitch frame, time
 const coScene = new THREE.Scene(); coScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms: CO, depthTest: false, depthWrite: false, transparent: true,
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
-  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D uFb, uScene; uniform float uFbAmt, uPix, uLev, uDith; uniform vec2 uRes;
+  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D uFb, uScene; uniform float uFbAmt, uPix, uLev, uDith, uGS, uGA, uGT, uGTm; uniform vec2 uRes;
+    vec4 samp(vec2 uv) { vec4 sc = texture2D(uScene, uv); vec3 fb = texture2D(uFb, uv).rgb * uFbAmt; return vec4(sc.rgb + fb * (1. - sc.a), max(sc.a, clamp(max(fb.r, max(fb.g, fb.b)) * 1.5, 0., 1.))); }
+    float gh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uGT * 17.13) * 43758.5453); }   // per-glitch-frame hash
+    float luma(vec3 c) { return dot(c, vec3(.299, .587, .114)); }
+    // glitch artifacts (lab): 1 split, 2 tear, 3 mosh, 4 sort, 5 crt, 6 corrupt; uGA 0..1
+    vec4 glitch(vec2 uv) {
+      float A = uGA, s = floor(uGS + .5);
+      if (s == 1.) {                                                    // split: the channels pulled apart, radially and along a jittered axis
+        vec2 d = (uv - .5) * .03 * A + (vec2(gh(vec2(1., 0.)), gh(vec2(2., 0.))) - .5) * .025 * A;
+        vec4 r = samp(uv + d), g = samp(uv), b = samp(uv - d);
+        return vec4(r.r, g.g, b.b, max(r.a, max(g.a, b.a)));
+      }
+      if (s == 2.) {                                                    // tear: bands of rows slide sideways, red lags behind
+        float band = floor(uv.y * mix(8., 48., gh(vec2(3., 0.))));
+        float dx = (gh(vec2(band, 5.)) - .5) * .3 * A * step(1. - .55 * A, gh(vec2(band, 4.)));
+        vec4 c = samp(vec2(uv.x + dx, uv.y)); c.r = samp(vec2(uv.x + dx * 1.5, uv.y)).r;
+        return c;
+      }
+      if (s == 3.) {                                                    // mosh: macroblocks slip, some flatten to one colour and one gradient
+        vec2 bs = 16. * (1. + 2. * step(.5, gh(vec2(6., 0.)))) / uRes, cell = floor(uv / bs);
+        float h = gh(cell); vec2 u = uv;
+        if (h < .4 * A) u += (vec2(gh(cell + 7.), gh(cell + 9.)) - .5) * bs * 8. * A;
+        vec4 c = samp(u);
+        if (h > 1. - .3 * A) { vec2 o = (floor(u / bs) + .5) * bs; vec4 c0 = samp(o), c1 = samp(o + vec2(bs.x, 0.)); c = mix(c, mix(c0, c1, fract(u.x / bs.x)), .9); }
+        return c;
+      }
+      if (s == 4.) {                                                    // sort: bright pixels stream down their column, as in pixel sorting
+        vec4 c = samp(uv); float l = luma(c.rgb), len = .16 * A * (.3 + .7 * gh(vec2(floor(uv.x * uRes.x / 3.), 8.)));
+        for (int i = 1; i <= 12; i++) { float f = float(i) / 12.; vec4 p = samp(uv + vec2(0., len * f)); float lp = luma(p.rgb) * (1. - .5 * f);
+          if (lp > l && lp > .25) { c = p; l = lp; } }
+        return c;
+      }
+      if (s == 5.) {                                                    // crt: barrel, shadow mask, scanlines, a rolling bar
+        vec2 c = uv - .5; c *= 1. + .25 * A * dot(c, c); vec2 u = c + .5;
+        vec4 col = samp(u); col.r = samp(u + vec2(.002 * A, 0.)).r; col.b = samp(u - vec2(.002 * A, 0.)).b;
+        col.rgb *= mix(1., .6 + .4 * sin(u.y * uRes.y * 1.5708), A);
+        float m = mod(floor(uv.x * uRes.x), 3.); col.rgb *= mix(vec3(1.), vec3(m == 0. ? 1. : .65, m == 1. ? 1. : .65, m == 2. ? 1. : .65), .7 * A);
+        col.rgb *= 1. + .3 * A * exp(-pow((fract(u.y + uGTm * .12) - .5) * 10., 2.));
+        return col;
+      }
+      if (s == 6.) {                                                    // corrupt: blocks swap channels, invert or lose bits
+        vec2 bs = vec2(mix(24., 120., gh(vec2(10., 0.))), mix(3., 28., gh(vec2(11., 0.)))) / uRes, cell = floor(uv / bs);
+        float h = gh(cell + 3.), k = gh(cell + 5.); vec4 c = samp(uv);
+        if (h < .3 * A) c.rgb = k < .33 ? c.gbr : k < .66 ? c.brg : max(c.a - c.rgb, 0.);
+        else if (h > 1. - .25 * A) c.rgb = floor(c.rgb * 3. + k) / 3.;
+        return c;
+      }
+      return samp(uv);
+    }
     void main(){
       vec2 uv = vUv, cell = floor(vUv * uRes / uPix);                   // retro: uPix buffer pixels per block (1 = off)
       if (uPix > 1.) uv = (cell + .5) * uPix / uRes;
-      vec4 sc = texture2D(uScene, uv); vec3 fb = texture2D(uFb, uv).rgb * uFbAmt; vec3 col = sc.rgb + fb * (1. - sc.a); float a = max(sc.a, clamp(max(fb.r, max(fb.g, fb.b)) * 1.5, 0., 1.));
+      vec4 g = uGA > .001 ? glitch(uv) : samp(uv); vec3 col = g.rgb; float a = g.a;
       if (uLev > 1.) {                                                  // colour depth: uLev levels a channel, a 4x4 ordered dither between them
         vec2 q = mod(cell, 4.); float b = mod(q.x * 4. + q.y * 7. + floor(q.y * .5) * 3., 16.) / 16. - .5;   // a 16-step ordered pattern
         vec4 v = vec4(col, a) * (uLev - 1.) + b * uDith;
@@ -1236,7 +1294,10 @@ function beingEvents(evs) {
   }
   blog.length = Math.min(blog.length, 3);
 }
-const pushIn = f => { an.push(f); feedBeing(f); if (brain) brain.push(f); if (beatOrgan) beatOrgan.push(f); lastIn = performance.now(); received += f.length;
+// the input trim (being/input-gain.mjs): per-app loopback arrived near -40 dBFS, where the analyzer's absolute floors miss most
+// drum hits and every song reads as quiet; the trim lifts the stream slowly to a normal level (the ear itself self-tunes either way)
+const trim = createInputGain();
+const pushIn = f => { trim.step(f, SR); trim.apply(f); an.push(f); feedBeing(f); if (brain) brain.push(f); if (beatOrgan) beatOrgan.push(f); lastIn = performance.now(); received += f.length;
   if (window.__latLog) window.__latLog.push(performance.now(), received, an.total);   // lab: when each sample arrived
   historyFrames += f.length; historyAudioSinceBoundary += f.length / SR;
   for (let i=0;i<f.length;i++) historyPower += f[i]*f[i];
@@ -1473,7 +1534,21 @@ function danceFrame(dt) {
   MOT.chaos = ease(MOT.chaos, U.uChaos.value, dt, .15, .45); U.uChaos.value = MOT.chaos;
   MOT.kick = ease(MOT.kick, U.uKick.value, dt, .03, .18); U.uKick.value = MOT.kick;
   MOT.sx = ease(MOT.sx, U.uShift.value.x, dt, .08, .16); MOT.sy = ease(MOT.sy, U.uShift.value.y, dt, .08, .16); U.uShift.value.set(MOT.sx, MOT.sy);
+  regionFrame(dt);
 }
+/* the motor population's regions (mind.regions, being/kuramoto.mjs): each region of the body swells on its own pulse,
+   minus what all regions share (the dance already shows that). So nothing extra shows while the body moves as one; a
+   ripple runs over it while the population catches hold, and under a cross rhythm part of the body keeps its own time. */
+const REG = { p: new Float64Array(8), a: 0 };
+function regionFrame(dt) {
+  const R = mind.regions; if (!R) return;
+  let mean = 0;
+  for (let g = 0; g < 8; g++) { const ph = SHOW.phase + R.phase[g], fr = ph - Math.floor(ph); REG.p[g] = Math.pow(1 - fr, 3) * R.coh[g]; mean += REG.p[g] / 8; }
+  const want = (window.__regionsA ?? .06) * BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - BREATHE.k);
+  REG.a = ease(REG.a, want, dt, .5, .8); U.uRegA.value = REG.a;
+  for (let g = 0; g < 8; g++) U.uRegP.value[g] = REG.p[g] - mean;
+}
+window.__regions = () => ({ order: +mind.order.toFixed(2), lock: +mind.lock.toFixed(2), cross: +mind.crossPulse.toFixed(2), coh: Array.from(mind.regions.coh, (x) => +x.toFixed(2)), phase: Array.from(mind.regions.phase, (x) => +x.toFixed(2)), crossHeld: Array.from(mind.regions.cross, (x) => +x.toFixed(2)), a: +REG.a.toFixed(3) });   // lab; window.__regionsA sets the swell
 const BOUNCE = { on: true, k: 1 };   // bounce to the beat (pulse, kick jolt, jitter, bass bounce and sway); the menu switches it
 pet.onBounce(v => { BOUNCE.on = v !== false; });
 pet.onRetro?.(v => { RETRO.pix = Math.min(24, Math.max(1, +v?.pix || 1)); RETRO.lev = +v?.lev >= 2 ? Math.min(64, +v.lev) : 0; RETRO.dith = Math.min(1, Math.max(0, +v?.dith || 0)); retroApply(); });
@@ -1807,6 +1882,7 @@ const EV = { beat: 0, downbeat: 0, kick: 0, snare: 0, hat: 0, section: 0, build:
 const V = { kick: 0, snare: 0, hat: 0 };   // instant hit envelopes, so a hit registers on the frame it is shown
 function glitch() {   // fracture: freeze motion for 1-3 frames, a small jump, an RGB split of the glow
   S.freeze = 1 + (Math.random() * 3 | 0); S.gjx = (Math.random() - .5) * .05 * Q.frac; S.gjy = (Math.random() - .5) * .05 * Q.frac; S.split = Math.min(.5, .3 * Q.frac);
+  glitchHit(.5 + .4 * Math.min(1, Q.frac));
 }
 function drumHit(type, s, live) {   // a drum hit on the body (heard, or predicted ahead of time)
   if (type === 'kick') { V.kick = Math.max(V.kick, s); S.spawnPan = S.panLo; if (live) { hitDrop(.05 + .06 * s); if (Q.frac > .35 && Math.random() < Q.frac * .6) spawnShard(.04 + .03 * s); if (Q.frac > .65 && Math.random() < .1 * Q.frac) glitch(); const j = s * S.xc * S.xc * .35 * T.jitter * BOUNCE.k; S.jit.x += (Math.random() - .5) * j; S.jit.y += (Math.random() - .5) * j; S.jit.z += (Math.random() - .5) * j; } }
@@ -1831,17 +1907,20 @@ function handleEvents(evs, now) {
         if (Number.isFinite(e.time)) LASTHIT[e.type] = Math.max(LASTHIT[e.type], e.time);
         const ex = timing.observe(e.type, e.strength || .6, gridAt(e.time), 250 / Math.max(.3, mind.pulseHz)) * SHOW.gate;
         if (ex < .5) drumHit(e.type, s * (1 - ex), live);
+        // closed loop (tissue.mjs, lab E11): while it is trying to be on time, a hit it predicted reaches its tissue as the
+        // same stamp every time, a hit that surprised it as noise
+        if (SHOW.gate > .15 && live) beingWorker.postMessage(ex > .5 ? { type: 'feedback', kind: 'pattern', band: e.type === 'kick' ? 0 : e.type === 'snare' ? 1 : 2, amount: Math.min(1, .4 + .6 * s) } : { type: 'feedback', kind: 'noise', amount: Math.min(1, .4 + .6 * s) });
         if (window.__hc) window.__hc['h' + e.type]++;
         break;
       }
       case 'build': S.flash = 'BUILD'; S.flashT = now; break;
       case 'drop':
-        B.dropNow = true;
+        B.dropNow = true; glitchHit(1);
         S.drop = 1; S.rush = 1; S.ring = 0; S.ring2 = -.28; V.kick = 1; S.flash = 'DROP'; S.flashT = now; reseed(true);
         flourish(mind.daPhasic > .6 ? 'star' : 'glint', 1); flourish('glisten', .8); particles.burst('spark', 24, U.uShellR.value);
         if (live) for (let k = 0, nb = Math.round(11 * T.burst); k < nb; k++) spawnDrop(.06 + Math.random() * .05);
         break;
-      case 'section': morphSection(); if (!hadDrop && now - S.flashT > 300) { S.hueTo += .15; reseed(true); S.flash = 'SECT ' + (an.state.structure.section | 0); S.flashT = now; } break;
+      case 'section': morphSection(); glitchHit(.6); if (!hadDrop && now - S.flashT > 300) { S.hueTo += .15; reseed(true); S.flash = 'SECT ' + (an.state.structure.section | 0); S.flashT = now; } break;
     }
   }
 }
@@ -2129,7 +2208,7 @@ function devFrame(now) {
     materials: { names: MATS, w: Array.from(MAT.m.x, (x) => num(x)), cur: MAT.cur, shown: Array.from(MAT.m.shown, (x) => num(x)), habit: Array.from(MAT.m.h, (x) => num(x)), mix: num(MAT.mix) },
     memory: { title: MEM.meta ? MEM.meta.title : null, artist: MEM.meta ? MEM.meta.artist : null, album: MEM.meta ? MEM.meta.album : null, plays: MEM.meta ? MEM.meta.plays : 0,
       familiarity: MEM.song ? num(MEM.song.familiarity) : 0, experience: MEM.song ? num(MEM.song.experience, 1) : 0, known: MEM.known },
-    proposals: PROP.on, fx: { ...FX },
+    proposals: PROP.on, fx: { ...FX }, glitch: { ...GLX },
     breathe: { on: BREATHE.on, paused: BREATHE.paused, phase: BREATHE.phase, side: BREATHE.side, left: num(Math.max(0, BREATHE.dur - BREATHE.t), 1), cycles: BREATHE.cycles, total: num(BREATHE.total, 0), cfg: BREATHE.cfg, level: BREATHE.level, cues: BREATHE.cues },
     look: { light: U.uLight.value.toArray().map((x) => num(x)), metal: U.uMetal.value.toArray().map((x) => num(x)), glow: num(U.uGlow.value), stainAmt: num(U.uStainA.value) },
     tune: { user: { ...ML.user }, live: Object.fromEntries(Object.entries(T).map(([k, v]) => [k, num(v)])) }, dials: { rhythm: DIALS.rhythm, sync: DIALS.sync },
@@ -2162,6 +2241,7 @@ function devCommand(c) {
     case 'bounce': BOUNCE.on = c.v !== false; break;
     case 'brainDrives': ML.brainDrives = !!c.v; break;
     case 'proposals': window.__proposals(!!c.v); break;
+    case 'glitch': window.__glitch(c.v); break;
     case 'fx': if (c.name in FX) { FX[c.name] = !!c.v; try { localStorage.setItem('on-fx', JSON.stringify(FX)); } catch {} } break;
     case 'voice': if (['off', 'whisper', 'sing'].includes(c.v)) { voice.mode = c.v; try { localStorage.setItem('being-voice', c.v); } catch {} } break;
     case 'section': morphSection(); skinFlush(.8, 'dashboard'); break;
@@ -2246,6 +2326,38 @@ function fxFrame() {
   U.uRimK.value = FX.rim ? 1 : 0; U.uHaloK.value = FX.halo ? 1 : 0; U.uThinK.value = FX.thin ? 1 : 0;
   if (!FX.aura) FB.uGain.value = 0;
 }
+// glitch artifacts (lab, off by default; dashboard Look, localStorage 'on-glitch', window.__glitch({ style, amt, react })):
+// a post-process on the final picture. Reactive: it breaks only at the mind's ruptures (fracture stutters, startle, surprise,
+// the drop, sections), held in short glitch frames; otherwise it stays on at amt. 'cycle' changes style at each rupture.
+const GLX_STYLES = ['off', 'split', 'tear', 'mosh', 'sort', 'crt', 'corrupt', 'cycle'];
+const GLX = (() => { const d = { style: 'off', amt: .6, react: true }; try { return { ...d, ...JSON.parse(localStorage.getItem('on-glitch') || '{}') }; } catch { return d; } })();
+const GLS = { hit: 0, env: 0, hold: 0, cur: 1, swapT: 0 };
+function glitchHit(s) {
+  if (GLX.style === 'off') return;
+  if (GLX.style === 'cycle' && s > GLS.hit + .2) GLS.cur = 1 + (Math.random() * 6 | 0);
+  GLS.hit = Math.max(GLS.hit, s); GLS.hold = 0;
+}
+function glitchFrame(dt, t) {
+  const i = GLX_STYLES.indexOf(GLX.style);
+  if (i <= 0) { CO.uGA.value = 0; return; }
+  GLS.hit *= Math.exp(-dt / .2);
+  const want = GLX.react ? Math.min(1, Math.max(GLS.hit, B.flinch, .4 * c01(mind.surprise - 1))) : 1;
+  GLS.env += (want - GLS.env) * (1 - Math.exp(-dt / (want > GLS.env ? .02 : .25)));
+  if ((GLS.hold -= dt) <= 0) { GLS.hold = .04 + Math.random() * .14; CO.uGT.value = Math.random() * 100; }   // a glitch frame: the pattern holds, then jumps
+  if (GLX.style === 'cycle' && !GLX.react && (GLS.swapT -= dt) <= 0) { GLS.swapT = 1.5 + Math.random() * 2.5; GLS.cur = 1 + (Math.random() * 6 | 0); }
+  CO.uGS.value = i === 7 ? GLS.cur : i;
+  CO.uGA.value = Math.max(0, Math.min(1, GLX.amt)) * GLS.env * (1 - SLEEP.z);
+  CO.uGTm.value = t;
+}
+window.__glitch = (o) => {
+  if (o && typeof o === 'object') {
+    if (GLX_STYLES.includes(o.style)) GLX.style = o.style;
+    if (Number.isFinite(o.amt)) GLX.amt = Math.max(0, Math.min(1, o.amt));
+    if (typeof o.react === 'boolean') GLX.react = o.react;
+    try { localStorage.setItem('on-glitch', JSON.stringify(GLX)); } catch {}
+  }
+  return { ...GLX, styles: GLX_STYLES };
+};
 const PROP = { on: new URLSearchParams(location.search).get('prop') === '1' || (() => { try { return localStorage.getItem('on-proposals') === '1'; } catch { return false; } })() };
 window.__proposals = (v) => { PROP.on = !!v; try { localStorage.setItem('on-proposals', PROP.on ? '1' : '0'); } catch {} return PROP.on; };
 const m0 = () => mind.arousal;
@@ -2367,7 +2479,9 @@ function flourishFrame(dt, t) {
   // the serpents: episodes in absorbed stretches (and brief passes at drops), each on its own orbit and rhythm
   const ch = an.state.character || {};
   FLO.serp.step(dt, t, { lock: mind.lock, groove: mind.groove, regularity: ch.regularity ?? .5, change: ch.change ?? .5, pulseHz: mind.pulseHz,
-    beat: U.uBeatPulse.value, drop: S.drop, mercury: w[15], awake: awake * (1 - BREATHE.k), shellR: U.uShellR.value, force: f.ser === 1 });
+    beat: U.uBeatPulse.value, drop: S.drop, mercury: w[15], awake: awake * (1 - BREATHE.k), shellR: U.uShellR.value, force: f.ser === 1,
+    // its journeys lock to the bar and dive in on the one (flourish.mjs); window.__serpBar = false lets them roam free
+    bars: window.__serpBar === false ? undefined : (SHOW.count - (RHY.aligned ? RHY.one : 0) + SHOW.phase) / (RHY.aligned ? RHY.perMind : 4), perBar: RHY.aligned ? RHY.perMind : 4 });
   const sps = FLO.serp.points(t, U.uShellR.value);   // pulls: the body's own mass rises after them (flourish.mjs pullPoints)
   for (let s = 0; s < 3; s++) {
     const sp = sps[s]; U.uSerA.value[s] = sp.pts ? sp.a : 0;
@@ -2668,7 +2782,7 @@ function beingBody(dt, t) {
   FB.uGain.value = (.12 + .25 * m.groove + .3 * B.chill + .2 * B.flinch) * (1 - .85 * z);
   FB.uWarp.value = .0015 + .004 * c01(tissueStats.act * 60);
   FB.uTime.value = t; FB.uTint.value.copy(U.uLight.value).lerp(new THREE.Color(1, 1, 1), .7);
-  fxFrame();
+  fxFrame(); glitchFrame(dt, t);
   if (window.__force) for (const k in window.__force) { const v = window.__force[k]; if (Array.isArray(v) && U[k].value.fromArray) U[k].value.fromArray(v); else U[k].value = v; }   // lab: pin uniforms from the devtools
 }
 /* ---------- loop ---------- */
@@ -2687,7 +2801,7 @@ renderer.setAnimationLoop(ts => {
   an.analyseUpTo(Math.max(0, an.total - Math.round(LATM.delay * 48)));
   const evsNow = an.drain();
   readChar(an.state, dt); deriveChar();
-  beingEvents(mind.step(dt, earFrame, onsetPeak, { tension: an.state.structure.tension, intensity: an.state.intensityAbs ?? an.state.intensity, familiarity: MEM.song ? MEM.song.familiarity : undefined, progress: MEM.song ? MEM.song.progress : undefined, rhythm: DIALS.rhythm, beat: an.state.beat,
+  beingEvents(mind.step(dt, earFrame, onsetPeak, { tension: an.state.structure.tension, intensity: an.state.intensityAbs ?? an.state.intensity, familiarity: MEM.song ? MEM.song.familiarity : undefined, progress: MEM.song ? MEM.song.progress : undefined, rhythm: DIALS.rhythm, beat: an.state.beat, predicted: timing.predicted * timing.readiness,
     ...(ML.av && performance.now() - ML.avT < 5000 ? { musicA: ML.av.arousal, musicV: ML.av.valence } : {}) })); onsetPeak = 0;
   beOnTime(dt, f0); handleEvents(evsNow, f0);
   B.chill *= Math.exp(-dt / 2.5); B.recoil *= Math.exp(-dt / .6); B.flinch *= Math.exp(-dt / .25);

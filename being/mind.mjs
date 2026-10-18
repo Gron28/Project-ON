@@ -8,6 +8,10 @@
 //   resonance    a bank of critical Hopf oscillators 0.5-8 Hz driven by the ear's onsets (Large et al. 2010, 2015) and a
 //                motor oscillator with its own spontaneous tempo f0 that locks to the felt pulse and drifts back home in
 //                silence (ASHLE, Roman et al. 2023). Its phase is the body's pulse, its lock is "being in the groove".
+//   motor pop.   the motor follows a population of coupled phase oscillators over eight body regions, forced by the felt
+//                pulse (Kuramoto; Childs & Strogatz 2008); lock is that population's order parameter, so it snaps in and
+//                lets go late (hysteresis) and fades in silence on its own. A cross pulse can hold part of the body
+//                (nonlocal coupling, Abrams & Strogatz 2004). See being/kuramoto.mjs.
 //   expectation  a 16-slot onset model on the being's own pulse grid (PPM-like, with forgetting): surprise (information
 //                content) and uncertainty (entropy) per slot (Pearce 2018; Harrison et al. 2020).
 //   value        Cheung et al. 2019 pleasure surface (surprise x uncertainty), groove inverted-U on syncopation around its own
@@ -24,8 +28,10 @@
 //
 // Decisions it makes (events): 'startle' (amount), 'reform' (bored: grows a new form), 'chill', 'recoil' (disappointment).
 
+import { createPopulation, NREG, REGION_DIRS } from './kuramoto.mjs';
+
 const TAU = Math.PI * 2;
-const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const clamp =(x, a, b) => (x < a ? a : x > b ? b : x);
 const clamp01 = (x) => clamp(x, 0, 1);
 
 export function mulberry32(a) {
@@ -53,8 +59,18 @@ export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
   // ---- resonance bank: critical oscillators, 12 per octave, 0.5-8 Hz ----------------------------------
   const NR = 49, RF = Float64Array.from({ length: NR }, (_, i) => 0.5 * 2 ** (i / 12));
   const rr = new Float64Array(NR), ri = new Float64Array(NR), ramp = new Float64Array(NR);
-  // motor oscillator (personal tempo)
+  // motor oscillator (personal tempo), following the mean phase of a motor population of coupled oscillators over eight
+  // body regions (being/kuramoto.mjs); part of the body (around a cross axis of its own) can take a cross pulse
   let phM = 0, fM = T.f0, motorCycles = 0;
+  const pop = createPopulation({ seed: (T.seed ^ 0x2545f491) >>> 0 });
+  const wMain = new Float64Array(NREG).fill(1), wCross = new Float64Array(NREG), drives = [];
+  {
+    const r = mulberry32((T.seed ^ 0x68e31da4) >>> 0), z = 2 * r() - 1, a = TAU * r(), q = Math.sqrt(1 - z * z), ax = [q * Math.cos(a), q * Math.sin(a), z];
+    for (let g = 0; g < NREG; g++) { const d = REGION_DIRS[g]; wCross[g] = clamp01(0.5 + 1.5 * (d[0] * ax[0] + d[1] * ax[1] + d[2] * ax[2])); }
+  }
+  let order = 0, cross = 0, crossD = null;
+  const uMain = { i: -1, v: 0 }, uCross = { i: -1, v: 0 };   // the felt pulses' phases, unwrapped
+  const regions = { phase: new Float32Array(NREG), coh: new Float32Array(NREG), cross: new Float32Array(NREG) };
   // ---- startle -------------------------------------------------------------------------------------------
   let onsetLevel = 0.05, H = 1, sens = 0, lastOnsetT = -1e9, lastPrepulseT = -1e9, lastStartleT = -1e9;
   let peakExp = 0.4, lastHitT = -1e9, prevO = 0, rising = false;   // expected size of a hit, learned from the hits themselves
@@ -92,6 +108,7 @@ export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
     get pulseHz() { return fM; }, get pulsePhase() { return phM / TAU; }, get pulseCount() { return motorCycles; }, get pulsePhaseRaw() { return phM / TAU; }, get pulseCountRaw() { return motorCycles; },
     get startle() { return Math.max(0, 1 - (time - lastStartleT) / 0.25); },
     resonance: ramp, resonanceHz: RF,
+    regions, get order() { return order; }, get crossPulse() { return cross; },
     feeling() {   // a word for the HUD, from the state (GEMS-like regions, Zentner 2008)
       if (state.startle > 0.5) return 'startled';
       if (daAnt > 0.5) return 'anticipating';
@@ -113,7 +130,7 @@ export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
    * @param {number} dt seconds
    * @param {{amp:Float32Array, mu:Float32Array, onset:number, rough:number, sub:number, level:number, hum:number}|null} ear latest ear frame
    * @param {number} onsetPeak largest ear onset since the last frame
-   * @param {{tension:number, musicA?:number, musicV?:number}} senses from the analyzer (build-up tension) and the
+   * @param {{tension:number, musicA?:number, musicV?:number, predicted?:number}} senses from the analyzer (build-up tension) and the
    *   music's perceived arousal (0..1) and valence (-1..1) from the mood model (undefined when it has nothing fresh), optional
    */
   state.step = (dt, ear, onsetPeak, senses = {}) => {
@@ -174,27 +191,73 @@ export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
       const a = Math.hypot(rr[i], ri[i]); ramp[i] = a;
       if (RF[i] >= 0.8 && RF[i] <= 3.2) {
         const prior = Math.exp(-((Math.log2(RF[i] / T.f0)) ** 2) / (2 * 0.6 * 0.6));   // its own tempo is easier to feel
-        const s = a * (0.5 + prior); sum += a; n++;
+        // and the pulse it already moves to keeps it (a listener holds its beat through a cross rhythm)
+        let fo = RF[i]; while (fo < T.f0 / 1.42) fo *= 2; while (fo > T.f0 * 1.42) fo /= 2;
+        const held = 1 + 0.6 * lock * Math.exp(-((Math.log2(fo / fM)) ** 2) / (2 * 0.08 * 0.08));
+        const s = a * (0.5 + prior) * held; sum += a; n++;
         if (s > bestS) { bestS = s; best = i; }
       }
     }
     const aS = best >= 0 ? ramp[best] : 0, mean = n ? sum / n : 1e-6;
     const contrast = aS / (mean + 1e-4);
-    lock += (1 - Math.exp(-dt / 0.8)) * (Math.max(clamp01((contrast - 1) / (1.5 * T.looseness)) * clamp01(aS * 6), 0.9 * trackerPull) - lock);
-    // motor oscillator: phase-locks to the felt pulse oscillator, frequency drifts back to f0 without input
+    // how clearly a pulse stands out of the bank: the strength with which it forces the motor population
+    const salience = clamp01((contrast - 1) / (1.5 * T.looseness)) * clamp01(aS * 6);
     const phS = best >= 0 ? Math.atan2(ri[best], rr[best]) : phM;
     const fS = best >= 0 ? RF[best] : T.f0;
     // fold the felt pulse into the motor's octave nearest to f0
-    let ratio = 1; while (fS * ratio < T.f0 / 1.42) ratio *= 2; while (fS * ratio > T.f0 * 1.42) ratio /= 2;
+    const fold = (f) => { let k = 1; while (f * k < T.f0 / 1.42) k *= 2; while (f * k > T.f0 * 1.42) k /= 2; return k; };
+    const ratio = fold(fS);
     // rhythm accuracy (a listener's dial): 0 = its own feel (the resonance it feels, pulled to its own tempo),
     // 1 = on the beat (the analyzer's beat tracker pulls tempo and phase into lock, like a musician following a drummer)
     const L = clamp01(Number.isFinite(senses.rhythm) ? senses.rhythm : 0), own = 1 - L, bt = senses.beat;
-    const err = Math.sin(phS * ratio - phM);
-    phM += TAU * fM * dt + 3 * lock * err * dt * (0.25 + 0.75 * own);
+    const btOk = bt && L > 0 && bt.confidence > 0.15 && bt.bpm > 40 && bt.bpm < 300 && Number.isFinite(bt.phase);   // a tracker value outside this is garbage, not a tempo
+    // a cross pulse: the strongest other peak of the bank that is not an octave of the felt pulse (3 against 2, dotted)
+    // folded down an octave a wrapped phase cannot simply be halved (it would jump by pi once a cycle): each pulse's phase is
+    // followed unwrapped, on the branch nearest to where it was heading, so the half-time beat it holds stays the same one
+    const unwrap = (u, i, ph, f) => {
+      if (u.i !== i) { u.i = i; u.v = ph + TAU * Math.round(((u.v + TAU * f * dt) - ph) / TAU); }
+      else { let e = ph - u.v; e -= TAU * Math.round(e / TAU); u.v += e; }
+      if (Math.abs(u.v) > 1e6) u.v -= TAU * 4 * Math.round(u.v / (TAU * 4));   // keep it small without changing any fold
+      return u.v;
+    };
+    const drive = (u, f, k) => ({ phase: u * k, hz: f * k });
+    let crossT = 0;
+    if (best >= 0 && own > 0 && time - lastOnsetT < 1.5) {
+      let b2 = -1, a2 = 0;
+      for (let i = 1; i < NR - 1; i++) {
+        if (RF[i] < 0.8 || RF[i] > 3.2 || i === best || ramp[i] < ramp[i - 1] || ramp[i] < ramp[i + 1]) continue;
+        if (Math.abs(Math.log2((RF[i] * fold(RF[i])) / (fS * ratio))) < 0.1) continue;
+        if (ramp[i] > a2) { a2 = ramp[i]; b2 = i; }
+      }
+      if (b2 >= 0) { crossT = salience * own * clamp01((a2 / aS - 0.5) / 0.35) * clamp01(loud * 4); crossD = drive(unwrap(uCross, b2, Math.atan2(ri[b2], rr[b2]), RF[b2]), RF[b2], fold(RF[b2])); }
+    }
+    cross += (1 - Math.exp(-dt / (crossT > cross ? 1.5 : 0.6))) * (crossT - cross);   // it has to persist to claim the body
+    for (let g = 0; g < NREG; g++) wMain[g] = 1 - 0.85 * wCross[g] * clamp01(cross * 3);
+    // the motor population (being/kuramoto.mjs): forced by the felt pulse, by a cross pulse over part of the body, and by
+    // the beat tracker when the dial asks for it; its order parameter over the main regions is the lock
+    // the bank rings on after the music stops; only a pulse still being struck forces the motor, so its afterglow is the
+    // population's own drift apart (a few seconds), not the bank's slow ring-down
+    const heard1 = clamp01(1.5 - (time - lastOnsetT));
+    const gT = btOk ? L * Math.min(1, bt.confidence * 1.6) : 0;
+    const uPh = best >= 0 ? unwrap(uMain, best, phS, fS) : 0;   // followed every frame, so no beat of it is lost
+    drives.length = 0;
+    if (best >= 0 && salience > 0) drives.push({ ...drive(uPh, fS, ratio), gain: 3 * salience * heard1 * (0.25 + 0.75 * own), w: wMain });
+    if (cross > 0.02 && crossD) drives.push({ ...crossD, gain: 3.5 * cross, w: wCross });
+    if (gT > 0) drives.push({ phase: bt.phase * TAU, hz: bt.bpm / 60, gain: 14 * gT, w: null });
+    pop.step(dt, { fC: fM, spread: 0.025 * T.looseness, K: 0.75, noise: 0.02, drives });
+    const om = pop.order(wMain);
+    order = om.r;
+    // the lock: the population's coherence, the bank's own salience (while the pulse is still being struck) or the tracker,
+    // whichever is strongest; it snaps in within a quarter of a second and lets go over a second or so, so one messy bar
+    // on real music does not drop the body out of step (the coherence alone fluttered 0.75 -> 0 -> 0.6 within seconds)
+    const lockT = Math.max(clamp01((om.r - 0.3) / 0.6), salience * heard1, 0.9 * gT);
+    lock += (1 - Math.exp(-dt / (lockT > lock || heard1 <= 0 ? 0.25 : 1.2))) * (lockT - lock);   // (in silence it lets go as fast as it caught on)
+    // the body's pulse follows the population's mean phase as far as the population holds together; tempo drifts back to f0
+    phM += TAU * fM * dt + 6 * lock * Math.sin(om.psi - phM) * dt;
     fM += (0.6 * lock * (fS * ratio - fM) * (0.25 + 0.75 * own) - 0.08 * (fM - T.f0) * own) * dt;
     trackerPull = 0;
-    if (bt && L > 0 && bt.confidence > 0.15 && bt.bpm > 40 && bt.bpm < 300 && Number.isFinite(bt.phase)) {   // a tracker value outside this is garbage, not a tempo
-      const g = L * Math.min(1, bt.confidence * 1.6);
+    if (btOk) {
+      const g = gT;
       let e = bt.phase * TAU - phM; e -= TAU * Math.round(e / TAU);
       beatError += (1 - Math.exp(-dt / 1)) * (Math.abs(e) / Math.PI - beatError);
       fM += (bt.bpm / 60 - fM) * (1 - Math.exp(-dt * 8 * g));
@@ -203,6 +266,13 @@ export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
     }
     while (phM >= TAU) { phM -= TAU; motorCycles++; }
     while (phM < 0) phM += TAU;
+    // each region's pulse relative to the body's (turns, -0.5..0.5), how coherent it is, and how much it holds the cross pulse
+    const xd = drives.find((d) => d.w === wCross);
+    for (let g = 0; g < NREG; g++) {
+      let e = (pop.Psi[g] - phM) / TAU; e -= Math.round(e);
+      regions.phase[g] = e; regions.coh[g] = pop.R[g];
+      regions.cross[g] = xd ? clamp01(pop.against(g, xd.phase)) * wCross[g] * clamp01((cross - 0.1) / 0.3) : 0;
+    }
 
     // ---- expectation on the being's own grid (16 slots = 4 felt beats) ----------------------------------------
     slotOnset = Math.max(slotOnset, o);
@@ -223,7 +293,9 @@ export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
         const lp = icSlow - icFast;                                  // learning progress: surprise falling = learning
         // learning the song is itself rewarding: its skin map's error falling (compression progress; Schmidhuber 2010)
         const mapProgress = Number.isFinite(senses.progress) ? Math.max(0, senses.progress) * 25 : 0;
-        h = T.gDA * (0.6 * cheung + 1.2 * groove + 2.0 * Math.max(0, lp) + mapProgress) - 0.8 * rough;
+        // being on time is itself rewarding: the share of heard hits it predicted (a predictable world; Kagan et al. 2022)
+        const onTime = Number.isFinite(senses.predicted) ? 0.5 * (clamp01(senses.predicted) - 0.4) * lock : 0;
+        h = T.gDA * (0.6 * cheung + 1.2 * groove + 2.0 * Math.max(0, lp) + mapProgress + onTime) - 0.8 * rough;
         const delta = h - V;                                         // reward prediction error (TD(0), value as slow average)
         V += 0.05 * delta;
         daPh = clamp(delta, -1.5, 1.5);
@@ -273,7 +345,7 @@ export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
     if (!Number.isFinite(mA) || !Number.isFinite(mV) || !Number.isFinite(hasM)) { mA = 0.3; mV = 0; hasM = 0; }
     if (!Number.isFinite(mood)) mood = 0; if (!Number.isFinite(dF)) dF = 0; if (!Number.isFinite(F)) F = 1; if (!Number.isFinite(daTon)) daTon = 0;
     // the integrators and the clock: each goes back to rest on its own, so one bad frame is forgotten instead of kept
-    if (!Number.isFinite(lock)) lock = 0; if (!Number.isFinite(groove)) groove = 0; if (!Number.isFinite(bored)) bored = 0; if (!Number.isFinite(confused)) confused = 0;
+    if (!Number.isFinite(lock)) lock = 0; if (!Number.isFinite(order)) order = 0; if (!Number.isFinite(cross)) cross = 0; if (!Number.isFinite(groove)) groove = 0; if (!Number.isFinite(bored)) bored = 0; if (!Number.isFinite(confused)) confused = 0;
     if (!Number.isFinite(daPh)) daPh = 0; if (!Number.isFinite(daAnt)) daAnt = 0; if (!Number.isFinite(V)) V = 0; if (!Number.isFinite(h)) h = 0;
     if (!Number.isFinite(sync)) sync = 0.3; if (!Number.isFinite(beatError)) beatError = 0; if (!Number.isFinite(Fprev)) Fprev = F;
     if (!Number.isFinite(IC)) IC = 0; if (!Number.isFinite(Hent)) Hent = 1; if (!Number.isFinite(icFast)) icFast = 1; if (!Number.isFinite(icSlow)) icSlow = 1;
@@ -322,7 +394,7 @@ export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
   state.prime = (hz) => {
     if (!Number.isFinite(hz) || hz < 0.3 || hz > 5) return false;
     let f = hz; while (f < T.f0 / 1.42) f *= 2; while (f > T.f0 * 1.42) f /= 2;
-    fM = f; return true;
+    fM = f; pop.setCentre(f); return true;
   };
   /** love / not-this from the listener: injected dopamine, like an optogenetic pulse */
   state.inject = (sign) => { if (sign > 0) { daPh = 1.2; V -= 0.2; mood += 0.05; } else { daPh = -1.2; bored = Math.min(1, bored + 0.5); } };

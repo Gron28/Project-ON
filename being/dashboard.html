@@ -381,6 +381,8 @@ function feed(s) {
     P.pPause.textContent = r.paused ? 'Resume' : 'Pause'; P.pCues.classList.toggle('on', !!r.cues); }
   P.propChip.classList.toggle('on', !!s.proposals);
   if (CTL.fx && s.fx) for (const k in CTL.fx) CTL.fx[k].classList.toggle('on', s.fx[k] !== false);
+  if (CTL.gStyle && s.glitch) { const g = s.glitch; if (document.activeElement !== CTL.gStyle) CTL.gStyle.value = g.style; CTL.gReact.classList.toggle('on', !!g.react);
+    if (document.activeElement !== CTL.gAmt._inp) { CTL.gAmt._inp.value = g.amt; CTL.gAmt._out.textContent = fmt(g.amt, 2); } }
   if (CTL.prop) { CTL.prop.classList.toggle('on', !!s.proposals); CTL.prop.textContent = s.proposals ? 'Proposal materials: on' : 'Proposal materials: off'; }
   if (s.ear) { coch.push(s.ear.amp.map((a) => Math.min(1, Math.log1p(a / .015) / 3))); if (coch.length > HN) coch.shift(); }
   push('err', s.timing.errMs); push('obpm', s.organ ? s.organ.bpm : 0); push('val', s.mind.valence); push('aro', s.mind.arousal); push('mood', s.mind.mood); push('da', s.mind.daPhasic); push('sur', s.mind.surprise); push('fps', s.perf.fps);
@@ -450,7 +452,13 @@ function buildRail(schema) {
   CTL.lev = slider('Colour levels', 1, 32, 1, 1, (v) => retro('lev', v), 0);
   CTL.dith = slider('Dither', 0, 1, .05, 0, (v) => retro('dith', v));
   dash.app('retro').then((r) => { if (!r) return; for (const [row, v] of [[CTL.pix, r.pix], [CTL.lev, r.lev >= 2 ? r.lev : 1], [CTL.dith, r.dith]]) { row._inp.value = v; row._out.textContent = fmt(v, row === CTL.dith ? 2 : 0); } });
-  $('#look').append(CTL.mem, CTL.nuc, CTL.cyto, CTL.stainAmt, CTL.light, CTL.metal, CTL.mat, CTL.prop, fxRow, CTL.pix, CTL.lev, CTL.dith);
+  // glitch artifacts (lab): a style, its strength, and whether it breaks only at the mind's ruptures
+  const glitch = (o) => dash.cmd({ k: 'glitch', v: o });
+  CTL.gStyle = tag(h('select', { title: 'A post-process on the final picture', on: { change: () => glitch({ style: CTL.gStyle.value }) } }, ...['off', 'split', 'tear', 'mosh', 'sort', 'crt', 'corrupt', 'cycle'].map((s) => h('option', { value: s }, 'Glitch: ' + s))), 'glitch-style');
+  CTL.gAmt = slider('Glitch amount', 0, 1, .05, .6, (v) => glitch({ amt: v })); tag(CTL.gAmt._inp, 'glitch-amt');
+  CTL.gReact = tag(h('button', { class: 'on', title: 'On: it glitches only at ruptures (stutters, startle, surprise, the drop, sections). Off: always on.', on: { click: () => glitch({ react: !(S && S.glitch && S.glitch.react) }) } }, 'reactive'), 'glitch-react');
+  const gRow = h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px' }, CTL.gStyle, CTL.gReact);
+  $('#look').append(CTL.mem, CTL.nuc, CTL.cyto, CTL.stainAmt, CTL.light, CTL.metal, CTL.mat, CTL.prop, fxRow, CTL.pix, CTL.lev, CTL.dith, gRow, CTL.gAmt);
   // skin: family mix override, maturity
   CTL.famAuto = tag(h('button', { class: 'on', on: { click: () => dash.cmd({ k: 'family', v: null }) } }, 'auto'), 'family-auto');
   CTL.fam = {};

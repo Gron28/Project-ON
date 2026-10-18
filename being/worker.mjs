@@ -2,6 +2,8 @@
 //
 // In:  { type:'pcm', mono:Float32Array }  (48 kHz, silence included: it hums and dreams in silence)
 //      { type:'kick', amount }            (a startle burst through the tissue)
+//      { type:'feedback', kind:'pattern'|'noise', band, amount }  (a predicted hit: a fixed stamp in band 0 low .. 2 high;
+//                                          a surprise: as many cells at random; see tissue.mjs)
 //      { type:'recycle', tex }            (optional: the page hands a tissue texture buffer back, so none is allocated per frame)
 // Out: { type:'ear', amp, mu, onset, rough, sub, level, hum }  every 10 ms of audio
 //      { type:'tissue', tex, act, sigma, branching }           every ~33 ms of audio
@@ -10,7 +12,8 @@ import { createEar, SR, NE, DELTA } from './ear.mjs';
 import { createTissue } from './tissue.mjs';
 
 const ear = createEar();
-const tissue = createTissue({ earUnits: NE, wander: 0.7 });   // in silence its set point wanders: slow up and down states (lab E09)
+// in silence its set point wanders: slow up and down states (lab E09); its links learn from the feedback below (lab E11)
+const tissue = createTissue({ earUnits: NE, wander: 0.7, plastic: 0.05 });
 const drive = new Float64Array(NE);
 let toEar = 0, toTissue = 0, toTex = 0;
 const TEX_BYTES = 128 * 64 * 4, pool = [];   // tissue texture buffers handed back by the page
@@ -22,6 +25,7 @@ let dlW = 0, delaySamples = Math.round(SR * 0.04);
 self.onmessage = (e) => {
   const d = e.data;
   if (d.type === 'kick') { tissue.kick(d.amount || 1); return; }
+  if (d.type === 'feedback') { if (d.kind === 'pattern') tissue.pattern(d.band, d.amount); else if (d.kind === 'noise') tissue.noise(d.amount); return; }
   if (d.type === 'recycle') { if (d.tex && d.tex.length === TEX_BYTES && pool.length < 4) pool.push(d.tex); return; }
   if (d.type === 'delay') { delaySamples = Math.max(0, Math.min(SR - 1, Math.round(SR * (d.ms || 0) / 1000))); return; }
   if (d.type !== 'pcm') return;

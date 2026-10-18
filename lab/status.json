@@ -67,6 +67,12 @@
       "name": "Individuality: two beings, two listening diets",
       "state": "planned",
       "verdict": ""
+    },
+    {
+      "id": "E12",
+      "name": "Closed loop: predictable feedback wears paths into the tissue (lab/experiments/11-predictive-feedback.mjs)",
+      "state": "done",
+      "verdict": "Partly: stamp links 0.66 vs 0.53 after noise or nothing, evoked response +30%; reproducibility unchanged."
     }
   ],
   "log": [

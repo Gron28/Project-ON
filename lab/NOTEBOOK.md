@@ -160,7 +160,7 @@ When μ > 0 it hums on its own. That hum is a **spontaneous otoacoustic emission
 - **Gradient-frequency oscillator networks** (Large et al. 2010, 2015). A sensory layer near Hopf plus a motor layer near a double limit cycle. The motor layer keeps pulsing after the music stops: an afterglow.
 - **Personal tempo** (ASHLE, Roman et al. 2023). The being locks to any tempo but always drifts back to its own spontaneous tempo f₀.
 - **Leading the beat.** Delayed self-feedback makes its pulse lead the beat slightly (Roman et al. 2019), as humans do.
-- **Lockedness** is the order parameter of a forced Kuramoto population (Ott–Antonsen form; Childs & Strogatz 2008). It gives a natural "snap into the groove".
+- **Lockedness** is the order parameter of a forced Kuramoto population (Ott–Antonsen form; Childs & Strogatz 2008). It gives a natural "snap into the groove". Implemented in `being/kuramoto.mjs`: below critical coupling, forced only while onsets come, so lock snaps in, holds on a little longer than it caught hold, and fades in 2-4 s of silence.
 - **Chimeras.** With nonlocal coupling, parts of the body lock while others drift (Abrams & Strogatz 2004). That is the visual expression of ambiguous or polyrhythmic music.
 - **Caveat.** Harding et al. 2025 (*Nat Rev Neurosci*) argue that anticipation comes from resonance itself ("strong anticipation"), not from predictive models. We can use both (2.6). Their disagreement is itself a signal.
 
