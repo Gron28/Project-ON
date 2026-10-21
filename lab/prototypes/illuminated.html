@@ -1,0 +1,296 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Illuminated Being</title>
+<!-- lab: ON as illuminated manuscript and marbled paper (reference: a lyric video of illuminated capitals over flowing ebru).
+     Marbling follows Lu, Jaffer et al., "Mathematical Marbling" (IEEE CG&A 2012): every stroke is a closed-form map with a closed-form
+     inverse, so a pixel's colour is found by undoing the strokes newest-first: rakes and a vortex that keep moving (the flow), ink drops
+     that fall on the bar and push everything aside, then the first stripes. Ornament is a plait (the base of Celtic knotwork): two families
+     of bands crossing over and under in turn, gilded. Keys 1-6 form, space pause, a auto depth. URL ?v=&d=&bpm=&sheet=1. No strobing. -->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px/1.45 system-ui, sans-serif; color: #cfd3dc; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #ui { position: fixed; left: 12px; top: 10px; background: #000a; padding: 8px 10px; border-radius: 6px; max-width: 360px; transition: opacity .6s; }
+  #ui b { color: #fff; } #ui input[type=range] { width: 170px; vertical-align: middle; } .k { opacity: .6; }
+  body.idle #ui { opacity: 0; } body.sheet #ui { display: none; }
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div><b id="name"></b> <span class="k" id="idx"></span></div>
+  <div id="desc" class="k"></div>
+  <div><b>journey</b> <input id="j" type="range" min="0" max="1" step=".01"> <span id="jv"></span></div>
+  <div><label><input id="autoJ" type="checkbox"> auto journey (deepens over 3 min, then begins again)</label></div>
+  <div>depth <input id="d" type="range" min="0" max="1" step=".01"> <span id="dv"></span></div>
+  <div>tempo <input id="bpm" type="range" min="60" max="160" step="1"> <span id="bv"></span></div>
+  <div>palette <select id="pal"><option value="0">red earth and cream</option><option value="1">stone: slate, umber, black veins</option><option value="2">sage and grey</option><option value="3">lapis and gold</option></select></div>
+  <div><label><input id="auto" type="checkbox"> auto depth</label></div>
+  <div class="k">1-6 form · space pause · the panel hides when the mouse rests</div>
+</div>
+<script>
+const FORMS = [
+  ['Ebru', 'The body as marbled paper: a drop of ink falls on each bar and pushes the rest aside; rakes and a slow vortex keep it flowing'],
+  ['Roundel', 'The marbled body framed like a page of the Book of Kells: gilded plaitwork on lapis and vermilion, dotted borders'],
+  ['Dissolve', 'The ornament is carried away by the marbling and gathers again, once a phrase, like the reference\'s letters'],
+  ['Gilded', 'A sphere of gold leaf, the plait raised in relief across it, the marbling showing through the gaps'],
+  ['Rosette', 'An eightfold carpet-page rosette: marbling and knotwork folded into a mandala, all inside the circle'],
+  ['Liquid gold', 'ON\'s liquid metal reflecting an illuminated, marbled world; the ornament melting in its surface'],
+];
+const Q = new URLSearchParams(location.search);
+const S = { j: +(Q.get('j') ?? 0), autoJ: Q.get('j') == null, v: +(Q.get('v') ?? 0), d: +(Q.get('d') ?? .6), bpm: +(Q.get('bpm') ?? 100), pal: +(Q.get('pal') ?? 0), auto: false, pause: false };
+const sheet = Q.get('sheet') === '1'; if (sheet) document.body.classList.add('sheet');
+
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes, uOff; uniform float uTime, uD, uBeats, uJ; uniform int uV, uPal;
+out vec4 O;
+const float TAU = 6.2831853;
+float h1( float n ) { return fract( sin( n * 127.1 + 1.3 ) * 43758.5453 ); }
+vec3 h3( float n ) { return vec3( h1( n ), h1( n + 17.7 ), h1( n + 41.3 ) ); }
+mat2 rot( float a ) { float c = cos( a ), s = sin( a ); return mat2( c, - s, s, c ); }
+vec3 rotAx( vec3 p, vec3 k, float a ) { return p * cos( a ) + cross( k, p ) * sin( a ) + k * dot( k, p ) * ( 1. - cos( a ) ); }
+
+// the reference's pigments
+vec3 ink( int pal, float x ) {
+  int i = int( floor( fract( x ) * 4. ) );
+  if ( pal == 0 ) { vec3 c[ 4 ] = vec3[ 4 ]( vec3( .70, .30, .20 ), vec3( .91, .80, .64 ), vec3( .62, .27, .18 ), vec3( .85, .70, .55 ) ); return c[ i ]; }
+  if ( pal == 1 ) { vec3 c[ 4 ] = vec3[ 4 ]( vec3( .40, .47, .60 ), vec3( .55, .42, .34 ), vec3( .30, .36, .50 ), vec3( .68, .58, .50 ) ); return c[ i ]; }
+  if ( pal == 2 ) { vec3 c[ 4 ] = vec3[ 4 ]( vec3( .62, .64, .55 ), vec3( .45, .48, .42 ), vec3( .74, .72, .64 ), vec3( .40, .38, .36 ) ); return c[ i ]; }
+  vec3 c[ 4 ] = vec3[ 4 ]( vec3( .16, .30, .62 ), vec3( .85, .64, .28 ), vec3( .10, .18, .40 ), vec3( .92, .84, .66 ) ); return c[ i ];
+}
+const vec3 GOLD = vec3( .86, .64, .28 ), LAPIS = vec3( .14, .28, .60 ), VERM = vec3( .78, .26, .14 ), UMBER = vec3( .16, .10, .07 ), CREAM = vec3( .93, .86, .72 );
+
+// ---- marbling: undo the strokes, newest first ----
+float gFlow;   // how far the rakes have travelled (the flow), set in main
+vec3 unrake( vec3 p, float amt ) {   // the moving strokes: a vortex and two wavy rakes (shifts perpendicular to their own direction: exact inverses)
+  vec3 ax = normalize( vec3( .3, 1., .25 ) ); float dd = length( cross( p, ax ) );
+  p = rotAx( p, ax, - amt * 1.3 * sin( gFlow * .11 ) * exp( - dd * dd * 1.2 ) );
+  vec3 M1 = normalize( vec3( 1., .15, .1 ) ), N1 = normalize( vec3( -.15, 1., .05 ) );
+  p -= M1 * amt * .38 * sin( dot( p, N1 ) * 3.3 + gFlow * .5 );
+  vec3 M2 = normalize( vec3( .1, -.3, 1. ) ), N2 = normalize( vec3( 1., .2, -.05 ) );
+  p -= M2 * amt * .22 * sin( dot( p, N2 ) * 6.1 - gFlow * .37 );
+  return p;
+}
+vec3 marble( vec3 p, int pal, float bars, out float vein ) {
+  float J = uJ;
+  p = unrake( p, mix( .7, 1.9, J ) );
+  if ( J > .35 ) p = mix( p, unrake( p * 1.8 + 3., 1.6 ) / 1.8 - 3. / 1.8, smoothstep( .35, .8, J ) );   // the flow folds into itself: finer strokes through the large ones
+  vein = 0.;
+  // a comb drawn once through the stones (shift decaying away from each tine: z u^d)
+  vec3 Mc = normalize( vec3( 0., 1., .3 ) ), Nc = normalize( vec3( 1., 0., -.2 ) );
+  float sp = .16, dn = dot( p, Nc ), dt = abs( mod( dn + sp * .5, sp ) - sp * .5 );
+  p -= Mc * .22 * pow( .03, dt / sp ) * ( pal == 0 ? 1.4 : .5 );   // a fine comb: the feathered lines of the reference
+  // ink drops: the newest fall on the bar, older ones are pushed aside (p' = c + (p - c) sqrt(1 + r^2 / |p - c|^2), inverted)
+  for ( int j = 0; j < 40; j++ ) {
+    float id, r; vec3 c;
+    if ( j < 4 ) {   // live drops, one a bar; the oldest is absorbed as it leaves
+      float b = floor( bars ) - float( j ), age = bars - b;
+      id = b; c = normalize( h3( b * 3.1 ) - .5 ) * 1.5; r = ( .14 + .2 * h1( b * 5.7 ) ) * ( 1. - exp( - age * 4. ) ) * ( 1. - smoothstep( 3., 4., age ) );
+    } else { id = float( j ) * 13.7 + float( pal ) * 3.; c = normalize( h3( id ) - .5 ) * 1.5; r = .1 + .32 * h1( id * 2.3 ) * h1( id * 4.1 + 2. ); }
+    if ( r < .002 ) continue;
+    vec3 q = p - c; float L = length( q );
+    if ( L < r ) { vein = max( vein, smoothstep( .9, 1., L / r ) ); return ink( pal, h1( id * .37 ) ) * ( .88 + .12 * L / r ) * ( .96 + .04 * sin( L / r * 40. ) ); }   // faint rings inside a stone
+    vein = max( vein, exp( - ( L - r ) * 140. ) * .9 );
+    p = c + q * sqrt( max( 0., 1. - r * r / ( L * L ) ) );
+  }
+  float st = dot( p, normalize( vec3( .2, 1., .1 ) ) ) * 6.;
+  return ink( pal, floor( st ) * .25 + .1 ) * ( .9 + .1 * smoothstep( .0, .15, abs( fract( st ) - .5 ) ) );   // the first stripes, fine
+}
+
+// ---- plait: two families of diagonal bands, over and under in turn (the ground of Celtic knotwork) ----
+// returns rgb (premultiplied by a) and a
+vec4 plait( vec2 g, float w ) {
+  float a = g.x + g.y, b = g.x - g.y;
+  float da = abs( fract( a + .5 ) - .5 ), db = abs( fract( b + .5 ) - .5 );
+  float ia = floor( a + .5 ), ib = floor( b + .5 );
+  bool aOver = mod( ia + ib, 2. ) < .5;
+  float aa = fwidth( a ) * 1.2, ow = .045;
+  float dOv = aOver ? da : db, dUn = aOver ? db : da;
+  vec4 col = vec4( 0. );
+  // the under band, then the over band's dark outline (the gap), then the over band
+  float un = 1. - smoothstep( w, w + aa, dUn );
+  vec3 cu = GOLD * ( .55 + .45 * sqrt( max( 0., 1. - dUn * dUn / ( w * w ) ) ) ) + .6 * smoothstep( .35 * w, 0., abs( dUn - w * .25 ) ) * vec3( 1., .9, .7 );
+  float unO = 1. - smoothstep( w + ow, w + ow + aa, dUn );
+  col = mix( col, vec4( UMBER, 1. ), unO ); col = mix( col, vec4( cu, 1. ), un );
+  float ovO = 1. - smoothstep( w + ow, w + ow + aa, dOv ), ov = 1. - smoothstep( w, w + aa, dOv );
+  vec3 co = GOLD * ( .6 + .5 * sqrt( max( 0., 1. - dOv * dOv / ( w * w ) ) ) ) + .7 * smoothstep( .3 * w, 0., abs( dOv - w * .25 ) ) * vec3( 1., .92, .75 );
+  col = mix( col, vec4( UMBER, 1. ), ovO ); col = mix( col, vec4( co, 1. ), ov );
+  return col;
+}
+float dots( vec2 g, float r ) { vec2 f = fract( g ) - .5; return 1. - smoothstep( r, r + fwidth( g.x ) * 1.5, length( f ) ); }
+
+// a ring of plaitwork between radii r0 and r1, in polar coordinates (n cells round: continuity needs an integer)
+vec4 ring( vec2 p, float r0, float r1, float rows, float spin, vec2 warp ) {
+  float r = length( p ), th = atan( p.y, p.x ) + spin;
+  if ( r < r0 - .01 || r > r1 + .01 ) return vec4( 0. );
+  float n = floor( TAU * ( r0 + r1 ) * .5 / ( ( r1 - r0 ) / rows ) * .5 ) * 2.;
+  vec2 g = vec2( th / TAU * n, ( r - r0 ) / ( r1 - r0 ) * rows ) + warp;
+  vec3 ground = mix( LAPIS, VERM, step( .5, fract( floor( g.x / 4. ) * .5 ) ) ) * ( .8 + .2 * dots( g * vec2( 2., 2. ) + .5, .08 ) );
+  vec4 k = plait( g, .2 );
+  vec3 c = mix( ground, k.rgb, k.a );
+  float band = smoothstep( r0 - .004, r0, r ) * smoothstep( r1 + .004, r1, r );
+  float rim = smoothstep( .006, .0, abs( r - r0 ) ) + smoothstep( .006, .0, abs( r - r1 ) );
+  c = mix( c, GOLD * 1.2, min( rim, 1. ) );
+  return vec4( c, band );
+}
+
+void main() {
+  vec2 p = ( gl_FragCoord.xy - uOff - .5 * uRes ) / uRes.y;
+  float d = uD, beats = uBeats, bars = beats / 4., pulse = exp( - fract( beats ) * 5. );
+  gFlow = uTime * mix( 1., .45, d ) + .15 * pulse * ( 1. - d );   // the flow: slower and steadier when deep
+  int pal = uPal;
+  float Rb = .3, r = length( p ), phrase = beats / 16.;
+  vec3 col = vec3( 0. ); float vein;
+  // the sphere
+  vec2 q = p / Rb; float q2 = dot( q, q );
+  bool inS = q2 < 1.;
+  float zz = sqrt( max( 0., 1. - q2 ) ); vec3 n = vec3( q, zz );
+  vec3 s = rotAx( rotAx( n, vec3( 0., 1., 0. ), uTime * .05 ), vec3( 1., 0., 0. ), .3 );   // the surface point, turning slowly
+  vec3 L = normalize( vec3( -.45, .6, .65 ) );
+  float diff = .55 + .45 * max( dot( n, L ), 0. ), fres = pow( 1. - zz, 3. );
+  float aaS = smoothstep( 1., .985, sqrt( q2 ) );
+
+  if ( uV == 0 || uV == 1 || uV == 2 ) {   // ebru body (+ roundel, + dissolving ornament)
+    if ( inS ) {
+      vec3 m = marble( s * 1.5, pal, bars, vein );
+      m = mix( m, UMBER * .6, vein * ( pal == 1 ? .9 : .35 ) );
+      col = m * diff + vec3( 1., .95, .85 ) * pow( max( dot( reflect( vec3( 0., 0., -1. ), n ), L ), 0. ), 30. ) * .25 + fres * mix( CREAM, GOLD, d ) * .35;
+      col *= aaS;
+    }
+    if ( uV >= 1 ) {
+      vec2 warp = vec2( 0. );
+      { vec3 w0 = unrake( vec3( p * 3., .4 ), 1. ) - vec3( p * 3., .4 ); warp = w0.xy * smoothstep( .3, 1., uJ ) * 1.6; }   // the journey melts the ornament into the flow
+      if ( uV == 2 ) {   // the ornament is carried by the marbling and gathers again on each phrase
+        float k = smoothstep( .15, .95, fract( phrase ) ) * mix( 1., .7, d );
+        vec3 w3 = unrake( vec3( p * 3., .4 ), 1. ) - vec3( p * 3., .4 );
+        warp += w3.xy * k * 3.;
+      }
+      vec4 r1 = ring( p, .33, .4, 2., - uTime * .02 * mix( 1., .5, d ), warp );
+      vec4 r2 = ring( p, .425, .47, 1., uTime * .015 * mix( 1., .5, d ), warp * 1.3 );
+      col = mix( col, r1.rgb, r1.a ); col = mix( col, r2.rgb, r2.a );
+      col += GOLD * smoothstep( .004, 0., abs( r - .412 ) ) * .8;   // a hairline of gold between them
+    }
+  } else if ( uV == 3 ) {   // gilded relief: the plait raised across a sphere of gold leaf, marbling in the gaps
+    if ( inS ) {
+      float u = atan( s.x, s.z ) / TAU * 16., v = asin( clamp( s.y, -1., 1. ) ) / TAU * 16.;
+      vec2 g = vec2( u, v ) + vec2( 0., gFlow * .05 );
+      vec4 k = plait( g, .22 );
+      vec3 m = marble( s * 1.5, pal, bars, vein ); m = mix( m, UMBER * .6, vein * .4 );
+      // relief: the plait's height bends the normal
+      float hgt = k.a; vec3 nb = normalize( n - vec3( dFdx( hgt ), dFdy( hgt ), 0. ) * 6. );
+      vec3 rf = reflect( vec3( 0., 0., -1. ), nb );
+      float spec = pow( max( dot( rf, L ), 0. ), 18. ), env = smoothstep( -.3, 1., rf.y );
+      vec3 gold = k.rgb * ( .45 + .55 * env ) + vec3( 1., .9, .7 ) * spec * .9;
+      col = mix( m * ( .35 + .4 * diff ), gold, k.a ) + fres * GOLD * .4;
+      col *= aaS;
+    }
+    vec4 r1 = ring( p, .33, .38, 1., - uTime * .02, vec2( 0. ) ); col = mix( col, r1.rgb, r1.a );
+  } else if ( uV == 4 ) {   // rosette: eightfold, folded and mirrored
+    float th = atan( p.y, p.x ) + uTime * .01 * mix( 1., .4, d ), a = TAU / 8.;
+    th = mod( th, a ); th = abs( th - a * .5 );
+    vec2 f = vec2( cos( th ), sin( th ) ) * r;
+    if ( r < .47 ) {
+      vec3 m = marble( vec3( f * 2.6, .6 + .2 * sin( gFlow * .05 ) ), pal, bars, vein ); m = mix( m, UMBER * .6, vein * .5 );
+      col = m;
+      vec4 k = plait( vec2( f.x * 22., f.y * 22. ) + vec2( - gFlow * .1, 0. ), .2 );
+      float zone = smoothstep( .16, .17, r ) * smoothstep( .3, .29, r );
+      col = mix( col, k.rgb, k.a * zone );
+      col = mix( col, GOLD * 1.1, smoothstep( .004, 0., abs( r - .165 ) ) + smoothstep( .004, 0., abs( r - .295 ) ) + smoothstep( .005, 0., abs( r - .465 ) ) );
+      col *= .8 + .2 * smoothstep( .47, .2, r );
+      col += mix( CREAM, GOLD, .5 ) * exp( - r / .05 ) * .6;   // the heart
+    }
+  } else {   // liquid gold: the metal reflecting a marbled, illuminated world; the ornament melting into it
+    if ( inS ) {
+      vec3 nn = normalize( n + .18 * ( unrake( s * 2., 1. ) - s * 2. ) );   // the liquid surface heaves with the flow
+      vec3 rf = reflect( vec3( 0., 0., -1. ), nn );
+      vec3 w = marble( rf * 1.5, pal, bars, vein ); w = mix( w, UMBER * .5, vein * .5 );
+      vec4 k = plait( vec2( atan( rf.x, rf.z ) / TAU * 18., rf.y * 4. ) + .5 * ( unrake( rf, 1. ) - rf ).xy * 4. * d, .2 );
+      vec3 envc = mix( w, k.rgb, k.a * .85 );
+      float fr = .5 + .5 * pow( 1. - zz, 2. );
+      col = envc * mix( vec3( 1. ), GOLD * 1.3, .55 ) * fr * 1.25 + vec3( 1., .95, .8 ) * pow( max( dot( rf, L ), 0. ), 60. ) * 1.2;
+      col *= aaS;
+    }
+    vec4 r1 = ring( p, .33, .38, 1., uTime * .015, vec2( 0. ) ); col = mix( col, r1.rgb, r1.a * .9 );
+  }
+  // deep: a warm halo round the circle, the light gathering
+  float edgeR = uV == 0 ? Rb : .47;
+  col += mix( CREAM, GOLD, .6 ) * exp( - ( r - edgeR ) * 30. ) * step( edgeR, r ) * .12 * d;
+  col *= 1. + .03 * pulse;
+  // ---- the journey (the reference's arc): pigments -> denser, saturated -> liquid relief -> hue turning, solarized, inverted ----
+  float J = uJ, inside = step( r, uV == 0 ? Rb : .47 );
+  float lum = dot( col, vec3( .3, .59, .11 ) );
+  col = max( mix( vec3( lum ), col, 1. + .9 * smoothstep( .2, .6, J ) ), 0. );   // saturation
+  float melt = smoothstep( .4, .75, J ) * inside;   // liquid relief: the picture's own brightness as height, lit like ON's metal
+  if ( melt > .01 ) {
+    float hgt = dot( col, vec3( .3, .59, .11 ) );
+    vec3 nm = normalize( vec3( - dFdx( hgt ), - dFdy( hgt ), .012 ) );
+    vec3 rf = reflect( vec3( 0., 0., -1. ), nm );
+    float spec = pow( max( dot( rf, normalize( vec3( -.45, .6, .65 ) ) ), 0. ), 12. ), envl = smoothstep( -.4, 1., rf.y );
+    col = mix( col, col * ( .5 + .7 * envl ) + vec3( 1., .97, .9 ) * spec * .8, melt * .85 );
+  }
+  float turn = smoothstep( .6, 1., J ) * inside;   // the hues turn with the flow, in bands that move inward
+  if ( turn > .01 ) {
+    float a = turn * ( gFlow * .25 + lum * 4. + log( max( r, .01 ) ) * 3. );
+    vec3 k = vec3( .57735 ); col = col * cos( a ) + cross( k, col ) * sin( a ) + k * dot( k, col ) * ( 1. - cos( a ) );
+    float band = smoothstep( .45, .55, fract( log( max( r, .01 ) ) * 2. - gFlow * .05 + lum ) );
+    col = mix( col, mix( col, 1. - col, .85 ), band * smoothstep( .8, 1., J ) );   // solarized: some bands invert
+    col = max( col, 0. );
+  }
+  O = vec4( pow( col, vec3( .4545 ) ), 1. );
+}`;
+
+const cv = document.getElementById('c'), gl = cv.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false });
+const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); throw new Error('shader'); } return s; };
+const pr = gl.createProgram();
+gl.attachShader(pr, sh(gl.VERTEX_SHADER, '#version 300 es\nin vec2 a; void main() { gl_Position = vec4( a, 0., 1. ); }'));
+gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const L = Object.fromEntries(['uRes', 'uOff', 'uTime', 'uD', 'uBeats', 'uV', 'uPal', 'uJ'].map((k) => [k, gl.getUniformLocation(pr, k)]));
+
+const $ = (id) => document.getElementById(id);
+const ui = () => { $('name').textContent = FORMS[S.v][0]; $('idx').textContent = `${S.v + 1}/${FORMS.length}`; $('desc').textContent = FORMS[S.v][1];
+  $('d').value = S.d; $('dv').textContent = S.d.toFixed(2); $('bpm').value = S.bpm; $('bv').textContent = S.bpm + ' bpm'; $('auto').checked = S.auto; $('pal').value = S.pal; $('j').value = S.j; $('jv').textContent = S.j.toFixed(2); $('autoJ').checked = S.autoJ; };
+$('j').oninput = (e) => { S.j = +e.target.value; S.autoJ = false; ui(); };
+$('autoJ').onchange = (e) => { S.autoJ = e.target.checked; };
+$('d').oninput = (e) => { S.d = +e.target.value; S.auto = false; ui(); };
+$('bpm').oninput = (e) => { S.bpm = +e.target.value; ui(); };
+$('pal').onchange = (e) => { S.pal = +e.target.value; };
+$('auto').onchange = (e) => { S.auto = e.target.checked; S.autoT = 0; };
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.key >= '1' && e.key <= String(FORMS.length)) S.v = +e.key - 1;
+  else if (e.key === ' ') S.pause = !S.pause; else if (e.key === 'a') { S.auto = !S.auto; S.autoT = 0; }
+  ui();
+});
+let idleT; addEventListener('mousemove', () => { document.body.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('idle'), 2500); });
+
+function draw(x, y, w, h, v, d, time, beats, pal, j) {
+  gl.uniform1f(L.uJ, j);
+  gl.viewport(x, y, w, h); gl.uniform2f(L.uRes, w, h); gl.uniform2f(L.uOff, x, y);
+  gl.uniform1f(L.uTime, time); gl.uniform1f(L.uD, d); gl.uniform1f(L.uBeats, beats); gl.uniform1i(L.uV, v); gl.uniform1i(L.uPal, pal);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function size() { const k = Math.min(devicePixelRatio, 1.5); cv.width = innerWidth * k | 0; cv.height = innerHeight * k | 0; }
+size(); addEventListener('resize', size);
+
+if (sheet) {   // rows: forms, columns: palettes
+  const forms = (Q.get('forms') || '0,1,2,3,4,5').split(',').map(Number), js = (Q.get('js') || '0,.4,.7,1').split(',').map(Number);
+  const T = +(Q.get('time') || 21), W = cv.width / js.length | 0, H = cv.height / forms.length | 0;
+  forms.forEach((v, r) => js.forEach((j, c) => draw(c * W, cv.height - (r + 1) * H, W, H, v, S.d, T, T * S.bpm / 60, S.pal, j)));
+  gl.finish(); window.__done = true;
+} else {
+  ui(); let last = performance.now(), clock = 0, beats = 0; S.autoT = 0;
+  const loop = (now) => {
+    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    if (!S.pause) {
+      clock += dt; beats += dt * S.bpm / 60;
+      if (S.auto) { S.autoT += dt; const t = S.autoT % 110, want = t < 45 ? t / 45 : t < 80 ? 1 : t < 82 ? .15 : .15 + (t - 82) / 28 * .3;
+        S.d += (want - S.d) * (1 - Math.exp(-dt / (want < S.d ? .6 : 3))); $('d').value = S.d; $('dv').textContent = S.d.toFixed(2); }
+    }
+    if (S.autoJ && !S.pause) { S.j = (clock % 200) < 180 ? Math.min(1, (clock % 200) / 180) : 1 - ((clock % 200) - 180) / 20; $('j').value = S.j; $('jv').textContent = S.j.toFixed(2); }
+    draw(0, 0, cv.width, cv.height, S.v, S.d, clock, beats, S.pal, S.j);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+</script>
+</body></html>

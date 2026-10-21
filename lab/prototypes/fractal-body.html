@@ -1,0 +1,301 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Fractal Body</title>
+<!-- lab: iterations of a body that leaves its sphere — the shell becomes a fractal, or pure geometry, or light.
+     Keys: 1-8 form, space pause, a auto rise, e cycle ether. URL: ?v=0..7&t=0..1&e=0..1&time=s&sheet=1 (contact sheet). -->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px/1.4 system-ui, sans-serif; color: #cfd3dc; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #ui { position: fixed; left: 12px; top: 10px; background: #0009; padding: 8px 10px; border-radius: 6px; max-width: 340px; }
+  #ui b { color: #fff; } #ui input { width: 180px; vertical-align: middle; } #ui .k { opacity: .6; }
+  body.sheet #ui { display: none; }
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div><b id="name"></b> <span class="k" id="idx"></span></div>
+  <div id="desc" class="k"></div>
+  <div>rise <input id="t" type="range" min="0" max="1" step=".01"> <span id="tv"></span></div>
+  <div>ether <input id="e" type="range" min="0" max="1" step=".01"> <span id="ev"></span></div>
+  <div class="k">1-8 form · a auto rise · space pause</div>
+</div>
+<script>
+const FORMS = [
+  ['Bloom', 'Mandelbulb: the shell swells into a power-8 bulb, its power breathing'],
+  ['Crystal', 'Icosahedral fold (KIFS): the body re-forms as a self-similar crystal, symmetric about its nucleus'],
+  ['Foam', 'Apollonian inversion carved into the sphere: lace of spheres inside spheres'],
+  ['Sponge', 'Menger carving in spherical shells: the metal is cut away recursively, then spills past its own edge'],
+  ['Julia', 'The quaternion Julia nucleus grows until it is the whole body'],
+  ['Geometry', 'Nested Platonic wireframes, each 1/φ the last, counter-rotating: a body of pure lines'],
+  ['Coral', 'A radial tree: from the nucleus, branches in twelve directions, each tip branching again, past the shell'],
+  ['Lattice', 'Nested geodesic spheres of great circles, each 1/φ the last, counter-rotating, the metal panes thinning away'],
+];
+const Q = new URLSearchParams(location.search);
+const S = { v: +(Q.get('v') ?? 0), t: +(Q.get('t') ?? .85), e: +(Q.get('e') ?? 0), auto: Q.get('t') == null, pause: false, time: +(Q.get('time') ?? 0) };
+const sheet = Q.get('sheet') === '1'; if (sheet) document.body.classList.add('sheet');
+
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform vec2 uOff; uniform float uTime, uT, uE; uniform int uV;
+out vec4 O;
+const float PHI = 1.618034, R = .62;
+mat2 rot( float a ) { float c = cos( a ), s = sin( a ); return mat2( c, - s, s, c ); }
+float smin( float a, float b, float k ) { float h = max( k - abs( a - b ), 0. ) / k; return min( a, b ) - h * h * k * .25; }
+float h13( vec3 p ) { return fract( sin( dot( p, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 ); }
+float vnz( vec3 p ) { vec3 i = floor( p ), f = fract( p ); f = f * f * ( 3. - 2. * f );
+  return mix( mix( mix( h13( i ), h13( i + vec3( 1, 0, 0 ) ), f.x ), mix( h13( i + vec3( 0, 1, 0 ) ), h13( i + vec3( 1, 1, 0 ) ), f.x ), f.y ),
+              mix( mix( h13( i + vec3( 0, 0, 1 ) ), h13( i + vec3( 1, 0, 1 ) ), f.x ), mix( h13( i + vec3( 0, 1, 1 ) ), h13( i + vec3( 1, 1, 1 ) ), f.x ), f.y ), f.z ); }
+float rise() { return smoothstep( 0., 1., uT ); }
+
+// the being as it is now: a hollow metal shell with drifting thin spots
+float shell( vec3 p ) {
+  vec3 n = normalize( p + 1e-5 );
+  float th = .05 + .03 * ( sin( n.x * 2.3 + uTime * .17 ) * sin( n.y * 2.1 - uTime * .13 + 1.7 ) + sin( n.z * 2.6 + uTime * .11 + 3. ) * sin( n.x * 1.7 - uTime * .15 + .6 ) );
+  return abs( length( p ) - R ) - th;
+}
+
+float trap;   // orbit trap, 0..1-ish, for colour
+
+float bulb( vec3 p ) {
+  vec3 z = p; float dr = 1., r = 0., n = 8. - 2. * ( .5 + .5 * sin( uTime * .23 ) ) * ( 1. - uT ); trap = 1e9;
+  for ( int i = 0; i < 8; i++ ) {
+    r = length( z ); if ( r > 2. ) break;
+    float th = acos( clamp( z.y / r, -1., 1. ) ) + uTime * .05, ph = atan( z.z, z.x );
+    dr = pow( r, n - 1. ) * n * dr + 1.;
+    z = pow( r, n ) * vec3( sin( th * n ) * cos( ph * n ), cos( th * n ), sin( th * n ) * sin( ph * n ) ) + p;
+    trap = min( trap, dot( z, z ) );
+  }
+  trap = clamp( sqrt( trap ) * .6, 0., 1. );
+  return .5 * log( r ) * r / dr;
+}
+
+// icosahedral folding planes (Knighty)
+const vec3 N1 = vec3( -.80901699, .30901699, .5 ), N2 = vec3( .30901699, -.5, .80901699 );
+const vec3 VX = vec3( .26287, .95106, .16246 );   // the icosahedron's vertex inside the folded cone
+vec3 icoFold( vec3 p ) {
+  for ( int k = 0; k < 3; k++ ) { p = abs( p ); p -= 2. * min( 0., dot( p, N1 ) ) * N1; p -= 2. * max( 0., dot( p, N2 ) ) * N2; }
+  return p;
+}
+vec3 nearV( vec3 p ) {   // the nearest of the icosahedron's 12 vertices (6 axes, either sign)
+  vec3 V[ 6 ] = vec3[ 6 ]( vec3( 0., .52573, .85065 ), vec3( 0., -.52573, .85065 ), vec3( .52573, .85065, 0. ), vec3( -.52573, .85065, 0. ), vec3( .85065, 0., .52573 ), vec3( .85065, 0., -.52573 ) );
+  vec3 b = V[ 0 ]; float m = -1.;
+  for ( int i = 0; i < 6; i++ ) { float d = dot( p, V[ i ] ); if ( abs( d ) > m ) { m = abs( d ); b = V[ i ] * sign( d ); } }
+  return b;
+}
+float crystal( vec3 p ) {   // scale φ²: the Sierpinski icosahedron, each vertex a smaller copy
+  float s = 1.; trap = 1e9;
+  for ( int i = 0; i < 3; i++ ) {
+    p = p * 2.618 - nearV( p ) * 1.618;
+    p.xy *= rot( .2 * sin( uTime * .21 + float( i ) ) * uT );
+    s *= 2.618; trap = min( trap, length( p ) );
+  }
+  trap = clamp( trap * .5, 0., 1. );
+  return ( ( abs( p.x ) + abs( p.y ) + abs( p.z ) ) * .57735 - .5 - .08 * sin( uTime * .4 ) ) / s;
+}
+
+float apollo( vec3 p ) {
+  float sc = 1., k0 = 1.15 + .1 * sin( uTime * .2 ); trap = 1e9;
+  for ( int i = 0; i < 7; i++ ) {
+    p = -1. + 2. * fract( .5 * p + .5 );
+    float r2 = dot( p, p ); trap = min( trap, r2 );
+    float k = k0 / r2; p *= k; sc *= k;
+  }
+  trap = clamp( trap, 0., 1. );
+  return .25 * abs( p.y ) / sc;
+}
+
+float sponge( vec3 p, float d ) {
+  float s = 1.;
+  for ( int i = 0; i < 4; i++ ) {
+    vec3 a = mod( p * s, 2. ) - 1.; s *= 3.;
+    vec3 r = abs( 1. - 3. * abs( a ) );
+    float c = ( min( max( r.x, r.y ), min( max( r.y, r.z ), max( r.z, r.x ) ) ) - 1. ) / s;
+    d = max( d, c );
+  }
+  return d;
+}
+
+float julia( vec3 p ) {
+  vec4 c = vec4( -.2, .6, .2, -.2 ) + .12 * vec4( sin( uTime * .11 ), cos( uTime * .07 ), sin( uTime * .09 + 1. ), cos( uTime * .13 ) );
+  vec4 q = vec4( p, .15 * sin( uTime * .07 ) ); float dr = 1.; trap = 1e9;
+  for ( int i = 0; i < 10; i++ ) {
+    dr = 2. * length( q ) * dr;
+    q = vec4( q.x * q.x - dot( q.yzw, q.yzw ), 2. * q.x * q.yzw ) + c;
+    trap = min( trap, dot( q, q ) );
+    if ( dot( q, q ) > 16. ) break;
+  }
+  trap = clamp( sqrt( trap ), 0., 1. );
+  float r = length( q ); return .5 * r * log( r ) / max( dr, 1e-6 );
+}
+
+// GDF normals (hg_sdf): icosahedron 3..12, dodecahedron 13..18
+const vec3 G[ 16 ] = vec3[ 16 ](
+  vec3( .577350, .577350, .577350 ), vec3( -.577350, .577350, .577350 ), vec3( .577350, -.577350, .577350 ), vec3( .577350, .577350, -.577350 ),
+  vec3( 0., .356822, .934172 ), vec3( 0., -.356822, .934172 ), vec3( .934172, 0., .356822 ), vec3( -.934172, 0., .356822 ), vec3( .356822, .934172, 0. ), vec3( -.356822, .934172, 0. ),
+  vec3( 0., .850651, .525731 ), vec3( 0., -.850651, .525731 ), vec3( .525731, 0., .850651 ), vec3( -.525731, 0., .850651 ), vec3( .850651, .525731, 0. ), vec3( -.850651, .525731, 0. ) );
+// distance to the edges of a convex polyhedron: where the two largest face planes meet
+float wire( vec3 p, float r, int a, int b, float w ) {
+  float d1 = -1e9, d2 = -1e9;
+  for ( int i = 0; i < 16; i++ ) { if ( i < a || i >= b ) continue; float v = abs( dot( p, G[ i ] ) ); if ( v > d1 ) { d2 = d1; d1 = v; } else if ( v > d2 ) d2 = v; }
+  float sd = d1 - r;
+  return max( length( vec2( max( sd, - .2 ), d2 - r ) ), abs( sd ) ) - w;
+}
+float geometry( vec3 p ) {
+  float d = 1e9, r = R * mix( .95, 1.15, uT ); trap = 0.;
+  for ( int k = 0; k < 6; k++ ) {
+    float fk = float( k ), sg = mod( fk, 2. ) * 2. - 1.;
+    vec3 q = p; q.xz *= rot( sg * uTime * ( .11 + .04 * fk ) ); q.xy *= rot( sg * uTime * .07 + fk );
+    float e = ( k % 2 == 0 ) ? wire( q, r, 0, 10, .006 + .004 * r ) : wire( q, r * .87, 10, 16, .006 + .004 * r );
+    if ( e < d ) { d = e; trap = fk / 6.; }
+    r /= PHI;
+  }
+  d = min( d, length( p ) - .035 );   // the nucleus
+  return d;
+}
+
+float coral( vec3 p ) {   // from the nucleus, branches toward the twelve vertices; each tip branches again: radial, never up or down
+  float d = 1e9, sc = 1., L = mix( .3, .55, uT ); trap = 0.;
+  for ( int i = 0; i < 4; i++ ) {
+    vec3 v = nearV( p );
+    float h = clamp( dot( p, v ), 0., L ), e = ( length( p - v * h ) - .055 * ( 1. - .5 * h / L ) ) / sc;
+    if ( e < d ) { d = e; trap = float( i ) / 5.; }
+    p -= v * L; p.xy *= rot( .25 * sin( uTime * .13 + float( i ) ) ); p *= 2.8; sc *= 2.8;
+  }
+  return d;
+}
+
+float lattice( vec3 p ) {   // great circles of the icosahedral mirrors on nested spheres; the panes between them thin away as it rises
+  float d = 1e9, r = R * mix( 1., 1.12, uT ); trap = 0.;
+  for ( int k = 0; k < 4; k++ ) {
+    float fk = float( k ), sg = mod( fk, 2. ) * 2. - 1.;
+    vec3 q = p; q.xz *= rot( sg * uTime * ( .07 + .03 * fk ) + fk ); q.xy *= rot( sg * uTime * .05 + 2. * fk );
+    vec3 f = icoFold( q ), g = icoFold( vec3( q.xy * rot( .628318 ), q.z ) );   // a second set of circles, a tenth of a turn round
+    float lines = min( min( f.x, min( f.y, f.z ) ), min( abs( dot( f, N1 ) ), abs( dot( f, N2 ) ) ) );
+    float lines2 = min( min( g.x, min( g.y, g.z ) ), min( abs( dot( g, N1 ) ), abs( dot( g, N2 ) ) ) );
+    float shellD = abs( length( p ) - r ), w = .0035 + .002 * r;
+    float web = length( vec2( shellD, max( min( lines, lines2 * 1.6 ), 0. ) ) ) - w;
+    float pane = shellD - .006 * ( 1. - uT );
+    float e = k == 0 ? min( web, pane ) : web;
+    if ( e < d ) { d = e; trap = fk / 4. + ( lines < lines2 ? 0. : .12 ); }
+    r /= PHI;
+  }
+  return min( d, length( p ) - .03 );
+}
+
+float body( vec3 p ) {
+  float k = rise(), d0 = shell( p ), r = length( p );
+  if ( uV == 0 ) { float s = R / 1.1 * mix( .9, 1.15, k ); return mix( d0, bulb( p / s ) * s, k ); }
+  if ( uV == 1 ) { float s = R * mix( .5, 1.1, k ); return min( mix( d0, max( d0, -( r - R * 2. ) ), 0. ) + .22 * k, crystal( p / s ) * s ); }
+  if ( uV == 2 ) { float s = .16, a = apollo( p / s + vec3( .3, .1, .7 ) ) * s; float bound = r - R * mix( 1., 1.25, k );
+    return mix( d0, max( max( a, bound ), -( r - R * .25 ) ), k ); }
+  if ( uV == 3 ) { vec3 q = p; q.xz *= rot( uTime * .05 ); float solid = mix( d0, r - R * mix( 1., 1.3, k ), k );
+    float sp = sponge( q * mix( 1.4, 1.1, k ), solid * mix( 1.4, 1.1, k ) ) / mix( 1.4, 1.1, k );
+    return mix( d0, max( sp, -( r - R * .5 * k ) ), k ); }
+  if ( uV == 4 ) { float s = R / 1.05 * mix( .3, 1.1, k ); float j = julia( p / s ) * s; return mix( smin( d0, j, .05 ), j, k * k ); }
+  if ( uV == 5 ) { float g = geometry( p ); return mix( smin( d0, g, .02 ), g, k ); }
+  if ( uV == 6 ) { float s = R * 1.25; return smin( d0 + .22 * k, coral( p / s ) * s, .03 ); }
+  return mix( d0, lattice( p ), k );
+}
+vec3 nrm( vec3 p ) { vec2 e = vec2( 1., -1. ) * .0012;
+  return normalize( e.xyy * body( p + e.xyy ) + e.yyx * body( p + e.yyx ) + e.yxy * body( p + e.yxy ) + e.xxx * body( p + e.xxx ) ); }
+
+vec3 env( vec3 r ) {   // after the page's env(): a dark studio, a key band, a rim
+  vec3 sky = mix( vec3( .018, .02, .038 ), vec3( .24, .24, .31 ), smoothstep( -.7, 1., r.y ) );
+  sky += vec3( 1., .99, .96 ) * ( smoothstep( .08, 0., abs( r.y - .5 ) ) * .85 + pow( max( dot( r, normalize( vec3( -.48, .62, .62 ) ) ), 0. ), 28. ) * .65 );
+  sky += vec3( .82, .88, 1. ) * smoothstep( .05, 0., abs( r.x + .62 ) ) * smoothstep( -.2, .4, r.y ) * .5;
+  return sky;
+}
+vec3 pal( float x ) { return .5 + .5 * cos( 6.2831853 * ( x + vec3( 0., .33, .67 ) ) ); }
+
+void main() {
+  vec2 uv = ( gl_FragCoord.xy - uOff - .5 * uRes ) / uRes.y;
+  vec3 ro = vec3( 0., 0., 3.4 ), rd = normalize( vec3( uv, -1.9 ) );
+  float a = uTime * .1; ro.xz *= rot( a ); rd.xz *= rot( a ); ro.yz *= rot( .25 ); rd.yz *= rot( .25 );
+  float t = 0., hit = -1., glow = 0., gtr = 0., tClose = - dot( ro, rd ), steps = 0.;
+  float stepK = uV == 2 || uV == 3 ? .7 : .85;
+  for ( int i = 0; i < 220; i++ ) {
+    vec3 p = ro + rd * t; float d = body( p );
+    float g = exp( - max( d, 0. ) * 38. ) * .045; glow += g; gtr += g * trap;
+    if ( d < .0007 * ( 1. + t ) ) { hit = t; break; }
+    t += d * stepK; steps += 1.; if ( t > 6. ) break;
+  }
+  vec3 col = vec3( 0. ); float alpha = 0.;
+  // the inner light, seen where the ray passes the nucleus before any metal
+  float core = exp( - length( cross( ro, rd ) ) * 6. ) * ( hit < 0. || hit > tClose ? 1. : 0. );
+  vec3 light = vec3( 1., .78, .5 );
+  if ( hit > 0. ) {
+    vec3 p = ro + rd * hit, n = nrm( p ), rf = reflect( rd, n );
+    float fr = .04 + .96 * pow( 1. - max( dot( n, - rd ), 0. ), 5. );
+    float ao = clamp( 1. - steps / 110., .25, 1. );
+    vec3 metal = mix( vec3( .9, .92, .97 ), vec3( .95, .93, .9 ) * pal( trap * .6 + .1 ), .25 * rise() );
+    vec3 surf = env( rf ) * metal * ( .55 + .45 * fr ) * ao * 1.35;
+    surf += light * .9 * pow( max( dot( n, normalize( - p ) ), 0. ), 2. ) * exp( - length( p ) * 2. ) * ao;   // lit from within
+    // ether: the surface keeps only its silhouette and edges; the rest is light
+    float rim = pow( 1. - max( dot( n, - rd ), 0. ), 2.5 );
+    vec3 ghost = ( pal( trap * .8 + .55 + .05 * uTime ) * .6 + .5 ) * rim * 1.2 + env( rf ) * .15;
+    col = mix( surf, ghost, uE ); alpha = mix( 1., rim * .8 + .15, uE );
+  }
+  if ( uE > .01 ) {   // ether: pass through the body, gathering light at every surface crossed
+    float tt = max( tClose - 1.6, 0. ), acc = 0.; vec3 xr = vec3( 0. );
+    for ( int i = 0; i < 140; i++ ) {
+      vec3 p = ro + rd * tt; float d = body( p ), ad = abs( d );
+      float g = exp( - ad * 160. ) * .03 + exp( - ad * 30. ) * .0025;
+      xr += g * ( pal( trap * .8 + .55 + .03 * uTime + length( p ) * .6 ) * .7 + .45 ) * ( 1. - acc );
+      acc = min( acc + g * .6, .85 );
+      tt += max( ad * .8, .006 ); if ( tt > tClose + 1.6 ) break;
+    }
+    col = mix( col, xr * 1.3 + col * .1, uE );
+  }
+  vec3 haze = ( pal( gtr / max( glow, 1e-4 ) * .8 + .55 + .05 * uTime ) * .5 + .5 ) * glow;
+  col += haze * mix( .05, .35, uE ) * ( .3 + rise() );
+  col += light * core * mix( .8, 1.4, uE ) * ( 1. - .5 * rise() * ( 1. - uE ) );
+  col = 1. - exp( - col * 1.2 );
+  O = vec4( pow( col, vec3( .4545 ) ), 1. );
+}`;
+
+const cv = document.getElementById('c'), gl = cv.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false });
+const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); throw new Error('shader'); } return s; };
+const pr = gl.createProgram();
+gl.attachShader(pr, sh(gl.VERTEX_SHADER, '#version 300 es\nin vec2 a; void main() { gl_Position = vec4( a, 0., 1. ); }'));
+gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const L = Object.fromEntries(['uRes', 'uOff', 'uTime', 'uT', 'uE', 'uV'].map((k) => [k, gl.getUniformLocation(pr, k)]));
+
+const $ = (id) => document.getElementById(id);
+const ui = () => { $('name').textContent = FORMS[S.v][0]; $('idx').textContent = `${S.v + 1}/${FORMS.length}`; $('desc').textContent = FORMS[S.v][1];
+  $('t').value = S.t; $('e').value = S.e; $('tv').textContent = S.t.toFixed(2); $('ev').textContent = S.e.toFixed(2); };
+$('t').oninput = (e) => { S.t = +e.target.value; S.auto = false; ui(); };
+$('e').oninput = (e) => { S.e = +e.target.value; ui(); };
+addEventListener('keydown', (e) => {
+  if (e.key >= '1' && e.key <= String(FORMS.length)) S.v = +e.key - 1;
+  else if (e.key === ' ') S.pause = !S.pause; else if (e.key === 'a') S.auto = !S.auto;
+  else if (e.key === 'e') S.e = S.e < .3 ? .5 : S.e < .8 ? 1 : 0;
+  ui();
+});
+
+function draw(x, y, w, h, v, t, e, time) {
+  gl.viewport(x, y, w, h); gl.uniform2f(L.uRes, w, h); gl.uniform2f(L.uOff, x, y);
+  gl.uniform1f(L.uTime, time); gl.uniform1f(L.uT, t); gl.uniform1f(L.uE, e); gl.uniform1i(L.uV, v);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function size() { const d = Math.min(devicePixelRatio, 1.5); cv.width = innerWidth * d | 0; cv.height = innerHeight * d | 0; }
+size(); addEventListener('resize', size);
+
+if (sheet) {   // rows: forms (Q forms=0,1,..), columns: (rise, ether) pairs
+  const forms = (Q.get('forms') || '0,1,2,3,4,5,6,7').split(',').map(Number);
+  const cols = (Q.get('cols') || '0:0,.5:0,1:0,1:.6,1:1').split(',').map((s) => s.split(':').map(Number));
+  const W = cv.width / cols.length | 0, H = cv.height / forms.length | 0;
+  forms.forEach((v, r) => cols.forEach(([t, e], c) => draw(c * W, cv.height - (r + 1) * H, W, H, v, t, e, S.time)));
+  gl.finish(); window.__done = true;
+} else {
+  ui(); let last = performance.now(), clock = S.time;
+  const loop = (now) => {
+    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    if (!S.pause) { clock += dt; if (S.auto) { S.t = .5 - .5 * Math.cos(clock * .25); $('t').value = S.t; $('tv').textContent = S.t.toFixed(2); } }
+    draw(0, 0, cv.width, cv.height, S.v, S.t, S.e, clock);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+</script>
+</body></html>

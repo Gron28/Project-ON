@@ -1,0 +1,16 @@
+.runtime/
+.setup/
+data/raw/
+node_modules/
+# the local word set and its readings: never published (tests/plain.test.mjs checks the rest)
+being/local/
+# third-party pictures kept for reference
+inspo/
+.atl/
+# lab output: screenshots, recordings, logs, page backups; the harnesses themselves stay
+scratch/*
+!scratch/*.cjs
+!scratch/*.mjs
+!scratch/*.sh
+!scratch/*.py
+!scratch/README.md

@@ -1,0 +1,484 @@
+// being/mind.mjs - the being's inner life. Pure module (no DOM), stepped once per rendered frame.
+//
+// Every state variable is a published mechanism (see lab/NOTEBOOK.md section 2). Nothing here maps a sound feature to a
+// shape: the body reads these states, and these states are dynamics driven by the ear.
+//
+//   startle      brainstem reflex with habituation, sensitization and prepulse inhibition (Davis 1982; Groves & Thompson
+//                1970; Blumenthal 2005). It flinches at the first big hit and learns to ignore the 50th.
+//   resonance    a bank of critical Hopf oscillators 0.5-8 Hz driven by the ear's onsets (Large et al. 2010, 2015) and a
+//                motor oscillator with its own spontaneous tempo f0 that locks to the felt pulse and drifts back home in
+//                silence (ASHLE, Roman et al. 2023). Its phase is the body's pulse, its lock is "being in the groove".
+//   motor pop.   the motor follows a population of coupled phase oscillators over eight body regions, forced by the felt
+//                pulse (Kuramoto; Childs & Strogatz 2008); lock is that population's order parameter, so it snaps in and
+//                lets go late (hysteresis) and fades in silence on its own. A cross pulse can hold part of the body
+//                (nonlocal coupling, Abrams & Strogatz 2004). See being/kuramoto.mjs.
+//   expectation  a 16-slot onset model on the being's own pulse grid (PPM-like, with forgetting): surprise (information
+//                content) and uncertainty (entropy) per slot (Pearce 2018; Harrison et al. 2020).
+//   value        Cheung et al. 2019 pleasure surface (surprise x uncertainty), groove inverted-U on syncopation around its own
+//                preferred level s* (Witek et al. 2014), learning progress as curiosity (Oudeyer 2007), roughness as aversion
+//                (Arnal 2015). Dopamine: phasic = value prediction error (Schultz 1997), anticipatory = build-up x value
+//                (Salimpoor 2011), tonic = slow average (Niv 2007).
+//   affect       arousal and valence as Ornstein-Uhlenbeck processes around personal home bases (Kuppens 2010), valence also
+//                fed by -dF/dt of smoothed surprise (Joffily & Coricelli 2013); mood integrates prediction errors (Eldar 2016);
+//                energy drains with dancing and recovers in calm (Keramati & Gutkin 2014); boredom when nothing is left to learn.
+//   contagion    the music's own perceived arousal and valence (regressors trained on human ratings: emoMusic, DEAM) set
+//                where arousal and valence settle: the being catches the music's expression (emotional contagion,
+//                Juslin & Vastfjall 2008, BRECVEMA). Loudness alone does not: mastered music is loud whatever it expresses.
+//                Without that reading (models not loaded) a bottom-up estimate stands in, scaled so it cannot saturate.
+//
+// Decisions it makes (events): 'startle' (amount), 'reform' (bored: grows a new form), 'chill', 'recoil' (disappointment).
+
+import { createPopulation, NREG, REGION_DIRS } from './kuramoto.mjs';
+
+const TAU = Math.PI * 2;
+const clamp =(x, a, b) => (x < a ? a : x > b ? b : x);
+const clamp01 = (x) => clamp(x, 0, 1);
+
+export function mulberry32(a) {
+  return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+/** The innate seed: who this being is before it hears anything. */
+export function traitsFor(seed) {
+  const r = mulberry32(seed);
+  return {
+    seed,
+    f0: 1.6 + 0.8 * r(),            // spontaneous tempo, Hz (96-144 bpm)
+    aHome: 0.2 + 0.2 * r(),         // arousal home base
+    vHome: -0.1 + 0.3 * r(),        // valence home base
+    sStar: 0.25 + 0.2 * r(),        // preferred syncopation (0..1 scale of the index below)
+    gDA: 0.6 + 0.7 * r(),           // how much music moves it (dopamine gain)
+    looseness: 0.5 + r(),           // how easily it falls out of the groove
+    hue: r(),                       // its own colour, from which valence bends warm or cold
+    restless: 0.5 + r(),            // how quickly boredom builds
+  };
+}
+
+export function createMind(traits, { earUnits = 28, earCF = null } = {}) {
+  const T = traits;
+  // ---- resonance bank: critical oscillators, 12 per octave, 0.5-8 Hz ----------------------------------
+  const NR = 49, RF = Float64Array.from({ length: NR }, (_, i) => 0.5 * 2 ** (i / 12));
+  const rr = new Float64Array(NR), ri = new Float64Array(NR), ramp = new Float64Array(NR);
+  // motor oscillator (personal tempo), following the mean phase of a motor population of coupled oscillators over eight
+  // body regions (being/kuramoto.mjs); part of the body (around a cross axis of its own) can take a cross pulse
+  let phM = 0, fM = T.f0, motorCycles = 0;
+  const pop = createPopulation({ seed: (T.seed ^ 0x2545f491) >>> 0 });
+  const wMain = new Float64Array(NREG).fill(1), wCross = new Float64Array(NREG), drives = [];
+  {
+    const r = mulberry32((T.seed ^ 0x68e31da4) >>> 0), z = 2 * r() - 1, a = TAU * r(), q = Math.sqrt(1 - z * z), ax = [q * Math.cos(a), q * Math.sin(a), z];
+    for (let g = 0; g < NREG; g++) { const d = REGION_DIRS[g]; wCross[g] = clamp01(0.5 + 1.5 * (d[0] * ax[0] + d[1] * ax[1] + d[2] * ax[2])); }
+  }
+  let order = 0, cross = 0, crossD = null;
+  const uMain = { i: -1, v: 0 }, uCross = { i: -1, v: 0 };   // the felt pulses' phases, unwrapped
+  const regions = { phase: new Float32Array(NREG), coh: new Float32Array(NREG), cross: new Float32Array(NREG) };
+  // ---- startle -------------------------------------------------------------------------------------------
+  let onsetLevel = 0.05, H = 1, sens = 0, lastOnsetT = -1e9, lastPrepulseT = -1e9, lastStartleT = -1e9;
+  let peakExp = 0.4, lastHitT = -1e9, prevO = 0, rising = false;   // expected size of a hit, learned from the hits themselves
+  // ---- expectation on a 16-slot grid ------------------------------------------------------------------------
+  const P = new Float64Array(16).fill(0.3);        // p(onset in slot)
+  let slotIdx = -1, slotOnset = 0, IC = 0, Hent = 1, icFast = 1, icSlow = 1, F = 1, Fprev = 1, dF = 0;
+  const syncW = [0, 3, 2, 3, 1, 3, 2, 3, 1, 3, 2, 3, 1, 3, 2, 3];   // metric depth: downbeat 0 ... sixteenths 3 (Witek-style)
+  let syncNum = 0, syncDen = 1e-6, sync = 0.3;
+  // z-scoring of surprise and uncertainty over ~1 min
+  let sM = 1, sV = 0.25, uM = 0.8, uV = 0.05;
+  // ---- value, dopamine, affect --------------------------------------------------------------------------
+  let V = 0, daPh = 0, daAnt = 0, daTon = 0, h = 0;
+  let A = T.aHome, Val = T.vHome, mood = 0, energy = 0.8, bored = 0, confused = 0;
+  let mA = 0.3, mV = 0, hasM = 0;
+  let heard = 0, quietFor = 0;                        // seconds of sound since the last silence: a build-up needs a context (Huron 2006, ITPRA)                     // contagion: the music's perceived arousal and valence, and trust in it
+  let lock = 0, groove = 0, lastReform = 0, lastChill = -1e9, buildSeen = -1e9, trackerPull = 0, beatError = 0;
+  let time = 0;
+  let ringT = 0;
+  const pitch = new Float32Array(12), pitchPrior = new Float32Array(12).fill(1 / 12);
+  let icHarm = 0, hHarm = 0, harmFast = 0, harmSlow = 0;
+  let tissueCoh = 0, proprioStrain = 0;
+  // ear unit -> pitch class (nearest semitone of its centre frequency, A = 440; defaults to the 55 Hz 1/4-octave grid)
+  const cfList = earCF || Float64Array.from({ length: earUnits }, (_, k) => 55 * 2 ** (k / 4));
+  const pcOf = Array.from(cfList, (f) => ((Math.round(12 * Math.log2(f / 440)) % 12) + 12 + 9) % 12);
+  const events = [];
+  const life = { born: Date.now(), listenSeconds: 0, grooveSeconds: 0, chills: 0, reforms: 0 };
+  const noise = mulberry32((T.seed ^ 0x5bd1e995) >>> 0);
+  const gauss = () => { let u = 0; while (!u) u = noise(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * noise()); };
+
+  const state = {
+    traits: T, events, pitch,
+    get arousal() { return A; }, get valence() { return Val; }, get mood() { return mood; }, get energy() { return energy; },
+    get bored() { return bored; }, get confused() { return confused; }, get habituation() { return H; },
+    get lock() { return lock; }, get groove() { return groove; }, get sync() { return sync; }, get beatError() { return beatError; },
+    get surprise() { return F; }, get dF() { return dF; }, get IC() { return IC; }, get entropy() { return Hent; },
+    get harmonicSurprise() { return icHarm; }, get harmonicEntropy() { return hHarm; },
+    get tissueCoherence() { return tissueCoh; }, get proprioStrain() { return proprioStrain; },
+    get musicArousal() { return mA; }, get musicValence() { return mV; }, get contagion() { return hasM; },
+    get daPhasic() { return daPh; }, get daAnticipation() { return daAnt; }, get daTonic() { return daTon; },
+    get pulseHz() { return fM; }, get pulsePhase() { return phM / TAU; }, get pulseCount() { return motorCycles; }, get pulsePhaseRaw() { return phM / TAU; }, get pulseCountRaw() { return motorCycles; },
+    get startle() { return Math.max(0, 1 - (time - lastStartleT) / 0.25); },
+    resonance: ramp, resonanceHz: RF,
+    regions, get order() { return order; }, get crossPulse() { return cross; },
+    feeling() {   // a word for the HUD, from the state (GEMS-like regions, Zentner 2008)
+      if (state.startle > 0.5) return 'startled';
+      if (daAnt > 0.5) return 'anticipating';
+      if (time - lastChill < 3) return 'chills';
+      if (bored > 0.6) return 'bored';
+      if (confused > 0.6) return 'confused';
+      if (A < 0.2 && Val > 0) return 'peaceful';
+      if (A < 0.15) return 'dormant';
+      if (groove > 0.5 && Val > 0.1) return 'in the groove';
+      if (A > 0.7 && Val > 0.1) return 'elated';
+      if (A > 0.6 && Val < -0.2) return 'tense';
+      if (A < 0.35 && Val < -0.2) return 'solemn';   // calm and dark: GEMS 'sadness' / 'transcendence', not anxiety
+      if (Val < -0.3) return 'uneasy';
+      return lock > 0.5 ? 'entrained' : 'listening';
+    },
+  };
+
+  /**
+   * @param {number} dt seconds
+   * @param {{amp:Float32Array, mu:Float32Array, onset:number, rough:number, sub:number, level:number, hum:number}|null} ear latest ear frame
+   * @param {number} onsetPeak largest ear onset since the last frame
+   * @param {{tension:number, musicA?:number, musicV?:number, predicted?:number, tissue?:object, proprio?:object}} senses from the analyzer (build-up tension) and the
+   *   music's perceived arousal (0..1) and valence (-1..1) from the mood model (undefined when it has nothing fresh), optional
+   */
+  state.step = (dt, ear, onsetPeak, senses = {}) => {
+    events.length = 0;
+    dt = Number.isFinite(dt) ? clamp(dt, 0, 0.1) : 0;            // the render clock can hand back 0 or a negative step
+    if (!Number.isFinite(onsetPeak)) onsetPeak = 0;
+    time += dt;
+    // one bad number from outside (an analyzer value, an ear frame) must not poison a state that integrates it forever
+    const fin = (x, d = 0) => (Number.isFinite(x) ? x : d);
+    const level = ear ? fin(ear.level) : 0, rough = ear ? clamp01(fin(ear.rough) * 2.5) : 0, sub = ear ? fin(ear.sub) : 0;
+    if (senses.intensity !== undefined && !Number.isFinite(senses.intensity)) senses = { ...senses, intensity: undefined };
+    // loudness: part absolute (the ear's level), part within-song (the analyzer's intensity, if given), so a quiet verse is calm
+    const absLoud = clamp01(Math.log10(1 + level * 30) / Math.log10(31));
+    const loud = senses.intensity === undefined ? absLoud : 0.35 * absLoud + 0.65 * clamp01(senses.intensity);
+
+    // ---- pitch & harmonic expectation: the ear's tonotopy folded onto 12 pitch classes ---------------------
+    if (ear && ear.amp && pcOf) {
+      const rawAcc = new Float32Array(12), acc = new Float32Array(12); let mx = 1e-9, mn = Infinity, sum = 0;
+      const nCh = Math.min(ear.amp.length, pcOf.length);
+      for (let k = 0; k < nCh; k++) { const a = Math.max(0, fin(ear.amp[k]) - 0.016); rawAcc[pcOf[k]] += a; }
+      // Suppress 3rd-harmonic (+7st) and 5th-harmonic (+4st) overtone spillover so fundamentals stand out cleanly
+      for (let i = 0; i < 12; i++) {
+        const sub5 = rawAcc[(i + 5) % 12], sub8 = rawAcc[(i + 8) % 12];
+        acc[i] = Math.max(0, rawAcc[i] - 0.22 * sub5 - 0.10 * sub8);
+        if (acc[i] > mx) mx = acc[i];
+        if (acc[i] < mn) mn = acc[i];
+        sum += acc[i];
+      }
+      // only update harmonic surprise when the spectrum has real tonal contrast (not a flat test array)
+      const tonalContrast = mx > 1e-4 ? (mx - mn) / mx : 0;
+      if (earCF || tonalContrast > 0.05) {
+        for (let i = 0; i < 12; i++) pitch[i] += 0.28 * (acc[i] / mx * clamp01(loud * 3) - pitch[i]);
+      }
+      if (tonalContrast > 0.15 && sum > 1e-3 && dt > 0) {
+        let kl = 0, hNow = 0;
+        const kPrior = 1 - Math.exp(-dt / 3.5);
+        for (let i = 0; i < 12; i++) {
+          const p = clamp(acc[i] / sum, 1e-4, 1), q = clamp(pitchPrior[i], 1e-4, 1);
+          kl += p * Math.log2(p / q);
+          hNow -= p * Math.log2(p);
+          pitchPrior[i] += kPrior * (p - pitchPrior[i]);
+        }
+        const rawHarm = clamp(kl * tonalContrast * clamp01(loud * 2.5), 0, 4);
+        icHarm += (1 - Math.exp(-dt / 0.25)) * (rawHarm - icHarm);
+        hHarm += (1 - Math.exp(-dt / 0.5)) * (hNow / Math.log2(12) - hHarm);
+        const prevFast = harmFast;
+        harmFast += (1 - Math.exp(-dt / 0.6)) * (icHarm - harmFast);
+        harmSlow += (1 - Math.exp(-dt / 4.0)) * (icHarm - harmSlow);
+        // harmonic learning progress: when a new chord resolves into familiarity, reward it
+        const harmLP = harmSlow - harmFast;
+        if (Math.abs(icHarm - prevFast) > 0.15 || harmLP > 0.05) {
+          daPh = clamp(daPh + dt * T.gDA * (1.2 * Math.max(0, harmLP) + 0.25 * clamp01(icHarm - 0.4)), -1.5, 1.5);
+        }
+      } else {
+        icHarm *= Math.exp(-dt / 1.5);
+        harmFast *= Math.exp(-dt / 1.5);
+        harmSlow *= Math.exp(-dt / 4.0);
+      }
+    }
+
+    // ---- closed-loop tissue & proprioceptive feedback ------------------------------------------------------
+    if (senses.tissue) {
+      const tc = fin(senses.tissue.coherence, 0);
+      tissueCoh += (1 - Math.exp(-dt / 0.5)) * (clamp01(tc) - tissueCoh);
+    } else tissueCoh *= Math.exp(-dt / 2);
+    let proprioJolt = 0;
+    if (senses.proprio) {
+      proprioStrain += (1 - Math.exp(-dt / 0.25)) * (clamp01(fin(senses.proprio.strain, 0)) - proprioStrain);
+      proprioJolt = clamp01(fin(senses.proprio.jolt, 0));
+    } else proprioStrain *= Math.exp(-dt / 1);
+
+    // ---- startle (brainstem + vestibular jolt) -------------------------------------------------------------
+    const o = Math.max(onsetPeak, proprioJolt * 1.4);
+    onsetLevel += (1 - Math.exp(-dt / 2)) * (o - onsetLevel);
+    H += (1 - H) * (dt / 30);                                       // habituation recovers in ~30 s
+    sens += -sens * dt / 10 + 0.1 * A * dt;                        // sensitization follows arousal
+    peakExp += (0.4 - peakExp) * (dt / 10);                         // without hits, the expectation of a hit fades back
+    // a hit = a local peak of the onset signal; it startles only when it is much bigger than the hits it has learned to expect
+    const isPeak = rising && o < prevO && prevO > 0.25 && time - lastHitT > 0.12;
+    rising = o > prevO || (rising && o === prevO);
+    if (isPeak) {
+      const hit = prevO; lastHitT = time;
+      const sincePre = time - lastPrepulseT;
+      const ppi = sincePre > 0.03 && sincePre < 0.5 ? 0.5 * Math.exp(-((sincePre - 0.1) ** 2) / 0.02) : 0;   // prepulse inhibition
+      const R = clamp01((hit / (1.6 * peakExp + 0.2) - 1) * 1.2) * H * (1 + sens) * (1 - ppi);
+      if (R > 0.15) { lastStartleT = time; H *= 0.7; events.push({ type: 'startle', amount: clamp01(R) }); A = clamp01(A + 0.25 * R); }
+      peakExp += 0.2 * (hit - peakExp);
+      lastPrepulseT = time;
+    }
+    prevO = o;
+    if (o > 0.25) lastOnsetT = time;
+
+    // ---- resonance: critical bank driven by onset strength + 2:1 mode coupling (substeps of ~4 ms) ---------
+    const x = Math.min(0.6, o * 0.5);
+    const sub_n = Math.max(1, Math.ceil(dt / 0.004)), h_ = dt / sub_n;
+    for (let s = 0; s < sub_n; s++) {
+      for (let i = 0; i < NR; i++) {
+        const f = RF[i], c = Math.cos(TAU * f * h_), sn = Math.sin(TAU * f * h_);
+        // 2:1 and 1:2 mode coupling (Large et al. 2015): octave harmonic (i+12) and subharmonic (i-12)
+        // share phase at missing-pulse and syncopated beats; quadratic in amplitude so it vanishes in silence
+        let mcR = 0, mcI = 0;
+        if (x > 0 || time - lastOnsetT < 1.2) {
+          if (i >= 12) { const rSub = rr[i - 12], iSub = ri[i - 12]; mcR += 0.35 * (rSub * rSub - iSub * iSub); mcI += 0.7 * rSub * iSub; }
+          if (i + 12 < NR) { const rHarm = rr[i + 12], iHarm = ri[i + 12]; mcR += 0.45 * (rHarm * rr[i] + iHarm * ri[i]); mcI += 0.45 * (iHarm * rr[i] - rHarm * ri[i]); }
+        }
+        let nr = rr[i] * c - ri[i] * sn + f * h_ * (x * 4 + mcR), ni = rr[i] * sn + ri[i] * c + f * h_ * mcI;
+        const d = 1 / (1 + f * h_ * (nr * nr + ni * ni) * 2);   // critical: alpha 0, beta1 -2 (semi-implicit)
+        rr[i] = nr * d; ri[i] = ni * d;
+      }
+    }
+    for (let i = 0; i < NR; i++) ramp[i] = Math.hypot(rr[i], ri[i]);
+    let best = -1, bestS = 0, sum = 0, n = 0;
+    for (let i = 0; i < NR; i++) {
+      const a = ramp[i];
+      if (RF[i] >= 0.8 && RF[i] <= 3.2) {
+        // harmonic support from 2:1 subdivision (i+12) and 3:2 fifth (i+7) stabilizes missing-pulse rhythms
+        const aMode = a + (i + 12 < NR ? 0.28 * ramp[i + 12] : 0) + (i + 7 < NR ? 0.14 * ramp[i + 7] : 0);
+        const prior = Math.exp(-((Math.log2(RF[i] / T.f0)) ** 2) / (2 * 0.6 * 0.6));   // its own tempo is easier to feel
+        // and the pulse it already moves to keeps it (a listener holds its beat through a cross rhythm)
+        let fo = RF[i]; while (fo < T.f0 / 1.42) fo *= 2; while (fo > T.f0 * 1.42) fo /= 2;
+        const held = 1 + 0.6 * lock * Math.exp(-((Math.log2(fo / fM)) ** 2) / (2 * 0.08 * 0.08));
+        const s = aMode * (0.5 + prior) * held; sum += a; n++;
+        if (s > bestS) { bestS = s; best = i; }
+      }
+    }
+    const aS = best >= 0 ? ramp[best] + (best + 12 < NR ? 0.2 * ramp[best + 12] : 0) : 0, mean = n ? sum / n : 1e-6;
+    const contrast = aS / (mean + 1e-4);
+    // how clearly a pulse stands out of the bank: the strength with which it forces the motor population
+    const salience = clamp01((contrast - 1) / (1.5 * T.looseness)) * clamp01(aS * 6);
+    const phS = best >= 0 ? Math.atan2(ri[best], rr[best]) : phM;
+    const fS = best >= 0 ? RF[best] : T.f0;
+    // fold the felt pulse into the motor's octave nearest to f0
+    const fold = (f) => { let k = 1; while (f * k < T.f0 / 1.42) k *= 2; while (f * k > T.f0 * 1.42) k /= 2; return k; };
+    const ratio = fold(fS);
+    // rhythm accuracy (a listener's dial): 0 = its own feel (the resonance it feels, pulled to its own tempo),
+    // 1 = on the beat (the analyzer's beat tracker pulls tempo and phase into lock, like a musician following a drummer)
+    const L = clamp01(Number.isFinite(senses.rhythm) ? senses.rhythm : 0), own = 1 - L, bt = senses.beat;
+    const btOk = bt && L > 0 && bt.confidence > 0.15 && bt.bpm > 40 && bt.bpm < 300 && Number.isFinite(bt.phase);   // a tracker value outside this is garbage, not a tempo
+    // a cross pulse: the strongest other peak of the bank that is not an octave of the felt pulse (3 against 2, dotted)
+    // folded down an octave a wrapped phase cannot simply be halved (it would jump by pi once a cycle): each pulse's phase is
+    // followed unwrapped, on the branch nearest to where it was heading, so the half-time beat it holds stays the same one
+    const unwrap = (u, i, ph, f) => {
+      if (u.i !== i) { u.i = i; u.v = ph + TAU * Math.round(((u.v + TAU * f * dt) - ph) / TAU); }
+      else { let e = ph - u.v; e -= TAU * Math.round(e / TAU); u.v += e; }
+      if (Math.abs(u.v) > 1e6) u.v -= TAU * 4 * Math.round(u.v / (TAU * 4));   // keep it small without changing any fold
+      return u.v;
+    };
+    const drive = (u, f, k) => ({ phase: u * k, hz: f * k });
+    let crossT = 0;
+    if (best >= 0 && own > 0 && time - lastOnsetT < 1.5) {
+      let b2 = -1, a2 = 0;
+      for (let i = 1; i < NR - 1; i++) {
+        if (RF[i] < 0.8 || RF[i] > 3.2 || i === best || ramp[i] < ramp[i - 1] || ramp[i] < ramp[i + 1]) continue;
+        if (Math.abs(Math.log2((RF[i] * fold(RF[i])) / (fS * ratio))) < 0.1) continue;
+        if (ramp[i] > a2) { a2 = ramp[i]; b2 = i; }
+      }
+      if (b2 >= 0) { crossT = salience * own * clamp01((a2 / aS - 0.5) / 0.35) * clamp01(loud * 4); crossD = drive(unwrap(uCross, b2, Math.atan2(ri[b2], rr[b2]), RF[b2]), RF[b2], fold(RF[b2])); }
+    }
+    cross += (1 - Math.exp(-dt / (crossT > cross ? 1.5 : 0.6))) * (crossT - cross);   // it has to persist to claim the body
+    for (let g = 0; g < NREG; g++) wMain[g] = 1 - 0.85 * wCross[g] * clamp01(cross * 3);
+    // the motor population (being/kuramoto.mjs): forced by the felt pulse, by a cross pulse over part of the body, and by
+    // the beat tracker when the dial asks for it; its order parameter over the main regions is the lock
+    // the bank rings on after the music stops; only a pulse still being struck forces the motor, so its afterglow is the
+    // population's own drift apart (a few seconds), not the bank's slow ring-down
+    const heard1 = clamp01(1.5 - (time - lastOnsetT));
+    const gT = btOk ? L * Math.min(1, bt.confidence * 1.6) : 0;
+    const uPh = best >= 0 ? unwrap(uMain, best, phS, fS) : 0;   // followed every frame, so no beat of it is lost
+    drives.length = 0;
+    if (best >= 0 && salience > 0) drives.push({ ...drive(uPh, fS, ratio), gain: 3 * salience * heard1 * (0.25 + 0.75 * own), w: wMain });
+    if (cross > 0.02 && crossD) drives.push({ ...crossD, gain: 3.5 * cross, w: wCross });
+    if (gT > 0) drives.push({ phase: bt.phase * TAU, hz: bt.bpm / 60, gain: 14 * gT, w: null });
+    pop.step(dt, { fC: fM, spread: 0.025 * T.looseness, K: 0.75, noise: 0.02, drives });
+    const om = pop.order(wMain);
+    order = om.r;
+    // the lock: the population's coherence, the bank's own salience (while the pulse is still being struck) or the tracker,
+    // whichever is strongest; it snaps in within a quarter of a second and lets go over a second or so, so one messy bar
+    // on real music does not drop the body out of step (the coherence alone fluttered 0.75 -> 0 -> 0.6 within seconds)
+    const lockT = Math.max(clamp01((om.r - 0.3) / 0.6), salience * heard1, 0.9 * gT);
+    lock += (1 - Math.exp(-dt / (lockT > lock || heard1 <= 0 ? 0.25 : 1.2))) * (lockT - lock);   // (in silence it lets go as fast as it caught on)
+    // the body's pulse follows the population's mean phase as far as the population holds together; tempo drifts back to f0
+    phM += TAU * fM * dt + 6 * lock * Math.sin(om.psi - phM) * dt;
+    fM += (0.6 * lock * (fS * ratio - fM) * (0.25 + 0.75 * own) - 0.08 * (fM - T.f0) * own) * dt;
+    trackerPull = 0;
+    if (btOk) {
+      const g = gT;
+      let e = bt.phase * TAU - phM; e -= TAU * Math.round(e / TAU);
+      beatError += (1 - Math.exp(-dt / 1)) * (Math.abs(e) / Math.PI - beatError);
+      fM += (bt.bpm / 60 - fM) * (1 - Math.exp(-dt * 8 * g));
+      phM += e * (1 - Math.exp(-dt * 14 * g));
+      trackerPull = g;
+    }
+    while (phM >= TAU) { phM -= TAU; motorCycles++; }
+    while (phM < 0) phM += TAU;
+    // each region's pulse relative to the body's (turns, -0.5..0.5), how coherent it is, and how much it holds the cross pulse
+    const xd = drives.find((d) => d.w === wCross);
+    for (let g = 0; g < NREG; g++) {
+      let e = (pop.Psi[g] - phM) / TAU; e -= Math.round(e);
+      regions.phase[g] = e; regions.coh[g] = pop.R[g];
+      regions.cross[g] = xd ? clamp01(pop.against(g, xd.phase)) * wCross[g] * clamp01((cross - 0.1) / 0.3) : 0;
+    }
+
+    // ---- expectation on the being's own grid (16 slots = 4 felt beats) ----------------------------------------
+    slotOnset = Math.max(slotOnset, o);
+    const slot = ((motorCycles % 4) * 4 + Math.floor((phM / TAU) * 4)) % 16;
+    if (slot !== slotIdx) {
+      if (slotIdx >= 0 && lock > 0.15) {
+        const hit = slotOnset > 0.25 ? 1 : 0, p = clamp(P[slotIdx], 0.03, 0.97);
+        IC = -Math.log2(hit ? p : 1 - p) + 0.35 * icHarm;
+        Hent = -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
+        P[slotIdx] += 0.08 * (hit - P[slotIdx]);                    // forgetting memory (~12 bars)
+        icFast += 0.08 * (IC - icFast); icSlow += 0.015 * (IC - icSlow);
+        sM += 0.01 * (IC - sM); sV += 0.01 * ((IC - sM) ** 2 - sV);
+        uM += 0.01 * (Hent - uM); uV += 0.01 * ((Hent - uM) ** 2 - uV);
+        if (hit) { syncNum += syncW[slotIdx] / 3 * slotOnset; syncDen += slotOnset; }
+        // hedonic input per slot: Cheung 2019 surface (z-scored), syncopation sweet spot, curiosity, roughness
+        const Sz = (IC - sM) / Math.sqrt(sV + 1e-3), Uz = (Hent - uM) / Math.sqrt(uV + 1e-3);
+        const cheung = -0.143 * Uz - 0.327 * Sz - 0.124 * Uz * Sz;
+        const lp = (icSlow - icFast) + 0.5 * (harmSlow - harmFast);  // learning progress: rhythmic + harmonic
+        // learning the song is itself rewarding: its skin map's error falling (compression progress; Schmidhuber 2010)
+        const mapProgress = Number.isFinite(senses.progress) ? Math.max(0, senses.progress) * 25 : 0;
+        // being on time is itself rewarding: the share of heard hits it predicted (a predictable world; Kagan et al. 2022)
+        const onTime = Number.isFinite(senses.predicted) ? 0.5 * (clamp01(senses.predicted) - 0.4) * lock : 0;
+        const tissueBonus = tissueCoh > 0.2 ? 0.25 * (tissueCoh - 0.2) * lock : 0;
+        h = T.gDA * (0.6 * cheung + 1.2 * groove + 2.0 * Math.max(0, lp) + mapProgress + onTime + tissueBonus) - 0.8 * rough;
+        const delta = h - V;                                         // reward prediction error (TD(0), value as slow average)
+        V += 0.05 * delta;
+        daPh = clamp(delta, -1.5, 1.5);
+        if (daPh < -0.9 && time - lastChill > 5) events.push({ type: 'recoil', amount: -daPh });
+      }
+      slotIdx = slot; slotOnset = 0;
+    }
+    sync += (1 - Math.exp(-dt / 6)) * (syncNum / syncDen - sync); syncNum *= Math.exp(-dt / 8); syncDen *= Math.exp(-dt / 8);
+    groove += (1 - Math.exp(-dt / 1.5)) * (lock * Math.exp(-((sync - T.sStar) ** 2) / (2 * 0.15 * 0.15)) * clamp01(loud * 2) - groove);
+    daPh *= Math.exp(-dt / 0.4);
+    const targetF = icFast + 0.5 * harmFast;
+    F += (1 - Math.exp(-dt / 2)) * (targetF - F);
+    const dFi = (F - Fprev) / Math.max(dt, 1e-3); Fprev = F; dF += (1 - Math.exp(-dt / 1)) * (dFi - dF);
+    // a song's opening rise is not a build-up: anticipation needs ~6-12 s of the music to anticipate from
+    if (level > 0.01) { heard += dt; quietFor = 0; } else if ((quietFor += dt) > 2) heard = 0;
+    const tension = clamp01(senses.tension || 0) * clamp01((heard - 6) / 6);
+    if (tension > 0.5) buildSeen = time;
+    daAnt += (1 - Math.exp(-dt / 0.6)) * (tension * (0.5 + Math.max(0, V)) * T.gDA - daAnt);
+    daTon += (1 - Math.exp(-dt / 30)) * (h - daTon);
+
+    // ---- affect -----------------------------------------------------------------------------------------------
+    const density = clamp01(onsetLevel * 2);
+    const novelty = Number.isFinite(senses.familiarity) ? 1 - senses.familiarity : 0;   // sounds its memory cannot place
+    // contagion: the model reads a 3.2 s window every 1.5 s; its values are eased (~2.5 s), trusted while they keep coming
+    if (Number.isFinite(senses.musicA) && Number.isFinite(senses.musicV)) {
+      const k = 1 - Math.exp(-dt / 2.5);
+      mA += k * (clamp01(senses.musicA) - mA); mV += k * (clamp(senses.musicV, -1, 1) - mV); hasM = Math.min(1, hasM + dt / 3);
+    } else hasM = Math.max(0, hasM - dt / 10);
+    // the music's character sets the level; the moment (within-song intensity, density) moves it inside that range
+    const aMusic = 0.06 + 0.82 * mA * (0.6 + 0.4 * loud) + 0.12 * density * mA;
+    const aBottomUp = 0.55 * clamp01(T.aHome * (0.5 + 0.5 * energy) + 0.75 * loud + 0.25 * density + 0.25 * rough + 0.15 * clamp01(sub * 8));
+    const aTarget = clamp01(hasM * aMusic + (1 - hasM) * aBottomUp + 0.2 * daAnt + 0.12 * rough * mA + 0.08 * novelty * clamp01(loud * 3) + 0.12 * proprioStrain + 0.05 * (T.aHome - 0.3));
+    A += (1 - Math.exp(-dt / 1.6)) * (aTarget - A) + 0.02 * Math.sqrt(dt) * gauss();
+    A = clamp01(A);
+    // valence: the music's expression first, then its own reward, groove and surprise (no longer all pushing upward)
+    const vTarget = clamp(0.4 * T.vHome + 0.75 * hasM * mV + mood + 0.35 * daPh + 0.15 * groove + 0.08 * tissueCoh - 0.2 * clamp(dF, -1, 1) - 0.5 * rough + 0.1 * daTon, -1, 1);
+    Val += (1 - Math.exp(-dt / 3)) * (vTarget - Val) + 0.03 * Math.sqrt(dt) * gauss();
+    Val = clamp(Val, -1, 1);
+    mood += (dt / 180) * (Math.tanh(2 * daPh + daTon) - mood);
+    energy = clamp01(energy + (-0.012 * groove * A + 0.006 * (1 - A)) * dt);
+    const lpAbs = Math.abs(icSlow - icFast) + Math.abs(harmSlow - harmFast);
+    const nothingToLearn = lpAbs < 0.03 && loud > 0.05;
+    bored = clamp01(bored + dt * (nothingToLearn && F < 0.6 ? 0.02 * T.restless : -0.03) - dt * 0.05 * Math.max(0, daPh));
+    confused = clamp01(confused + dt * (nothingToLearn && F > 1.2 ? 0.03 : -0.03));
+    // a living system must never die of one bad number: anything non-finite goes back to its resting value
+    if (!Number.isFinite(A)) A = T.aHome; if (!Number.isFinite(Val)) Val = T.vHome; if (!Number.isFinite(energy)) energy = 0.8;
+    if (!Number.isFinite(heard)) heard = 0; if (!Number.isFinite(quietFor)) quietFor = 0;
+    if (!Number.isFinite(mA) || !Number.isFinite(mV) || !Number.isFinite(hasM)) { mA = 0.3; mV = 0; hasM = 0; }
+    if (!Number.isFinite(mood)) mood = 0; if (!Number.isFinite(dF)) dF = 0; if (!Number.isFinite(F)) F = 1; if (!Number.isFinite(daTon)) daTon = 0;
+    // the integrators and the clock: each goes back to rest on its own, so one bad frame is forgotten instead of kept
+    if (!Number.isFinite(lock)) lock = 0; if (!Number.isFinite(order)) order = 0; if (!Number.isFinite(cross)) cross = 0; if (!Number.isFinite(groove)) groove = 0; if (!Number.isFinite(bored)) bored = 0; if (!Number.isFinite(confused)) confused = 0;
+    if (!Number.isFinite(daPh)) daPh = 0; if (!Number.isFinite(daAnt)) daAnt = 0; if (!Number.isFinite(V)) V = 0; if (!Number.isFinite(h)) h = 0;
+    if (!Number.isFinite(sync)) sync = 0.3; if (!Number.isFinite(beatError)) beatError = 0; if (!Number.isFinite(Fprev)) Fprev = F;
+    if (!Number.isFinite(IC)) IC = 0; if (!Number.isFinite(Hent)) Hent = 1; if (!Number.isFinite(icFast)) icFast = 1; if (!Number.isFinite(icSlow)) icSlow = 1;
+    if (!Number.isFinite(icHarm)) icHarm = 0; if (!Number.isFinite(hHarm)) hHarm = 0; if (!Number.isFinite(harmFast)) harmFast = 0; if (!Number.isFinite(harmSlow)) harmSlow = 0;
+    if (!Number.isFinite(tissueCoh)) tissueCoh = 0; if (!Number.isFinite(proprioStrain)) proprioStrain = 0;
+    if (!Number.isFinite(sM) || !Number.isFinite(sV)) { sM = 1; sV = 0.25; } if (!Number.isFinite(uM) || !Number.isFinite(uV)) { uM = 0.8; uV = 0.05; }
+    if (!Number.isFinite(syncNum) || !Number.isFinite(syncDen) || syncDen <= 0) { syncNum = 0; syncDen = 1e-6; }
+    if (!Number.isFinite(onsetLevel)) onsetLevel = 0.05; if (!Number.isFinite(H)) H = 1; if (!Number.isFinite(sens)) sens = 0; if (!Number.isFinite(peakExp)) peakExp = 0.4;
+    if (!Number.isFinite(fM) || fM < 0.2 || fM > 6) fM = clamp(Number.isFinite(fM) ? fM : T.f0, 0.2, 6);
+    if (!Number.isFinite(phM)) phM = 0;
+    for (let i = 0; i < NR; i++) if (!Number.isFinite(rr[i]) || !Number.isFinite(ri[i])) { rr[i] = 0; ri[i] = 0; }
+    // ---- enculturation: music it grooves to slowly reshapes all 8 of its innate traits (Witek 2014 S6; Roman 2023) --
+    if (groove > 0.5 && daPh > 0) {
+      T.f0 = clamp(T.f0 + dt * 0.0015 * (fM - T.f0), 1.2, 2.8);                // hours of a tempo pull its spontaneous tempo
+      T.sStar = clamp(T.sStar + dt * 0.0008 * (sync - T.sStar), 0.1, 0.65);     // enjoyed syncopation becomes the preferred level
+      T.looseness = clamp(T.looseness + dt * 0.0004 * (clamp01(cross * 2) + 0.5 - T.looseness), 0.35, 1.6);
+      T.gDA = clamp(T.gDA + dt * 0.0003 * (clamp(0.6 + daPh, 0.4, 1.5) - T.gDA), 0.4, 1.5);
+      life.grooveSeconds += dt;
+    }
+    if (loud > 0.05) {
+      T.aHome = clamp(T.aHome + dt * 0.0002 * (A - T.aHome), 0.1, 0.6);
+      T.vHome = clamp(T.vHome + dt * 0.0002 * (Val - T.vHome), -0.35, 0.45);
+      T.restless = clamp(T.restless + dt * 0.0002 * ((bored > 0.5 ? 1.2 : 0.7) - T.restless), 0.35, 1.6);
+      // dominant pitch class gently drifts its innate hue around the chromatic circle
+      let domPc = 0, domVal = 0;
+      for (let i = 0; i < 12; i++) if (pitch[i] > domVal) { domVal = pitch[i]; domPc = i; }
+      if (domVal > 0.25) {
+        let dh = (domPc / 12) - T.hue; dh -= Math.round(dh);
+        T.hue = ((T.hue + dt * 0.0003 * dh) % 1 + 1) % 1;
+      }
+      life.listenSeconds += dt;
+    }
+    // ---- decisions --------------------------------------------------------------------------------------------
+    if (bored > 0.7 && time - lastReform > 25) { lastReform = time; bored = 0.3; life.reforms++; events.push({ type: 'reform', why: 'bored' }); }
+    if (daPh > 0.7 && A > 0.55 && time - buildSeen < 10 && time - lastChill > 30) { lastChill = time; life.chills++; events.push({ type: 'chill' }); }
+    void ringT;
+    return events;
+  };
+
+  /** what it carries from one session to the next: its (drifted) traits, its rhythmic expectations, its moods */
+  state.serialize = () => ({ v: 1, traits: { ...T }, P: Array.from(P), mood, energy, V, life: { ...life }, savedAt: Date.now() });
+  state.restore = (o) => {
+    if (!o || o.v !== 1) return false;
+    for (const k of ['f0', 'sStar', 'aHome', 'vHome', 'gDA', 'looseness', 'hue', 'restless']) if (Number.isFinite(o.traits?.[k])) T[k] = o.traits[k];
+    if (Array.isArray(o.P) && o.P.length === 16) o.P.forEach((x, i) => { if (Number.isFinite(x)) P[i] = x; });
+    if (Number.isFinite(o.mood)) mood = clamp(o.mood, -1, 1);
+    // energy recovers while it was away (about 1 per 8 hours)
+    if (Number.isFinite(o.energy)) energy = clamp01(o.energy + (Date.now() - (o.savedAt || Date.now())) / (8 * 3600e3));
+    if (Number.isFinite(o.V)) V = o.V;
+    if (o.life) Object.assign(life, o.life);
+    return true;
+  };
+  state.life = life;
+  /** a known song returns: the feeling it left comes back first (episodic memory; Juslin 2013) */
+  state.recall = (feeling = 0, plays = 1) => {
+    const f = clamp(feeling, -1, 1), strength = Math.min(1, 0.4 + 0.15 * plays);
+    Val = clamp(Val + 0.6 * f * strength, -1, 1); mood = clamp(mood + 0.1 * f, -1, 1);
+    daPh = clamp(0.4 + 0.8 * f, -1.5, 1.5) * strength; A = clamp01(A + 0.15 * strength);
+    events.push({ type: 'recognize', feeling: f });
+  };
+  /** a known song's tempo comes back before the first beat: the motor starts at the remembered pulse (folded near f0) */
+  state.prime = (hz) => {
+    if (!Number.isFinite(hz) || hz < 0.3 || hz > 5) return false;
+    let f = hz; while (f < T.f0 / 1.42) f *= 2; while (f > T.f0 * 1.42) f /= 2;
+    fM = f; pop.setCentre(f); return true;
+  };
+  /** love / not-this from the listener: injected dopamine, like an optogenetic pulse */
+  state.inject = (sign) => { if (sign > 0) { daPh = 1.2; V -= 0.2; mood += 0.05; } else { daPh = -1.2; bored = Math.min(1, bored + 0.5); } };
+  return state;
+}
+

@@ -1,0 +1,32 @@
+Essentia pretrained models (ONNX) - MTG / Universitat Pompeu Fabra
+Source: https://essentia.upf.edu/models/  (downloaded 2026-10-05)
+
+License: all models created by the MTG are licensed under CC BY-NC-SA 4.0
+(https://creativecommons.org/licenses/by-nc-sa/4.0/) - attribution, NON-COMMERCIAL, share-alike.
+They are also available under a proprietary license on request (see https://essentia.upf.edu/models.html and the
+Essentia LICENSE page). Any commercial distribution of this app with these files bundled needs that license.
+The accompanying .json files are the upstream model cards (labels, tensor names, datasets, metrics).
+
+Required citation for the EffNet-Discogs embeddings:
+  Alonso-Jimenez, P., Serra, X., Bogdanov, D. "Music Representation Learning Based on Editorial Metadata
+  from Discogs", ISMIR 2022.
+Essentia models: Alonso-Jimenez, P., Bogdanov, D., Pons, J., Serra, X. "Tensorflow Audio Models in Essentia",
+  ICASSP 2020.
+
+Files:
+  discogs-effnet-bsdynamic-1.onnx            400 Discogs styles ("Parent---Style") + 1280-d embedding, input [n,128,96] log-mel
+  <head>-discogs-effnet-1.onnx               classification heads, input [n,1280] EffNet embeddings
+     mood_{aggressive,relaxed,happy,sad,party,electronic,acoustic}, danceability, voice_instrumental,
+     tonal_atonal, timbre (bright/dark), approachability_regression, engagement_regression,
+     mtg_jamendo_instrument (40 tags), mtg_jamendo_moodtheme (56 tags)
+
+  msd-musicnn-1.onnx                          MusiCNN-MSD feature extractor, input [n,187,96] log-mel (same front end), 200-d embedding
+  emomusic-msd-musicnn-2.onnx, deam-msd-musicnn-2.onnx
+                                             arousal / valence regressors on MusiCNN embeddings, output (valence, arousal), 1..9
+                                             (downloaded 2026-10-13; emoMusic arousal r .82 / valence r .74, DEAM .77 / .74)
+  Citation for the arousal / valence heads: Bogdanov, D., Lizarraga-Seijas, X., Alonso-Jimenez, P., Serra, X.
+  "MusAV: A dataset of relative arousal-valence annotations for validation of audio models", ISMIR 2022.
+
+Skipped: nsynth_bright_dark-discogs-effnet-1 (upstream publishes only the .pb / TensorFlow version, no ONNX);
+  "timbre" (bright/dark) is used for the `bright` output instead.
+  genre_discogs400 head is not needed: the feature extractor already outputs the 400 style activations.

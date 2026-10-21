@@ -1,0 +1,182 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Absorption Iterations</title>
+<!-- lab: iterations of ON absorbed (lab/research/absorption.md). The field is drawn the way Bressloff et al. 2001 explain Klüver's
+     form constants: a planform in cortical coordinates (log r, angle), mapped back to the eye, so drifting in log r is an endless,
+     beat-locked zoom. Depth 0 is ON as it is (reactive); depth 1 is deep absorption: steady, slower, dimmer and warmer, the body mostly light.
+     Keys: 1-7 form, space pause, a auto depth, b breath. URL: ?v=0..6&d=0..1&bpm=..&sheet=1. Safety: no strobing; the beat moves
+     line width and luminance by a few percent only (WCAG 2.3.1). -->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px/1.45 system-ui, sans-serif; color: #cfd3dc; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #ui { position: fixed; left: 12px; top: 10px; background: #000a; padding: 8px 10px; border-radius: 6px; max-width: 360px; transition: opacity .6s; }
+  #ui b { color: #fff; } #ui input[type=range] { width: 170px; vertical-align: middle; } .k { opacity: .6; }
+  body.idle #ui { opacity: 0; } body.sheet #ui { display: none; }
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div><b id="name"></b> <span class="k" id="idx"></span></div>
+  <div id="desc" class="k"></div>
+  <div>depth <input id="d" type="range" min="0" max="1" step=".01"> <span id="dv"></span></div>
+  <div>tempo <input id="bpm" type="range" min="60" max="160" step="1"> <span id="bv"></span></div>
+  <div><label><input id="auto" type="checkbox"> auto depth (rise ~45 s, hold, a surprise drops it)</label></div>
+  <div><label><input id="br" type="checkbox"> breath swell at 6/min when deep</label></div>
+  <div class="k">1-7 form · space pause · the panel hides when the mouse rests</div>
+</div>
+<script>
+const FORMS = [
+  ['Tunnel', 'Rings in cortical space: an endless tunnel, one ring per bar, falling forward into the nucleus'],
+  ['Spiral', 'Oblique stripes in cortical space: log spirals turning in, counter-turning in a second layer when deep'],
+  ['Honeycomb', 'A hexagonal planform: cells that shrink toward the heart forever, the lattice of Klüver\'s honeycomb'],
+  ['Cobweb', 'Spokes and sagging rings: the cobweb form constant, threads catching the light'],
+  ['Phi mandala', 'Nested pentagons, each 1/φ the last, alternating in orientation: sacred geometry as an infinite zoom'],
+  ['Moiré', 'Two planforms at slightly different scales, rotating against each other: the interference shimmers'],
+  ['Flow', 'All of them in turn, each flowing into the next over a phrase: the mix moves with the music'],
+];
+const Q = new URLSearchParams(location.search);
+const S = { v: +(Q.get('v') ?? 0), d: +(Q.get('d') ?? .8), bpm: +(Q.get('bpm') ?? 112), auto: false, breath: true, pause: false };
+const sheet = Q.get('sheet') === '1'; if (sheet) document.body.classList.add('sheet');
+
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes, uOff; uniform float uTime, uD, uBeats, uBreath; uniform int uV;
+out vec4 O;
+const float TAU = 6.2831853, PHI = 1.618034;
+vec3 pal( float x ) { return .5 + .5 * cos( TAU * ( x + vec3( 0., .33, .67 ) ) ); }
+float h11( float x ) { return fract( sin( x * 127.1 ) * 43758.5453 ); }
+// a line at every integer of s, w wide (in units of s), antialiased
+float lines( float s, float w ) { float d = abs( fract( s + .5 ) - .5 ), aa = fwidth( s ) * 1.2; return 1. - smoothstep( w, w + aa, d ); }
+float hexEdge( vec2 p ) {   // distance to the nearest edge of a hexagonal tiling (period 1 in x)
+  const vec2 s = vec2( 1., 1.7320508 );
+  vec4 hc = floor( vec4( p, p - vec2( .5, 1. ) ) / s.xyxy ) + .5;
+  vec4 h = vec4( p - hc.xy * s, p - ( hc.zw + .5 ) * s );
+  vec2 q = dot( h.xy, h.xy ) < dot( h.zw, h.zw ) ? h.xy : h.zw; q = abs( q );
+  return .5 - max( dot( q, s * .5 ), q.x );
+}
+// the planform of form k in cortical coordinates c = (log r, angle) * N / 2pi (a conformal map, so cells stay square); z: the zoom
+float planform( int k, vec2 c, float z, float w ) {
+  if ( k == 0 ) return max( lines( c.x - z, w ), .25 * lines( c.y, w * .6 ) );
+  if ( k == 1 ) return lines( c.x * .5 + c.y * .5 - z, w );
+  if ( k == 2 ) { float e = hexEdge( vec2( c.y, c.x - z * 1.732 ) ); float aa = fwidth( e ) * 1.2; return 1. - smoothstep( w, w + aa, e ); }
+  if ( k == 3 ) { float fy = abs( fract( c.y + .5 ) - .5 ); return max( lines( c.y, w * .7 ), lines( c.x - z + .35 * fy * fy * 4., w ) ); }
+  return 0.;
+}
+float mandala( vec2 p, float z, float w ) {   // nested pentagons, each 1/phi the last, alternating
+  float r = length( p ), th = atan( p.y, p.x ), n = 5., a = TAU / n;
+  float rho1 = r * cos( mod( th + .1 * uTime * .2, a ) - a * .5 ) / cos( a * .5 );
+  float rho2 = r * cos( mod( th + a * .5 - .1 * uTime * .2, a ) - a * .5 ) / cos( a * .5 );
+  float s1 = log( rho1 ) / log( PHI ) - z, s2 = log( rho2 ) / log( PHI ) - z + .5;
+  return max( lines( s1 * 2. * .5, w * .5 ), lines( s2 * .5 * 2., w * .5 ) * .8 );
+}
+float field( int k, vec2 p, float z, float w, float N ) {
+  float r = length( p ), th = atan( p.y, p.x );
+  vec2 c = vec2( log( r ), th ) * N / TAU;
+  if ( k <= 3 ) return planform( k, c, z, w );
+  if ( k == 4 ) return mandala( p, z * .5, w );
+  // moire: two planforms, slightly different scales, counter-rotating
+  vec2 c2 = vec2( log( r ) * 1.07, th ) * N / TAU + vec2( 0., uTime * .05 );
+  vec2 c1 = c + vec2( 0., - uTime * .04 );
+  return max( planform( 0, c1, z, w * .7 ) * .8, planform( 1, c2, z * 1.07, w * .7 ) * .8 );
+}
+void main() {
+  vec2 p = ( gl_FragCoord.xy - uOff - .5 * uRes ) / uRes.y;
+  float d = uD, beat = fract( uBeats ), pulse = exp( - beat * 5. ), bar = uBeats / 4.;
+  // reactive at depth 0: a jolt on each beat; steady absorbed
+  float jolt = ( 1. - d ) * pulse * .012;
+  p += jolt * vec2( h11( floor( uBeats ) ) - .5, h11( floor( uBeats ) + 7. ) - .5 );
+  float r = length( p );
+  // ON: a sphere whose size breathes (6/min when deep) and barely pulses
+  float Rb = .2 * ( 1. + .07 * uBreath * smoothstep( .5, 1., d ) + .02 * pulse * ( 1. - .6 * d ) );
+  // the field: one cell per bar, endless; slower when deep (one per two bars at full depth), line width breathing with the beat
+  float z = bar * mix( 1., .5, d ), w = mix( .05, .028, d ) * ( 1. + .25 * pulse );
+  float N = 24.;
+  float f;
+  if ( uV < 6 ) f = field( uV, p, z, w, N );
+  else {   // flow: each form flowing into the next over a phrase (16 beats)
+    float ph = uBeats / 16., i = floor( ph ), m = smoothstep( .6, 1., fract( ph ) );
+    f = mix( field( int( mod( i, 6. ) ), p, z, w, N ), field( int( mod( i + 1., 6. ) ), p, z, w, N ), m );
+  }
+  float edge = mix( .5, .85, smoothstep( .6, 1., d ) );   // within ON's round window; deep, the field opens past it (vastness)
+  float outside = smoothstep( Rb, Rb * 1.25, r ) * smoothstep( edge, edge * .55, r );
+  // colour: cool silver when awake, warm amber-violet when deep, and a little dimmer (peak music is less bright)
+  vec2 cc = vec2( log( r ), atan( p.y, p.x ) ) * N / TAU;
+  vec3 cool = vec3( .62, .7, .85 ), warm = mix( vec3( 1., .64, .32 ), vec3( .72, .5, 1. ), .5 + .5 * sin( cc.x * .35 - bar * .2 ) );   // amber and violet, drifting inward
+  vec3 lc = mix( cool, warm, smoothstep( .2, .9, d ) ) * mix( 1., .78, d ) * ( 1. + .05 * pulse );
+  vec3 col = lc * f * outside * mix( .25, .95, d ) * ( .45 + .55 * smoothstep( edge, .15, r ) );
+  col += lc * f * outside * .25 * d * exp( - ( r - Rb ) * 6. );   // light gathers toward the heart
+  // the body: metal when awake, glass and light when deep (ether)
+  if ( r < Rb * 1.02 ) {
+    vec2 q = p / Rb; float zz = sqrt( max( 0., 1. - dot( q, q ) ) ); vec3 n = vec3( q, zz );
+    vec3 rf = reflect( vec3( 0., 0., -1. ), n );
+    float env = smoothstep( .08, 0., abs( rf.y - .45 ) ) * .9 + .25 * smoothstep( -.6, 1., rf.y ) + .5 * pow( max( dot( rf, normalize( vec3( -.5, .6, .6 ) ) ), 0. ), 24. );
+    vec3 metal = vec3( .55, .58, .66 ) * ( .25 + env );
+    float fres = pow( 1. - zz, 2.5 );
+    // inside, deep: the field refracted through the glass, smaller and turning, around a glowing nucleus
+    float fi = field( uV < 6 ? uV : 2, q * .35 * ( 1. + .2 * zz ), z * 1.5 + .5, w * .8, 12. );
+    vec3 glass = lc * ( fres * 1.3 + fi * .55 * zz ) + vec3( .9, .75, .55 ) * .08;
+    col = mix( metal, glass, smoothstep( .15, .85, d ) ) * smoothstep( 1.02, .99, length( q ) );
+  }
+  float nuc = exp( - r / ( Rb * mix( .12, .3, d ) ) ) * mix( .4, 1.1, d ) * ( 1. + .1 * pulse );
+  col += vec3( 1., .8, .55 ) * nuc;
+  col += lc * .5 * exp( - abs( r - Rb ) * 70. ) * mix( .3, 1., d );   // the rim of light
+  col = 1. - exp( - col * 1.3 );
+  O = vec4( pow( col, vec3( .4545 ) ), 1. );
+}`;
+
+const cv = document.getElementById('c'), gl = cv.getContext('webgl2', { preserveDrawingBuffer: true, antialias: false });
+const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(s)); throw new Error('shader'); } return s; };
+const pr = gl.createProgram();
+gl.attachShader(pr, sh(gl.VERTEX_SHADER, '#version 300 es\nin vec2 a; void main() { gl_Position = vec4( a, 0., 1. ); }'));
+gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const L = Object.fromEntries(['uRes', 'uOff', 'uTime', 'uD', 'uBeats', 'uBreath', 'uV'].map((k) => [k, gl.getUniformLocation(pr, k)]));
+
+const $ = (id) => document.getElementById(id);
+const ui = () => { $('name').textContent = FORMS[S.v][0]; $('idx').textContent = `${S.v + 1}/${FORMS.length}`; $('desc').textContent = FORMS[S.v][1];
+  $('d').value = S.d; $('dv').textContent = S.d.toFixed(2); $('bpm').value = S.bpm; $('bv').textContent = S.bpm + ' bpm'; $('auto').checked = S.auto; $('br').checked = S.breath; };
+$('d').oninput = (e) => { S.d = +e.target.value; S.auto = false; ui(); };
+$('bpm').oninput = (e) => { S.bpm = +e.target.value; ui(); };
+$('auto').onchange = (e) => { S.auto = e.target.checked; S.autoT = 0; };
+$('br').onchange = (e) => { S.breath = e.target.checked; };
+addEventListener('keydown', (e) => {
+  if (e.key >= '1' && e.key <= String(FORMS.length)) S.v = +e.key - 1;
+  else if (e.key === ' ') S.pause = !S.pause; else if (e.key === 'a') { S.auto = !S.auto; S.autoT = 0; } else if (e.key === 'b') S.breath = !S.breath;
+  ui();
+});
+let idleT; addEventListener('mousemove', () => { document.body.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add('idle'), 2500); });
+
+function draw(x, y, w, h, v, d, time, beats, breath) {
+  gl.viewport(x, y, w, h); gl.uniform2f(L.uRes, w, h); gl.uniform2f(L.uOff, x, y);
+  gl.uniform1f(L.uTime, time); gl.uniform1f(L.uD, d); gl.uniform1f(L.uBeats, beats); gl.uniform1f(L.uBreath, breath); gl.uniform1i(L.uV, v);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function size() { const k = Math.min(devicePixelRatio, 1.5); cv.width = innerWidth * k | 0; cv.height = innerHeight * k | 0; }
+size(); addEventListener('resize', size);
+
+if (sheet) {   // rows: forms, columns: depths
+  const forms = (Q.get('forms') || '0,1,2,3,4,5,6').split(',').map(Number), depths = (Q.get('depths') || '0,.5,1').split(',').map(Number);
+  const T = +(Q.get('time') || 7.3), W = cv.width / depths.length | 0, H = cv.height / forms.length | 0;
+  forms.forEach((v, r) => depths.forEach((d, c) => draw(c * W, cv.height - (r + 1) * H, W, H, v, d, T, T * S.bpm / 60, 0)));
+  gl.finish(); window.__done = true;
+} else {
+  ui(); let last = performance.now(), clock = 0, beats = 0;
+  S.autoT = 0;
+  const loop = (now) => {
+    const dt = Math.min(.1, (now - last) / 1000); last = now;
+    if (!S.pause) {
+      clock += dt; beats += dt * S.bpm / 60;
+      if (S.auto) {   // deepen slowly, hold, then a surprise: out quickly, and again
+        S.autoT += dt; const t = S.autoT % 110;
+        const want = t < 45 ? t / 45 : t < 80 ? 1 : t < 82 ? .15 : .15 + (t - 82) / 28 * .3;
+        S.d += (want - S.d) * (1 - Math.exp(-dt / (want < S.d ? .6 : 3))); $('d').value = S.d; $('dv').textContent = S.d.toFixed(2);
+      }
+    }
+    draw(0, 0, cv.width, cv.height, S.v, S.d, clock, beats, S.breath ? Math.sin(clock * TAU6) : 0);
+    requestAnimationFrame(loop);
+  };
+  const TAU6 = 2 * Math.PI * 6 / 60;   // 6 breaths a minute
+  requestAnimationFrame(loop);
+}
+</script>
+</body></html>

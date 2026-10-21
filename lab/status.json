@@ -1,0 +1,116 @@
+{
+  "phase": "Research and first experiments",
+  "now": "Being sketch v1 running: ear, tissue, startle, pulse, expectation, dopamine, affect, memory; cymatics, nucleus, aura.",
+  "experiments": [
+    {
+      "id": "E01",
+      "name": "Anatomy of hearing in the fly connectome",
+      "state": "done",
+      "verdict": "Inhibition-rich recurrent sheet"
+    },
+    {
+      "id": "E02",
+      "name": "Which rhythms the fly's auditory relays follow",
+      "state": "done",
+      "verdict": "Onset follower, no preferred tempo"
+    },
+    {
+      "id": "E03",
+      "name": "Is the auditory circuit critical?",
+      "state": "done",
+      "verdict": "Subcritical at rest, narrow window"
+    },
+    {
+      "id": "E04",
+      "name": "Replicate Kinouchi & Copelli 2006",
+      "state": "replicated",
+      "verdict": "Dynamic range peaks at σ = 1"
+    },
+    {
+      "id": "E05",
+      "name": "Replicate the missing pulse (Large et al.)",
+      "state": "open",
+      "verdict": "Local 2 Hz bump only; needs a faithful port"
+    },
+    {
+      "id": "E06",
+      "name": "Self-tuned Hopf ear: 1/3 law, phantom tones, humming",
+      "state": "replicated",
+      "verdict": "1/3-law compression at CF, 2f1-f2 heard, hums in silence, tires and recovers"
+    },
+    {
+      "id": "E07",
+      "name": "Faithful oscillator network port (pyGrFNN)",
+      "state": "planned",
+      "verdict": ""
+    },
+    {
+      "id": "E08",
+      "name": "Homeostatic critical sheet: m = 1 − h/r*",
+      "state": "planned",
+      "verdict": ""
+    },
+    {
+      "id": "E09",
+      "name": "Alien wiring grammar vs real brain statistics",
+      "state": "planned",
+      "verdict": ""
+    },
+    {
+      "id": "E10",
+      "name": "Inner life on real music: drops, fake drops, groove",
+      "state": "planned",
+      "verdict": ""
+    },
+    {
+      "id": "E11",
+      "name": "Individuality: two beings, two listening diets",
+      "state": "planned",
+      "verdict": ""
+    },
+    {
+      "id": "E12",
+      "name": "Closed loop: predictable feedback wears paths into the tissue (lab/experiments/11-predictive-feedback.mjs)",
+      "state": "done",
+      "verdict": "Partly: stamp links 0.66 vs 0.53 after noise or nothing, evoked response +30%; reproducibility unchanged."
+    }
+  ],
+  "log": [
+    {
+      "t": "2026-10-08 17:40",
+      "text": "First attempt (whole fly brain + MilkDrop) built and shelved: it was not the brief."
+    },
+    {
+      "t": "2026-10-08 20:07",
+      "text": "E01 anatomy and E02 rhythm transfer measured on FlyWire v783."
+    },
+    {
+      "t": "2026-10-08 20:20",
+      "text": "E03 criticality: the fly circuit is subcritical at its published strength."
+    },
+    {
+      "t": "2026-10-08 21:05",
+      "text": "Five literature reviews back: ear, rhythm and emotion, substrates, visuals, perception."
+    },
+    {
+      "t": "2026-10-08 21:20",
+      "text": "E04 replicated Kinouchi & Copelli: 26.5 dB at σ = 1."
+    },
+    {
+      "t": "2026-10-08 21:35",
+      "text": "E05 missing pulse: not replicated yet. Recorded as open."
+    },
+    {
+      "t": "2026-10-08 21:50",
+      "text": "Notebook 01 written: lab/NOTEBOOK.md."
+    },
+    {
+      "t": "2026-10-08 23:10",
+      "text": "E06 replicated the hair-cell physics in the being's ear (tests/being.test.mjs)."
+    },
+    {
+      "t": "2026-10-08 23:30",
+      "text": "Being v1: cymatic shell, Julia nucleus, feedback aura, body-ear sway, roughness bristle, life memory."
+    }
+  ]
+}

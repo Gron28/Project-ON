@@ -1,0 +1,687 @@
+{
+  "question": "anatomy of the fly auditory circuit as building-block statistics",
+  "params": {
+    "MIN_SYN": 5,
+    "MIN_FRAC": 0.05,
+    "MAX_HOP": 4
+  },
+  "layers": [
+    {
+      "hop": 0,
+      "neurons": 446,
+      "inhibitoryShare": 0.182,
+      "transmitters": [
+        [
+          "ACH",
+          237
+        ],
+        [
+          "SER",
+          76
+        ],
+        [
+          "GLUT",
+          49
+        ],
+        [
+          "UNKNOWN",
+          43
+        ],
+        [
+          "GABA",
+          32
+        ],
+        [
+          "OCT",
+          7
+        ]
+      ],
+      "superClass": [
+        [
+          "sensory",
+          446
+        ]
+      ],
+      "topFamilies": [
+        [
+          "JO-B",
+          299
+        ],
+        [
+          "JO-A",
+          94
+        ],
+        [
+          "JO-D",
+          28
+        ],
+        [
+          "JO-DP",
+          13
+        ],
+        [
+          "JO-DA",
+          12
+        ]
+      ],
+      "fanOutMedian": 0,
+      "fanInMedian": 1,
+      "outSynapsesMedian": 0,
+      "inSynapsesMedian": 7
+    },
+    {
+      "hop": 1,
+      "neurons": 99,
+      "inhibitoryShare": 0.455,
+      "transmitters": [
+        [
+          "ACH",
+          53
+        ],
+        [
+          "GABA",
+          42
+        ],
+        [
+          "GLUT",
+          3
+        ],
+        [
+          "SER",
+          1
+        ]
+      ],
+      "superClass": [
+        [
+          "central",
+          88
+        ],
+        [
+          "descending",
+          9
+        ],
+        [
+          "ascending",
+          2
+        ]
+      ],
+      "topFamilies": [
+        [
+          "CB",
+          75
+        ],
+        [
+          "WED",
+          8
+        ],
+        [
+          "DNge",
+          6
+        ],
+        [
+          "SAD",
+          4
+        ],
+        [
+          "DNg",
+          3
+        ],
+        [
+          "AN_multi",
+          2
+        ],
+        [
+          "WEDPN",
+          1
+        ]
+      ],
+      "fanOutMedian": 27,
+      "fanInMedian": 26,
+      "outSynapsesMedian": 393,
+      "inSynapsesMedian": 331
+    },
+    {
+      "hop": 2,
+      "neurons": 598,
+      "inhibitoryShare": 0.413,
+      "transmitters": [
+        [
+          "ACH",
+          348
+        ],
+        [
+          "GABA",
+          220
+        ],
+        [
+          "GLUT",
+          27
+        ],
+        [
+          "SER",
+          3
+        ]
+      ],
+      "superClass": [
+        [
+          "central",
+          541
+        ],
+        [
+          "descending",
+          33
+        ],
+        [
+          "ascending",
+          16
+        ],
+        [
+          "sensory",
+          8
+        ]
+      ],
+      "topFamilies": [
+        [
+          "CB",
+          408
+        ],
+        [
+          "WED",
+          41
+        ],
+        [
+          "SAD",
+          38
+        ],
+        [
+          "AVLP",
+          23
+        ],
+        [
+          "DNg",
+          17
+        ],
+        [
+          "DNge",
+          9
+        ],
+        [
+          "DNp",
+          7
+        ],
+        [
+          "AN_AVLP",
+          6
+        ],
+        [
+          "(untyped)",
+          6
+        ],
+        [
+          "AN_multi",
+          6
+        ],
+        [
+          "AOTU",
+          5
+        ],
+        [
+          "WEDPN",
+          4
+        ]
+      ],
+      "fanOutMedian": 39,
+      "fanInMedian": 37,
+      "outSynapsesMedian": 456,
+      "inSynapsesMedian": 483
+    },
+    {
+      "hop": 3,
+      "neurons": 2353,
+      "inhibitoryShare": 0.374,
+      "transmitters": [
+        [
+          "ACH",
+          1450
+        ],
+        [
+          "GABA",
+          625
+        ],
+        [
+          "GLUT",
+          255
+        ],
+        [
+          "SER",
+          14
+        ],
+        [
+          "DA",
+          5
+        ],
+        [
+          "OCT",
+          2
+        ]
+      ],
+      "superClass": [
+        [
+          "central",
+          1914
+        ],
+        [
+          "sensory",
+          186
+        ],
+        [
+          "descending",
+          131
+        ],
+        [
+          "ascending",
+          93
+        ],
+        [
+          "visual_centrifugal",
+          12
+        ],
+        [
+          "visual_projection",
+          11
+        ]
+      ],
+      "topFamilies": [
+        [
+          "CB",
+          1085
+        ],
+        [
+          "AVLP",
+          263
+        ],
+        [
+          "WED",
+          174
+        ],
+        [
+          "PLP",
+          65
+        ],
+        [
+          "JO-E",
+          57
+        ],
+        [
+          "PVLP",
+          56
+        ],
+        [
+          "SAD",
+          49
+        ],
+        [
+          "DNg",
+          48
+        ],
+        [
+          "DNge",
+          48
+        ],
+        [
+          "CL",
+          47
+        ],
+        [
+          "WEDPN",
+          36
+        ],
+        [
+          "AN_GNG",
+          33
+        ]
+      ],
+      "fanOutMedian": 25,
+      "fanInMedian": 25,
+      "outSynapsesMedian": 278,
+      "inSynapsesMedian": 279
+    },
+    {
+      "hop": 4,
+      "neurons": 7149,
+      "inhibitoryShare": 0.388,
+      "transmitters": [
+        [
+          "ACH",
+          4203
+        ],
+        [
+          "GABA",
+          1396
+        ],
+        [
+          "GLUT",
+          1377
+        ],
+        [
+          "DA",
+          79
+        ],
+        [
+          "SER",
+          71
+        ],
+        [
+          "OCT",
+          22
+        ]
+      ],
+      "superClass": [
+        [
+          "central",
+          5321
+        ],
+        [
+          "descending",
+          516
+        ],
+        [
+          "optic",
+          412
+        ],
+        [
+          "sensory",
+          329
+        ],
+        [
+          "ascending",
+          237
+        ],
+        [
+          "visual_projection",
+          168
+        ]
+      ],
+      "topFamilies": [
+        [
+          "CB",
+          2510
+        ],
+        [
+          "AVLP",
+          704
+        ],
+        [
+          "CL",
+          286
+        ],
+        [
+          "PLP",
+          247
+        ],
+        [
+          "PS",
+          223
+        ],
+        [
+          "DNg",
+          165
+        ],
+        [
+          "DNge",
+          158
+        ],
+        [
+          "WED",
+          157
+        ],
+        [
+          "SMP",
+          152
+        ],
+        [
+          "Tm",
+          126
+        ],
+        [
+          "AN_AVLP",
+          123
+        ],
+        [
+          "PVLP",
+          118
+        ]
+      ],
+      "fanOutMedian": 25,
+      "fanInMedian": 26,
+      "outSynapsesMedian": 290,
+      "inSynapsesMedian": 277
+    }
+  ],
+  "core": {
+    "neurons": 1143,
+    "connections": 14202,
+    "density": 0.01088,
+    "weightSynapses": {
+      "median": 10,
+      "p90": 36,
+      "p99": 100,
+      "max": 263,
+      "logMean": 2.484,
+      "logSd": 0.748
+    },
+    "reciprocity": 0.1572,
+    "reciprocityIfRandom": 0.01088,
+    "synapseFlow": {
+      "forward": 0.254,
+      "withinLayer": 0.682,
+      "backward": 0.064
+    },
+    "convergenceShare": 0.716,
+    "midline": {
+      "ipsilateral": 0.773,
+      "contralateral": 0.227
+    },
+    "feedbackInhibitionLoopsInSample": 3181
+  },
+  "soundVsWind": {
+    "soundTargets": 353,
+    "windTargets": 675,
+    "shared": 159,
+    "jaccard": 0.183
+  },
+  "reach": [
+    {
+      "hop": 1,
+      "newNeurons": 353,
+      "cumulativeShare": 0.006
+    },
+    {
+      "hop": 2,
+      "newNeurons": 6564,
+      "cumulativeShare": 0.053
+    },
+    {
+      "hop": 3,
+      "newNeurons": 53843,
+      "cumulativeShare": 0.44
+    },
+    {
+      "hop": 4,
+      "newNeurons": 56058,
+      "cumulativeShare": 0.842
+    },
+    {
+      "hop": 5,
+      "newNeurons": 6202,
+      "cumulativeShare": 0.887
+    },
+    {
+      "hop": 6,
+      "newNeurons": 698,
+      "cumulativeShare": 0.892
+    }
+  ],
+  "hubs": [
+    {
+      "type": "CB0466",
+      "hop": 2,
+      "auditorySynapsesIn": 882,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 171
+    },
+    {
+      "type": "CB0466",
+      "hop": 2,
+      "auditorySynapsesIn": 865,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 186
+    },
+    {
+      "type": "CB3882",
+      "hop": 2,
+      "auditorySynapsesIn": 557,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 168
+    },
+    {
+      "type": "SAD021_c",
+      "hop": 2,
+      "auditorySynapsesIn": 523,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 75
+    },
+    {
+      "type": "DNp12",
+      "hop": 2,
+      "auditorySynapsesIn": 510,
+      "nt": "ACH",
+      "class": "descending",
+      "fanOut": 25
+    },
+    {
+      "type": "CB3913",
+      "hop": 2,
+      "auditorySynapsesIn": 499,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 125
+    },
+    {
+      "type": "DNp12",
+      "hop": 2,
+      "auditorySynapsesIn": 475,
+      "nt": "ACH",
+      "class": "descending",
+      "fanOut": 17
+    },
+    {
+      "type": "CB0307",
+      "hop": 2,
+      "auditorySynapsesIn": 451,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 40
+    },
+    {
+      "type": "CB3881",
+      "hop": 2,
+      "auditorySynapsesIn": 446,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 156
+    },
+    {
+      "type": "CB3491",
+      "hop": 2,
+      "auditorySynapsesIn": 432,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 66
+    },
+    {
+      "type": "CB3880",
+      "hop": 2,
+      "auditorySynapsesIn": 389,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 135
+    },
+    {
+      "type": "SAD053",
+      "hop": 2,
+      "auditorySynapsesIn": 386,
+      "nt": "ACH",
+      "class": "central",
+      "fanOut": 66
+    },
+    {
+      "type": "CB4161",
+      "hop": 2,
+      "auditorySynapsesIn": 379,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 54
+    },
+    {
+      "type": "CB0591",
+      "hop": 2,
+      "auditorySynapsesIn": 371,
+      "nt": "ACH",
+      "class": "central",
+      "fanOut": 98
+    },
+    {
+      "type": "CB3880",
+      "hop": 2,
+      "auditorySynapsesIn": 355,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 143
+    },
+    {
+      "type": "CB0033",
+      "hop": 2,
+      "auditorySynapsesIn": 348,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 129
+    },
+    {
+      "type": "CB0533",
+      "hop": 2,
+      "auditorySynapsesIn": 345,
+      "nt": "ACH",
+      "class": "central",
+      "fanOut": 158
+    },
+    {
+      "type": "CB1817b",
+      "hop": 2,
+      "auditorySynapsesIn": 332,
+      "nt": "ACH",
+      "class": "central",
+      "fanOut": 96
+    },
+    {
+      "type": "SAD021_c",
+      "hop": 2,
+      "auditorySynapsesIn": 328,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 49
+    },
+    {
+      "type": "SAD021_c",
+      "hop": 2,
+      "auditorySynapsesIn": 313,
+      "nt": "GABA",
+      "class": "central",
+      "fanOut": 57
+    }
+  ]
+}

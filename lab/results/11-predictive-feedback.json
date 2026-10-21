@@ -1,0 +1,30 @@
+{
+  "train": 120,
+  "plastic": 0.05,
+  "results": [
+    {
+      "cond": "pattern",
+      "evoked": 33.05,
+      "reproducibility": 0.017,
+      "stampWeight": 0.659,
+      "meanWeight": 0.504,
+      "sigma": 0.553
+    },
+    {
+      "cond": "noise",
+      "evoked": 27.15,
+      "reproducibility": 0.016,
+      "stampWeight": 0.535,
+      "meanWeight": 0.504,
+      "sigma": 0.569
+    },
+    {
+      "cond": "none",
+      "evoked": 25.45,
+      "reproducibility": 0.014,
+      "stampWeight": 0.528,
+      "meanWeight": 0.504,
+      "sigma": 0.558
+    }
+  ]
+}
