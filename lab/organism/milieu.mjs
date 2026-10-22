@@ -6,7 +6,9 @@
 //                cells' firing is not charged: sensory transduction runs on the sense organ's own supply, as the cochlea's on
 //                the stria vascularis, so loud sound is not a drain the network cannot control), of conducting each
 //                spike down its cell's axon arbor (costWire per spike per unit of arbor length: wiring economy, Cajal
-//                1899; Chklovskii, Schikorski & Stevens 2002), of keeping synapses, of moving and of repair. At each impact (a sensory event, brace.mjs) income is paid for inhibition that was
+//                1899; Chklovskii, Schikorski & Stevens 2002), of keeping synapses, of moving, of holding
+//                the muscles stiff (costStiff x the mean commanded stiffness squared: co-contraction, brace.mjs; a body
+//                held stiff all the time spends about twice its basal income) and of repair. At each impact (a sensory event, brace.mjs) income is paid for inhibition that was
 //                already waiting for it 20-60 ms before (network.mjs anticipation: predicted in advance, chance-corrected,
 //                so a reaction earns nothing; paid on its running mean over the last ~4 impacts, so chance
 //                fluctuations average down; a reactive network whose inhibition decays before each beat is not
@@ -16,7 +18,8 @@
 //   stimulation  a need: it rises on its own (tau ~2 min) and is fed 70% by sensory novelty (adapting hair cells, onsets)
 //                and 30% by trophic use (the share of synapses whose presynaptic cell is active): silence and a silent
 //                network both starve it. Unused synapses also atrophy (network.mjs), so starvation has a structural cost.
-// Reward prediction error: each impact's outcome (anticipation income minus the impact's cost) against the running
+// Reward prediction error: each impact's outcome (anticipation income minus the impact's cost minus the tension held
+// in the last ~0.5 s, a leaky integral of the stiffness cost: a brace bought by staying stiff is not free) against the running
 // mean outcome of impacts (Schultz et al. 1997); a phasic signal (tau 0.25 s) that the modulatory cells feel.
 // Viability = half the worst margin plus half the mean margin. Valence is its rate of change (Joffily & Coricelli 2013),
 // a readout for the view; arousal is read from the network's modulator. Neither drives anything.
@@ -25,7 +28,7 @@ import { impactCost } from './brace.mjs';
 const c01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 export const MILIEU = {
-  income: 0.004, anticIncome: 0.004, costSpike: 0.0007, costWire: 0.0003, costSyn: 0.00012, costMotor: 0.004, costChrom: 0.001,
+  income: 0.004, anticIncome: 0.004, costSpike: 0.0007, costWire: 0.0003, costSyn: 0.00012, costMotor: 0.004, costStiff: 0.03, costChrom: 0.001,
   repairRate: 1 / 120, repairCost: 0.5, riotHz: 25, riotDamage: 0.02, strainBear: 0.06, strainDamage: 2,
   needRise: 120, needFeed: 10, restHz: 2,
 };
@@ -33,24 +36,26 @@ export const MILIEU = {
 export function createMilieu(G, P = MILIEU) {
   const s = { energy: 0.8, integrity: 0.9, need: 0.3, viability: 0, valence: 0, alive: true, income: 0, cost: 0, predShare: 0, predFrac: 0, damage: 0, repair: 0,
     rpe: 0, events: 0, anticIncome: 0, impactLoss: 0, lastImpact: null };
-  let vSlow = null, vPrev = null, dVs = 0, antic = 0, outBase = 0, outDev = 1e-3, incE = 0, allE = 0;
+  let vSlow = null, vPrev = null, dVs = 0, antic = 0, outBase = 0, outDev = 1e-3, incE = 0, allE = 0, hold = 0;
   const eff = G.effic;
   function margins() { return [s.energy, s.integrity, 1 - s.need]; }
   function viab() { const m = margins(); return 0.5 * Math.min(...m) + 0.5 * (m[0] + m[1] + m[2]) / 3; }
   s.viability = viab();
 
   /** inp: { dt, rateHz (spikes of non-receptor cells per cell of the body, Hz), wireHz (the same spikes times their
-   *  arbor length), interHz (interneurons), motor, chrom, synMass (sum w / N), strain, stim,
+   *  arbor length), interHz (interneurons), motor, stiff2 (mean commanded stiffness squared), chrom, synMass (sum w / N), strain, stim,
    *  impact: null or { a (0..1), p (protection 0..1), A (anticipation) } } */
   function update(inp) {
     const dt = inp.dt; if (!s.alive) return s;
     s.rpe *= Math.exp(-dt / 0.25);
     let lumpE = 0, lumpI = 0, gain = 0;
+    const holdCost = P.costStiff * (inp.stiff2 || 0) / eff;
+    hold = hold * Math.exp(-dt / 0.5) + holdCost * dt;            // the tension paid over the last ~0.5 s
     if (inp.impact) {
       const { a, p, A } = inp.impact, c = impactCost(a, p);
       antic += 0.25 * (Math.max(-1, Math.min(1, A)) - antic);       // over the last ~4 impacts: one lucky event pays little
       gain = P.anticIncome * a * c01(antic); lumpE = gain - c.dE / eff; lumpI = -c.dI;
-      const outcome = gain - c.dE - c.dI;                          // in energy-equivalent units
+      const outcome = gain - c.dE - c.dI - hold;                   // in energy-equivalent units
       const d = outcome - outBase; s.rpe = Math.max(-1, Math.min(1, d / (3 * outDev)));
       outBase += 0.1 * d; outDev += 0.05 * (Math.abs(d) - outDev); if (outDev < 1e-5) outDev = 1e-5;
       s.predFrac += 0.1 * (A - s.predFrac); s.events++; s.anticIncome += gain; s.impactLoss += c.dE + c.dI;
@@ -60,7 +65,7 @@ export function createMilieu(G, P = MILIEU) {
     const income = P.income * eff;
     const rest = c01(1 - inp.interHz / P.restHz);
     const repair = P.repairRate * (1 - s.integrity) * (1 + 3 * rest) * c01(s.energy / 0.2);
-    const cost = (P.costSpike * inp.rateHz + P.costWire * (inp.wireHz || 0) + P.costSyn * inp.synMass + P.costMotor * inp.motor + P.costChrom * inp.chrom) / eff + P.repairCost * repair;
+    const cost = (P.costSpike * inp.rateHz + P.costWire * (inp.wireHz || 0) + P.costSyn * inp.synMass + P.costMotor * inp.motor + P.costChrom * inp.chrom) / eff + holdCost + P.repairCost * repair;
     const riot = Math.max(0, inp.interHz / P.riotHz - 1), strain = Math.max(0, inp.strain - P.strainBear);
     const damage = P.riotDamage * riot * riot + P.strainDamage * strain * strain + (s.energy < 0.1 ? 0.01 * (0.1 - s.energy) / 0.1 : 0);
     s.energy = c01(s.energy + dt * (income - cost) + lumpE);
@@ -75,5 +80,5 @@ export function createMilieu(G, P = MILIEU) {
     if (s.energy < 0.02 || s.integrity < 0.05) s.alive = false;
     return s;
   }
-  return { s, update, margins, serialize: () => ({ ...s, vSlow, vPrev, antic, outBase, outDev, incE, allE }), restore: (o) => { Object.assign(s, o); vSlow = o.vSlow; vPrev = o.vPrev; antic = o.antic ?? 0; outBase = o.outBase; outDev = o.outDev; incE = o.incE; allE = o.allE; } };
+  return { s, update, margins, serialize: () => ({ ...s, vSlow, vPrev, antic, outBase, outDev, incE, allE, hold }), restore: (o) => { Object.assign(s, o); vSlow = o.vSlow; vPrev = o.vPrev; antic = o.antic ?? 0; outBase = o.outBase; outDev = o.outDev; incE = o.incE; allE = o.allE; hold = o.hold ?? 0; } };
 }
