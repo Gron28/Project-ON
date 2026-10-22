@@ -36,7 +36,7 @@ const settings = { pet: true, size: SIZES.Medium, x: null, y: null, top: true, o
 try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS, 'utf8'))); } catch {}
 settings.ml = { style: true, feel: true, world: true, beat: true, ...(settings.ml || {}) };   // the local models, layer by layer
 settings.cosmos = { ...COSMOS_DEFAULT(), ...(settings.cosmos || {}) };
-settings.organism = { watch: false, genome: 'best', ...(settings.organism || {}) };   // the lab organism, watched in the dashboard
+settings.organism = { watch: false, drive: false, genome: 'best', ...(settings.organism || {}) };   // the lab organism, watched in the dashboard; drive (experimental) lets it move the being
 delete settings.driver; delete settings.blobs;   // experimental drivers that were tried and removed
 // the local folder's main-process side (being/local/main.cjs, not part of the repository): experimental features of its own,
 // menu entries, dashboard keys and the page's 'ext:' channels. Without it there is none of that.
@@ -304,10 +304,11 @@ function setExperimental(k, on) {
 }
 // motion: "Calm" (Settings) stills the dance, the beat pulse and the glints; "Bounce to the beat" (dashboard) is the finer switch
 function sendMotion() { send('bounce', settings.bounce !== false && !settings.calm); send('calm', !!settings.calm); }
-// the lab organism (lab/organism/watch.mjs, run in being/worker.mjs on the being's own ear; it drives nothing): the evolved
-// best genome is read here, since the sandboxed page cannot; without it the worker grows one from a seed
+// the lab organism (lab/organism/watch.mjs, run in being/worker.mjs on the being's own ear; it drives nothing unless
+// settings.organism.drive is on, which implies watch): the evolved best genome is read here, since the sandboxed page
+// cannot; without it the worker grows one from a seed
 function organismState() {
-  const o = { watch: !!settings.organism.watch, genome: null, seed: 1, label: '' };
+  const o = { watch: !!settings.organism.watch, drive: !!(settings.organism.watch && settings.organism.drive), genome: null, seed: 1, label: '' };
   if (!o.watch) return o;
   try {
     const b = JSON.parse(fs.readFileSync(path.join(__dirname, 'lab', 'results', 'organism-best.json'), 'utf8'));
@@ -448,7 +449,13 @@ ipcMain.handle('dash-app', (e, key, value) => {
   }
   if (key === 'retro') { if (value) setRetro(value.k, value.v); return { pix: settings.pix || 1, lev: settings.lev || 0, dith: settings.dith || 0 }; }
   if (key === 'action' && value === 'showcase') { openShowcase(); return true; }
-  if (key === 'organism') { if (value && typeof value.watch === 'boolean' && value.watch !== !!settings.organism.watch) { settings.organism.watch = value.watch; save(); sendOrganism(); } return { watch: !!settings.organism.watch }; }
+  if (key === 'organism') {   // { watch?, drive? }: drive on turns watch on, watch off turns drive off; always answers with both
+    const o = settings.organism, was = `${!!o.watch}/${!!o.drive}`;
+    if (value && typeof value.watch === 'boolean') { o.watch = value.watch; if (!o.watch) o.drive = false; }
+    if (value && typeof value.drive === 'boolean') { o.drive = value.drive; if (o.drive) o.watch = true; }
+    if (`${!!o.watch}/${!!o.drive}` !== was) { save(); sendOrganism(); }
+    return { watch: !!o.watch, drive: !!(o.watch && o.drive) };
+  }
   if (EXTM && EXTM.dashApp) { const r = EXTM.dashApp(key, value); if (r !== undefined) return r; }
   if (key === 'action' && ['feedback+', 'feedback-', 'burst', 'reseed', 'new-seed', 'open-memories'].includes(value)) { if (value === 'feedback+') send('feedback', 1); else if (value === 'feedback-') send('feedback', -1); else send(value); return true; }
   return false;

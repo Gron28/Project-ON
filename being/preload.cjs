@@ -52,7 +52,7 @@ contextBridge.exposeInMainWorld('pet', {
   onDev: (fn) => onState('dev', fn),
   onDevPause: (fn) => onState('dev-pause', fn),          // true while the dashboard is minimized or hidden: no snapshots
   onCalm: (fn) => onState('calm', fn),                   // true: no glints or stars (with the bounce off, from main.cjs)
-  onOrganism: (fn) => onState('organism', fn),           // { watch, genome, seed, label }: the lab organism the dashboard watches (lab/organism/watch.mjs)
+  onOrganism: (fn) => onState('organism', fn),           // { watch, drive, genome, seed, label }: the lab organism the dashboard watches (lab/organism/watch.mjs); drive lets it move the being
   devSnap: (snap) => ipcRenderer.send('dev-snap', snap),
   onDevCmd: (fn) => on('dev-cmd', fn),
   // inert parts of the original API

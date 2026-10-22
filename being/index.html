@@ -268,10 +268,17 @@ beingWorker.onmessage = e => {
   if (d.type === 'ear') { earFrame = d; if (d.onset > onsetPeak) onsetPeak = d.onset; memoryHear(d); voiceHear(d); }
   else if (d.type === 'tissue') { tissueTex.image.data.set(d.tex); tissueTex.needsUpdate = true; tissueStats = d; beingWorker.postMessage({ type: 'recycle', tex: d.tex }, [d.tex.buffer]); }
   else if (d.type === 'organism') ORG.last = d;
+  else if (d.type === 'org-drive') { ORGD.d = d; ORGD.at = performance.now(); ORGD.n++; }
 };
-// the lab organism (lab/organism/watch.mjs) lives in the worker on this ear, only for the dashboard to watch: it drives nothing
-const ORG = { on: false, last: null, full: true };
-pet.onOrganism?.((o) => { ORG.on = !!(o && o.watch); ORG.last = null; ORG.full = true; beingWorker.postMessage({ type: 'organism', on: ORG.on, genome: o && o.genome, seed: o && o.seed, label: o && o.label }); });
+// the lab organism (lab/organism/watch.mjs) lives in the worker on this ear, for the dashboard to watch; it drives nothing
+// unless drive is on (experimental, ORGD below). Switching drive alone does not regrow it.
+const ORG = { on: false, last: null, full: true, key: '' };
+pet.onOrganism?.((o) => {
+  const on = !!(o && o.watch), drive = on && !!o.drive, key = on ? `${o.seed}|${o.label}|${o.genome ? o.genome.length : 0}` : '';
+  ORGD.on = drive; if (!drive) ORGD.d = null;
+  if (on === ORG.on && key === ORG.key) { beingWorker.postMessage({ type: 'org-drive', on: drive }); return; }
+  ORG.on = on; ORG.key = key; ORG.last = null; ORG.full = true; beingWorker.postMessage({ type: 'organism', on, drive, genome: o && o.genome, seed: o && o.seed, label: o && o.label });
+});
 window.__being = () => ({ B2, mind, phys, U, S, earFrame, tissueStats, intensity: an.state.intensity, intensityAbs: an.state.intensityAbs, character: an.state.character, FB, frameMs: lastFrameMs });
 // lab: one row of the feeling against the model's reading of the music (scratch/affect-lab.cjs)
 window.__affect = () => { const b = ML.brain, mo = b ? b.moods : {}, mu = MAT.m.uniforms(); return {
@@ -699,14 +706,15 @@ function ease(cur, to, dt, up, down) { return cur + (to - cur) * (1 - Math.exp(-
 function danceFrame(dt) {
   const D = BOUNCE.k * c01((mind.lock - .25) / .5) * (.35 + .65 * mind.groove) * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);   // listening to a voice, or led by something other than the music: no dance
   MOT.D = ease(MOT.D, D, dt, .6, 1.2);
-  const ph = SHOW.phase, beat = .5 + .5 * Math.cos(2 * Math.PI * ph);
-  U.uShift.value.y += -.011 * MOT.D * beat * beat;                                    // a dip on the beat
-  U.uShift.value.x += .016 * MOT.D * Math.sin(Math.PI * (SHOW.count + ph));            // a sway every two beats
-  U.uScale.value *= 1 + .022 * MOT.D * beat * beat;                                   // a swell with it
+  const ph = SHOW.phase, beat = .5 + .5 * Math.cos(2 * Math.PI * ph), kM = 1 - ORGD.k;   // the organism's dance replaces this one by ORGD.k (0: unchanged)
+  U.uShift.value.y += -.011 * MOT.D * beat * beat * kM;                               // a dip on the beat
+  U.uShift.value.x += .016 * MOT.D * Math.sin(Math.PI * (SHOW.count + ph)) * kM;       // a sway every two beats
+  U.uScale.value *= 1 + .022 * MOT.D * beat * beat * kM;                              // a swell with it
   if (RHY.aligned) {   // the one: the rhythm organ knows where the bar starts; that beat lands deeper and swells more
     const per = RHY.perMind, inBar = (((SHOW.count - RHY.one) % per) + per) % per, one = inBar === 0 ? beat * beat : inBar === per - 1 ? Math.max(0, Math.cos(Math.PI * (1 - ph))) ** 4 : 0;
-    U.uShift.value.y += -.012 * MOT.D * one; U.uScale.value *= 1 + .02 * MOT.D * one;
+    U.uShift.value.y += -.012 * MOT.D * one * kM; U.uScale.value *= 1 + .02 * MOT.D * one * kM;
   }
+  if (ORGD.k > 0) orgDance(dt);
   if (!MOT.on) { MOT.on = true; MOT.scale = U.uScale.value; MOT.shell = U.uShellR.value; MOT.spikes = U.uSpikes.value; MOT.chaos = U.uChaos.value; MOT.kick = U.uKick.value; MOT.sx = U.uShift.value.x; MOT.sy = U.uShift.value.y; }
   MOT.scale = ease(MOT.scale, U.uScale.value, dt, .05, .26); U.uScale.value = MOT.scale;
   MOT.shell = ease(MOT.shell, U.uShellR.value, dt, .05, .24); U.uShellR.value = MOT.shell;
@@ -723,14 +731,63 @@ const REG = { p: new Float64Array(8), a: 0 };
 function regionFrame(dt) {
   const R = mind.regions; if (!R) return;
   let mean = 0;
-  for (let g = 0; g < 8; g++) { const ph = SHOW.phase + R.phase[g], fr = ph - Math.floor(ph); REG.p[g] = Math.pow(1 - fr, 3) * R.coh[g]; mean += REG.p[g] / 8; }
-  const want = (window.__regionsA ?? .06) * BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);
+  const kO = ORGD.k;   // the organism's regions replace the mind's by ORGD.k (0: unchanged)
+  for (let g = 0; g < 8; g++) { const ph = SHOW.phase + R.phase[g], fr = ph - Math.floor(ph); REG.p[g] = Math.pow(1 - fr, 3) * R.coh[g]; if (kO > 0) REG.p[g] += (ORGD.v.reg[g] - REG.p[g]) * kO; mean += REG.p[g] / 8; }
+  const want = (window.__regionsA ?? .06) * (1 + .35 * kO) * BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);
   REG.a = ease(REG.a, want, dt, .5, .8); U.uRegA.value = REG.a;
   for (let g = 0; g < 8; g++) U.uRegP.value[g] = REG.p[g] - mean;
 }
 window.__regions = () => ({ order: +mind.order.toFixed(2), lock: +mind.lock.toFixed(2), cross: +mind.crossPulse.toFixed(2), coh: Array.from(mind.regions.coh, (x) => +x.toFixed(2)), phase: Array.from(mind.regions.phase, (x) => +x.toFixed(2)), crossHeld: Array.from(mind.regions.cross, (x) => +x.toFixed(2)), a: +REG.a.toFixed(3) });   // lab; window.__regionsA sets the swell
 const BOUNCE = { on: true, k: 1 };   // bounce to the beat (pulse, kick jolt, jitter, bass bounce and sway); the menu switches it
 pet.onBounce(v => { BOUNCE.on = v !== false; });
+/* ---------- the lab organism drives (experimental: settings.organism.drive; lab/organism/watch.mjs drive(), posted by
+   the worker as 'org-drive' after each audio block, at most ~60/s). A deliberate, switchable exception to 'the body
+   reads the mind': while it is on and its data is fresh (< 200 ms), the organism, not the hand-written dance, moves the
+   body. ORGD.k fades in and out over ~1 s on the switch and when the data goes stale; at 0 every path below is skipped,
+   so ON is exactly as without it. Mapping (every input clamped and checked finite):
+   - regions: its motor cells' activation per REGION_DIRS region (reg, 0..1, over its own running peak) replaces the
+     mind's region pulses in regionFrame (uRegP minus their mean; uRegA up to x1.35);
+   - dance: its motor pulse (pulse, 0..1, squared) replaces danceFrame's beat curve for the dip and the swell; the sway
+     follows its left-right region balance and its body's sideways position, not every second beat;
+   - wobble: its body's l=2 surface modes and squash replace physics.mjs's in beingBody (orgMix); its position and spin
+     are added to the page's own body (orgAdd), so drags and pokes still move it;
+   - colour: its chromatophores (mean pigment hue, brightness, contrast) and its arousal, valence and energy make a
+     colour the light leans toward (at most 35%) and the metal (at most 10%); the mind and its feeling are untouched;
+   - sleep: all of it scales by (1 - SLEEP.z) and the dance's gates (bounce, beads, a voice, EXT.lead); it never wakes
+     the being. Known limit: its brace peaks ~120 ms after the hit, so its motion lags the beat. ---------- */
+const ORGD = { on: false, d: null, at: -1e9, n: 0, k: 0, D: 0, col: new THREE.Color(), colW: 0,
+  v: { reg: new Float64Array(8), pulse: 0, sway: 0, modes: new Float64Array(5), squash: 0, pos: new Float64Array(3), omega: new Float64Array(3), feel: [0, 0, 0] } };
+const orgC = (x, a, b) => (Number.isFinite(x) ? (x < a ? a : x > b ? b : x) : 0);
+const orgMix = (own, org) => (ORGD.k > 0 ? own + (org - own) * ORGD.k : own);   // the organism replaces
+const orgAdd = (own, org) => (ORGD.k > 0 ? own + org * ORGD.k : own);           // the organism adds
+function orgDriveFrame(dt, now) {
+  const d = ORGD.d, want = ORGD.on && d && now - ORGD.at < 200 ? 1 : 0;
+  if (!want && ORGD.k === 0) return;
+  ORGD.k += (want - ORGD.k) * (1 - Math.exp(-dt / .3)); if (!want && ORGD.k < .002) { ORGD.k = 0; return; }
+  if (!want) return;   // fading out: the last mapped values hold
+  const V = ORGD.v, awake = 1 - SLEEP.z, b = d.body || {};
+  let lr = 0;
+  for (let g = 0; g < 8; g++) { V.reg[g] = ease(V.reg[g], orgC(d.reg && d.reg[g], 0, 1), dt, .03, .12); lr += (g & 1 ? 1 : -1) * V.reg[g] / 4; }
+  V.pulse = ease(V.pulse, orgC(d.pulse, 0, 1), dt, .03, .15);
+  V.sway = ease(V.sway, orgC(.6 * lr + .4 * Math.tanh(8 * orgC(b.pos && b.pos[0], -1, 1)), -1, 1), dt, .08, .2);
+  for (let m = 0; m < 5; m++) V.modes[m] = orgC(b.modes && b.modes[m], -1, 1);
+  V.squash = orgC(b.squash, -.45, .45);
+  for (let i = 0; i < 3; i++) { V.pos[i] = orgC(b.pos && b.pos[i], -.25, .25) * awake; V.omega[i] = orgC(b.omega && b.omega[i], -2, 2) * awake; }
+  const f = d.feel || [], c = d.chrom || [], A = orgC(f[0], 0, 1), Va = orgC(f[1], -1, 1), E = orgC(f[2], 0, 1);
+  V.feel[0] = A; V.feel[1] = Va; V.feel[2] = E;
+  ORGD.col.setHSL(orgC(c[1], 0, 1), orgC(.3 + .4 * A + 1.5 * orgC(c[2], 0, 1), .2, .9), orgC(.42 + .25 * orgC(c[0], 0, 1) + .08 * Va, .3, .7));
+  ORGD.colW = .35 * (.5 + .5 * E) * awake;
+}
+function orgDance(dt) {   // its dip, swell and sway, in place of the beat curve (danceFrame)
+  const D = BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);
+  ORGD.D = ease(ORGD.D, D, dt, .6, 1.2);
+  const k = ORGD.k * ORGD.D, p = ORGD.v.pulse * ORGD.v.pulse;
+  U.uShift.value.y += -.014 * k * p;
+  U.uShift.value.x += .016 * k * ORGD.v.sway;
+  U.uScale.value *= 1 + .024 * k * p;
+}
+window.__orgDrive = () => ({ on: ORGD.on, k: +ORGD.k.toFixed(3), ageMs: ORGD.d ? Math.round(performance.now() - ORGD.at) : null, received: ORGD.n, last: ORGD.d,
+  mapped: { ...ORGD.v, reg: Array.from(ORGD.v.reg), modes: Array.from(ORGD.v.modes), pos: Array.from(ORGD.v.pos), omega: Array.from(ORGD.v.omega), D: ORGD.D, colour: '#' + ORGD.col.getHexString(), colW: ORGD.colW } });   // lab
 pet.onRetro?.(v => { RETRO.pix = Math.min(24, Math.max(1, +v?.pix || 1)); RETRO.lev = +v?.lev >= 2 ? Math.min(64, +v.lev) : 0; RETRO.dith = Math.min(1, Math.max(0, +v?.dith || 0)); retroApply(); });
 pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
 const HATCH = { t: -1, swapped: false, A: 1.4, B: 2.8 };
@@ -2076,13 +2133,14 @@ function beingBody(dt, t) {
   B2.vy += (-45 * B2.sy - 11 * B2.vy) * dt - push * .55; B2.sy += B2.vy * dt;   // a soft spring: the bass lowers it, it rises back
   B2.sx += (sub * .015 * BOUNCE.k * Math.sin(Math.PI * (SHOW.count + SHOW.phase)) - B2.sx) * (1 - Math.exp(-dt / .2));   // heavy bass sways it on the felt pulse
   phys.step(dt, { fx: B2.sx * 16 + S.pan * .5 * S.awake, fy: -push * 10, fz: (V.kick - V.snare * .5) * 3.5 * BOUNCE.k, tx: V.snare * 1.2, ty: V.hat * 1.0, tz: (SHOW.phase - .5) * .5 * m.lock, sub: e ? e.sub : 0, hit: (V.kick + .6 * V.snare) * BOUNCE.k, pulsePhase: SHOW.phase, arousal: m.arousal, groove: m.groove });
-  for (let m2 = 0; m2 < 5; m2++) U.uSH.value[m2] += phys.modes[m2] * .038 * S.awake * (1 - z);
-  const sq = phys.squash * .14 * BOUNCE.k * (1 - z);
+  // with the organism driving (ORGD), its body's modes and squash replace these, its position and spin add (0: unchanged)
+  for (let m2 = 0; m2 < 5; m2++) U.uSH.value[m2] += orgMix(phys.modes[m2], ORGD.v.modes[m2]) * .038 * S.awake * (1 - z);
+  const sq = orgMix(phys.squash, ORGD.v.squash) * .14 * BOUNCE.k * (1 - z);
   U.uWide.value = THREE.MathUtils.clamp(U.uWide.value + sq, -.3, .55);
   U.uScale.value *= 1 - sq * .28;
-  U.uShift.value.x += B2.sx + THREE.MathUtils.clamp(phys.pos[0] * .18, -.03, .03);
-  U.uShift.value.y += THREE.MathUtils.clamp(B2.sy + phys.pos[1] * .18, -.06, .06);
-  S.spin += phys.omega[1] * dt * .2;
+  U.uShift.value.x += B2.sx + THREE.MathUtils.clamp(orgAdd(phys.pos[0], ORGD.v.pos[0]) * .18, -.03, .03);
+  U.uShift.value.y += THREE.MathUtils.clamp(B2.sy + orgAdd(phys.pos[1], ORGD.v.pos[1]) * .18, -.06, .06);
+  S.spin += orgAdd(phys.omega[1], ORGD.v.omega[1]) * dt * .2;
   // roughness makes it bristle (an aversive sound; Arnal 2015)
   const rough = e ? c01(e.rough * 2.5) : 0;
   if (look.fx.spikes) U.uSpikes.value += .07 * rough * S.awake;
@@ -2116,7 +2174,7 @@ renderer.setAnimationLoop(ts => {
     ...(ML.av && performance.now() - ML.avT < 5000 ? { musicA: ML.av.arousal, musicV: ML.av.valence } : {}) })); onsetPeak = 0;
   beOnTime(dt, f0); handleEvents(evsNow, f0);
   B.chill *= Math.exp(-dt / 2.5); B.recoil *= Math.exp(-dt / .6); B.flinch *= Math.exp(-dt / .25);
-  rhythmFrame(dt);
+  rhythmFrame(dt); orgDriveFrame(dt, f0);
   const st = mixState(an.state), bs = st.beat, structure = st.structure;
   // hit envelopes: the engine's smoothed ones, plus the instant ones from events
   const kickV = Math.max(st.drums.kick, V.kick), snareV = Math.max(st.drums.snare, V.snare), hatV = Math.max(st.drums.hat, V.hat);
@@ -2231,9 +2289,11 @@ renderer.setAnimationLoop(ts => {
   else { const l = LIGHT[look.light] || LIGHT.solar; lightTo.setRGB(l[0], l[1], l[2]); }
   { const ml = materialLight(MAT.m.shown); if (ml) lightTo.lerp(COS.c.setRGB(...ml.rgb), ml.w); }   // what it is made of colours its light
   if (COS.t && COS.t.light) lightTo.lerp(COS.c.setRGB(...COS.t.light.rgb), COS.t.light.w);   // the sky modes' light
+  if (ORGD.k > 0) lightTo.lerp(ORGD.col, ORGD.colW * ORGD.k);   // the organism's chromatophores and feeling tint the light (ORGD)
   U.uLight.value.lerp(lightTo, 1 - Math.exp(-dt * 1.5));
   { const m = FINISH[look.finish] || FINISH.chrome; metalTo.setRGB(m[0], m[1], m[2]).lerp(lightTo, .1); if (COS.t && COS.t.metal) metalTo.lerp(COS.c.setRGB(...COS.t.metal.rgb), COS.t.metal.w); }
   metalTo.lerp(COS.c.setHSL(BUILD.tint[0], BUILD.tint[1], .6), .2);   // its own tint in the metal
+  if (ORGD.k > 0) metalTo.lerp(ORGD.col, .1 * ORGD.k * (1 - SLEEP.z));   // and a little of the organism's (ORGD)
   U.uMetal.value.lerp(metalTo, 1 - Math.exp(-dt * 2));
   // glow follows level and dopamine, which can step in one frame: eased (rise ~80 ms, fall ~400 ms) so it swells, never cuts
   { const g = (.28 + S.awake * (.22 + X * .55 + st.level * .25)) * (.6 + .75 * loudF + contrast) * T.glow * (1 + .35 * Math.max(0, mind.daPhasic) + .4 * B.chill) * COS.glow * (1 + EXT.glow);

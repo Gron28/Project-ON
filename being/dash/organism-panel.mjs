@@ -1,16 +1,12 @@
 // being/dash/organism-panel.mjs - the dashboard's Organism panel: watch the lab organism (lab/organism/) that ON runs
-// beside the being, hearing what ON hears. Watch only: it drives nothing, and its body does not move ON.
-// The three views (Anatomy, Live, Diagram), the body and the radial profile are the lab page's own
-// (lab/prototypes/organism/), fed a remote organism built from the snapshots (organism-proxy.mjs). Renders only while
-// the switch is on, the panel is open and on screen, and the window is visible.
+// beside the being, hearing what ON hears, and (second switch, experimental, when the build offers it) let its muscles
+// and skin move ON (dash-app 'organism' { drive }). The three views (Anatomy, Live, Diagram: a left-to-right flow whose
+// blocks are named by their measured roles, lab/prototypes/organism/roles.mjs), the body and the radial profile are the
+// lab page's own (lab/prototypes/organism/), fed a remote organism built from the snapshots (organism-proxy.mjs). Renders
+// only while the switch is on, the panel is open and on screen, and the window is visible.
 
 import { createRemoteOrganism } from './organism-proxy.mjs';
 
-const LEGEND = {
-  anatomy: 'Every cell where development put it: ▲ receptor · ● interneuron · ◆ interoceptor · ✦ modulator · ■ motor · ⬭ chromatophore. Gold haze: the hearing field on the skin. Colour: the areas found in its wiring. Hover a cell.',
-  live: 'Cells glow as they fire; each spike sends sparks along its strongest synapses, from the senses inward and out to the effectors. Violet waves: the modulatory cells’ release.',
-  diagram: 'Each group of cells as one block: senses above, areas between, the nucleus at the centre, effectors below. Tubes: the wiring between groups; moving pulses: activity. Hover a block.',
-};
 const CSS = `
   .org-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
   .org-top label.sw2 { display: inline-flex; gap: 6px; align-items: center; color: var(--ink); cursor: pointer; }
@@ -22,11 +18,24 @@ const CSS = `
   .org-view .labels .area { font-size: 10.5px; pointer-events: none; white-space: nowrap; background: #06080bd9; border: 1px solid #222a33; border-radius: 4px; padding: 1px 5px; }
   .org-view .labels .gl { font-size: 10px; line-height: 1.35; pointer-events: none; white-space: nowrap; text-align: center; color: var(--ink2); background: #06080bc0; border-radius: 4px; padding: 2px 5px; }
   .org-view .labels .gl b { font-weight: 600; } .org-view .labels .gl .n, .org-view .labels .gl .ln { color: var(--muted); }
-  .org-view .labels .gl canvas { width: 72px; height: 16px; display: inline-block; vertical-align: middle; }
+  .org-view.tall { height: 620px; } .org-grid.diag { grid-template-columns: minmax(0, 1fr); }
+  .org-view .labels .gl.flow { text-align: left; white-space: normal; background: none; padding: 0; line-height: 1.25; }
+  .org-view .labels .gl.flow .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .org-view .labels .gl.flow .t b { font-size: 11.5px; } .org-view .labels .gl.flow .n { font-size: 9.5px; }
+  .org-view .labels .gl.flow .ln { font-size: 10px; color: var(--ink2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .org-view .labels .gl.stage { text-align: left; white-space: normal; background: none; padding: 0; }
+  .org-view .labels .gl.stage b { font-size: 11px; color: var(--ink); text-transform: uppercase; letter-spacing: .06em; } .org-view .labels .gl.stage .ln { font-size: 10px; }
+  .org-view .labels .gl.pct { font-size: 9.5px; padding: 0 3px; color: var(--ink); background: #06080bd0; }
+  .org-what { color: var(--ink2); font-size: 11.5px; line-height: 1.45; margin: 0 0 8px; padding: 7px 10px; border-left: 2px solid var(--axis); background: #ffffff06; border-radius: 0 6px 6px 0; }
+  .org-what b { color: var(--ink); font-weight: 600; }
+  .org-drive { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: -2px 0 8px; }
+  .org-drive label.sw2 { display: inline-flex; gap: 6px; align-items: center; color: var(--ink); cursor: pointer; }
   .org-bar { position: absolute; z-index: 3; top: 8px; left: 8px; right: 8px; display: flex; gap: 8px; align-items: center; pointer-events: none; }
   .org-bar > * { pointer-events: auto; } .org-bar select { width: auto; max-width: 190px; }
   .org-bar .sub2 { margin-left: auto; background: #06080bc0; border-radius: 4px; padding: 1px 6px; pointer-events: none; }
-  .org-legend { position: absolute; z-index: 2; left: 178px; right: 8px; bottom: 6px; color: var(--muted); font-size: 10.5px; pointer-events: none; background: #06080bd0; border-radius: 4px; padding: 2px 6px; }
+  .org-legend { color: var(--muted); font-size: 10.5px; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 3px 14px; }
+  .org-legend .k { white-space: nowrap; } .org-legend .k i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .org-legend .k b { font-weight: 600; }
+  .org-view.diag .org-body { display: none; }
   .org-body { position: absolute; z-index: 2; left: 8px; bottom: 6px; width: 160px; height: 160px; border: 1px solid var(--ring); border-radius: 8px; background: #080b0fcc; }
   .org-body > canvas { display: block; }
   .org-body .cap { position: absolute; left: 7px; top: 5px; color: var(--muted); font-size: 10px; }
@@ -41,46 +50,68 @@ const CSS = `
 
 export function install(ORG, { h, panel, fmt }) {
   const remote = createRemoteOrganism(), org = remote.org;
-  let body, sw, note, info, grid, waitEl, viewHost, bodyHost, legend, side, kvEl, braceC, braceTxt, clock, seg, colorSel;
-  let watch = false, supported = true, view = null, bodyView = null, radial = null, traces = null, libs = null, onScreen = true, raf = 0, lastT = 0, lastKv = 0, lastAreas = 0, mode = 'anatomy', frames = 0, pendingStatic = false, lastSnap = 0;
+  let body, sw, note, info, grid, waitEl, viewHost, bodyHost, legend, side, kvEl, braceC, braceTxt, clock, seg, colorSel, whatEl, driveRow, driveSw, VT = null;
+  let watch = false, drive = false, canDrive = false, supported = true, view = null, bodyView = null, radial = null, traces = null, libs = null, onScreen = true, raf = 0, lastT = 0, lastKv = 0, lastAreas = 0, mode = 'anatomy', frames = 0, pendingStatic = false, lastSnap = 0;
 
   function build() {
     if (body) return;
     const st = document.createElement('style'); st.textContent = CSS; document.head.append(st);
     body = panel('organism', 'Organism', true);
-    sw = h('input', { type: 'checkbox', 'aria-label': 'Run the organism (watch only)', on: { change: () => setWatch(sw.checked) } });
-    note = h('span', { class: 'sub2' }, 'It hears what ON hears. Its body doesn’t move ON yet.');
+    sw = h('input', { type: 'checkbox', 'aria-label': 'Run the organism', on: { change: () => setWatch(sw.checked) } });
+    note = h('span', { class: 'sub2' });
+    driveSw = h('input', { type: 'checkbox', 'aria-label': 'Let it move ON (experimental)', on: { change: () => setDrive(driveSw.checked) } });
+    driveRow = h('div', { class: 'org-drive', hidden: true }, h('label', { class: 'sw2' }, driveSw, 'Let it move ON (experimental)'),
+      h('span', { class: 'sub2' }, 'Its muscles move ON’s body and its skin colours ON’s light. It braces ~120 ms after the beat, so its motion lags the music for now.'));
+    whatEl = h('p', { class: 'org-what' });
     info = h('span', { class: 'sub2', style: 'margin-left:auto' });
     waitEl = h('div', { class: 'org-wait' }, 'Switch it on to watch.');
-    seg = h('div', { class: 'seg' }, ...['anatomy', 'live', 'diagram'].map((v, k) => h('button', { data: { v }, title: `${LEGEND[v]} (key ${k + 1} over the view)`, on: { click: () => setMode(v) } }, v[0].toUpperCase() + v.slice(1))));
-    colorSel = h('select', { 'aria-label': 'colour by', on: { change: () => view && view.setColorBy(colorSel.value) } },
+    seg = h('div', { class: 'seg' }, ...['anatomy', 'live', 'diagram'].map((v, k) => h('button', { data: { v }, title: `key ${k + 1} over the view`, on: { click: () => setMode(v) } }, v[0].toUpperCase() + v.slice(1))));
+    colorSel = h('select', { 'aria-label': 'colour by', on: { change: () => { if (view) view.setColorBy(colorSel.value); explain(); } } },
       ...[['community', 'colour: area'], ['type', 'colour: kind of cell'], ['depth', 'colour: depth from the senses'], ['ei', 'colour: excitatory / inhibitory']].map(([value, t]) => h('option', { value }, t)));
     clock = h('span', { class: 'sub2 num' });
     legend = h('div', { class: 'org-legend' });
     bodyHost = h('div', { class: 'org-body' }, h('span', { class: 'cap' }, 'body · chromatophores'));
-    viewHost = h('div', { class: 'org-view', tabIndex: 0 }, h('div', { class: 'org-bar' }, seg, colorSel, clock), bodyHost, legend);
+    viewHost = h('div', { class: 'org-view', tabIndex: 0 }, h('div', { class: 'org-bar' }, seg, colorSel, clock), bodyHost);
     viewHost.addEventListener('keydown', (e) => { const v = { 1: 'anatomy', 2: 'live', 3: 'diagram' }[e.key]; if (v) setMode(v); });
     kvEl = h('div', { class: 'kv' }); braceC = h('canvas'); braceC.style.height = '96px'; braceTxt = h('div', { class: 'sub2', style: 'margin-top:3px' });
     side = h('div', { class: 'org-side' }, h('h3', {}, 'Vital signs'), kvEl, h('div', { id: 'orgTraces', style: 'margin-top:8px' }),
       h('h3', {}, 'Bracing against the beat'), braceC, braceTxt, h('div', { id: 'orgRadial', style: 'margin-top:10px' }));
-    grid = h('div', { class: 'org-grid' }, viewHost, side); grid.hidden = true;
-    body.append(h('div', { class: 'org-top' }, h('label', { class: 'sw2' }, sw, 'Run the organism (watch only)'), note, info), waitEl, grid);
+    grid = h('div', { class: 'org-grid' }, h('div', {}, whatEl, viewHost, legend), side); grid.hidden = true;
+    body.append(h('div', { class: 'org-top' }, h('label', { class: 'sw2' }, sw, 'Run the organism'), note, info), driveRow, waitEl, grid);
     new IntersectionObserver((es) => { onScreen = es.some((e) => e.isIntersecting); wake(); }).observe(body);
     document.addEventListener('visibilitychange', wake);
     body.closest('.panel').querySelector('h2').addEventListener('click', () => setTimeout(wake));
     setMode('anatomy');
-    window.dash.app('organism').then((r) => { if (r && typeof r === 'object') { watch = !!r.watch; sw.checked = watch; } else supported = false; status(); wake(); })
-      .catch(() => { supported = false; status(); });
+    window.dash.app('organism').then((r) => { take(r); status(); wake(); }).catch(() => { supported = false; status(); });
+  }
+  /** the main process's answer: { watch, drive? } (older builds have no drive: its switch stays hidden) */
+  function take(r) {
+    supported = !!r && typeof r === 'object';
+    watch = supported && !!r.watch; canDrive = supported && 'drive' in r; drive = canDrive && !!r.drive;
+    sw.checked = watch; driveSw.checked = drive; driveRow.hidden = !canDrive;
   }
   async function setWatch(on) {
-    try { const r = await window.dash.app('organism', { watch: !!on }); supported = !!r && typeof r === 'object'; watch = supported && !!r.watch; } catch { supported = false; watch = false; }
-    sw.checked = watch; status(); wake();
+    try { take(await window.dash.app('organism', { watch: !!on })); } catch { supported = false; watch = false; }
+    status(); wake();
   }
-  function setMode(v) { mode = v; for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); legend.textContent = LEGEND[v]; if (view) view.setMode(v); }
+  async function setDrive(on) {
+    try { take(await window.dash.app('organism', { drive: !!on })); } catch { driveSw.checked = drive; }
+    status(); wake();
+  }
+  function setMode(v) {
+    mode = v; for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v);
+    viewHost.classList.toggle('tall', v === 'diagram'); viewHost.classList.toggle('diag', v === 'diagram'); grid.classList.toggle('diag', v === 'diagram'); explain();
+    if (view) view.setMode(v);
+  }
+  function explain() {
+    if (!VT || !whatEl) return;   // the words come with the views (loaded when it is first shown)
+    whatEl.innerHTML = `<b>What you’re seeing.</b> ${VT.VIEW_WHAT[mode]}`; legend.innerHTML = VT.viewKey(mode, colorSel.value);
+  }
   function status() {
     if (!body) return;
     const r = remote.ready && watch;
     grid.hidden = !r; waitEl.hidden = r;
+    note.textContent = drive ? 'It hears what ON hears, and its muscles and skin move ON.' : 'It hears what ON hears. Watch only: it doesn’t move ON.';
     waitEl.textContent = !supported ? 'This build of ON cannot run the organism.' : !watch ? 'Switch it on to watch.' : pendingStatic ? 'Waiting for the organism’s anatomy…' : 'Starting the organism…';
     info.textContent = remote.ready ? `${remote.label || 'organism'} · ${org.dev.N} cells` : '';
   }
@@ -107,7 +138,7 @@ export function install(ORG, { h, panel, fmt }) {
     try {
       const [V, B, R, TR, AN] = await Promise.all([import('../../lab/prototypes/organism/view.mjs'), import('../../lab/prototypes/organism/body.mjs'),
         import('../../lab/prototypes/organism/radial.mjs'), import('../../lab/prototypes/nervous-system/traces.mjs'), import('../../lab/organism/analysis.mjs')]);
-      libs = { V, AN };
+      libs = { V, AN }; VT = V; explain();
       const tip = h('div', { class: 'org-tip', hidden: true }); document.body.append(tip);
       view = V.createView(viewHost, tip); bodyView = B.createBody(bodyHost); radial = R.createRadial(side.querySelector('#orgRadial'));
       view.setThreshold(0.55); view.setColorBy(colorSel.value);
@@ -141,7 +172,7 @@ export function install(ORG, { h, panel, fmt }) {
     const dt = Math.min(0.1, Math.max(0, (now - lastT) / 1000)); lastT = now;
     if (!view) { ensureView().then((ok) => ok && wake()); return; }
     try {
-      remote.tick(dt);
+      remote.tick(dt); view.observe(org.takeEvents());
       traces.sample(org.time); traces.draw(org.time);
       view.frame(dt); bodyView.frame(dt);
       if (now - lastAreas > 30000) findAreas();

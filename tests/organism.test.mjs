@@ -310,3 +310,29 @@ test('watch: the ear tap leaves frame() unchanged; the snapshot carries what the
   assert.ok(transferables(s).length >= 8);
   console.log(`  develop ${w.developMs.toFixed(0)} ms, ${w.org.dev.N} cells, ${s.timing.impacts.length} impacts, lead ${s.timing.impacts.map((i) => i.leadMs).join(' ')} ms`);
 });
+
+test('watch: drive() is compact, bounded and finite, and reports the largest impact since the last call', async () => {
+  const { createEar } = await import('../being/ear.mjs');
+  const { createWatch } = await import('../lab/organism/watch.mjs');
+  const ear = createEar(), w = createWatch({ genome: null, seed: 3 });
+  const x = (n) => 0.4 * Math.exp(-((n % 24000) / 48000) * 30) * Math.sin(n * 0.01);   // a hit every 0.5 s
+  const fin = (v, a, b) => Number.isFinite(v) && v >= a && v <= b;
+  let impacts = 0, drives = 0;
+  for (let n = 0; n < 48000 * 3; n++) {
+    ear.sample(x(n));
+    if (n % 192 === 191) w.tick(ear.tap());
+    if (n % 960 === 959) {   // every 20 ms, as the worker posts it
+      const d = w.drive(); drives++;
+      assert.equal(d.reg.length, 8); assert.ok(d.reg.every((r) => fin(r, 0, 1)));
+      assert.ok(fin(d.pulse, 0, 1) && fin(d.motor, 0, 1) && fin(d.brace, 0, 1) && fin(d.impact, 0, Infinity));
+      assert.ok(fin(d.chrom[0], 0, 1) && fin(d.chrom[1], 0, 1) && fin(d.chrom[2], 0, 1));
+      assert.equal(d.body.pos.length, 3); assert.equal(d.body.modes.length, 5); assert.equal(d.body.omega.length, 3);
+      assert.ok([...d.body.pos, ...d.body.modes, ...d.body.omega, d.body.squash, d.body.strain].every(Number.isFinite));
+      assert.ok(d.feel.every(Number.isFinite));
+      if (d.impact > 0) impacts++;
+      assert.ok(JSON.stringify({ ...d, reg: Array.from(d.reg) }).length < 1200);   // small enough for ~60 posts a second
+    }
+  }
+  assert.ok(impacts >= 4 && impacts <= 8, `impacts seen ${impacts} of 6 hits`);   // each hit reported once, not lost between calls
+  assert.equal(w.drive().impact, 0);
+});

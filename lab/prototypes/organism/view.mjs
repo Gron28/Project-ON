@@ -5,9 +5,11 @@
 //   Live     the same body, dark, with activity flowing: cells glow as they fire, every spike sends sparks along its
 //            strongest synapses (so signals visibly run from the senses inward to the nucleus and out to the effectors),
 //            and the modulatory cells' release spreads from the nucleus as a soft wave.
-//   Diagram  a live 3D schematic: each functional group (groups.mjs) collapsed into a block, laid out from the senses
-//            (outer ring above) through the areas to the nucleus (centre) and out to the effectors (ring below); tubes are
-//            the summed weights between groups, their moving pulses the summed activity; each block has a readout.
+//   Diagram  a left-to-right flow: each functional group (groups.mjs) collapsed into a block on a card, in five stages
+//            (senses, listeners, integrators, feeling core, muscles and skin). Each card is titled by the group's measured
+//            role (roles.mjs: what feeds it, when it fires relative to hits and beats, where it sends). Arrows: summed
+//            weight between groups (thickness), their moving pulses the activity they carry, % their share of the
+//            receiver's input; faint arrows running back are feedback.
 // Also replays development as a time-lapse. Reads the organism, never drives it. ON's dashboard shows a remote organism
 // through the same view (being/dash/organism-proxy.mjs): one with takeSpikes() reports its spikes instead of rate jumps.
 
@@ -15,7 +17,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { T, TYPE_NAMES, isReceptor, MILIEU_VARS } from '../../organism/develop.mjs';
-import { buildGroups, diagramPositions, groupLinks } from './groups.mjs';
+import { buildGroups, diagramPositions, groupLinks, flowLayout, FLOW } from './groups.mjs';
+import { createRoles, STAGES } from './roles.mjs';
 
 const add = { transparent: true, blending: THREE.AdditiveBlending, depthWrite: false };
 const PAL = [0xe8a33d, 0x3fb8d0, 0xd95f8f, 0x8fd16a, 0x9d7cf0, 0xf07a4a, 0x4fd6a0, 0xe0d050, 0x5f8ff0, 0xd08ad8, 0xa0c04a, 0xf0a0a0];
@@ -61,7 +64,9 @@ export function createView(host, tip) {
   let org = null, meshes = [], where = null, base = [], member = null, depthArr = null, colorMode = 'community', edges = null, edgeInfo = null, areaLabels = [];
   let lapse = null, lapseObjs = [], threshold = 0.35, showEdges = true, dead = null;
   let G = null, anat = null, diag = null, cur = null, links = [], bundles = [], blocks = [], strong = null, rfPrev = null, tPrev = 0, spk = null;
-  let mode = 'anatomy', m = 0, live = 0, moved = true, tAnim = 0, modAcc = 0, lastWave = 0, sampleT = 0;
+  let mode = 'anatomy', m = 0, live = 0, moved = true, tAnim = 0, modAcc = 0, lastWave = 0;
+  let flow = null, stageEls = [], desc = [], descT = 0, labelK = 0, camSaved = null, camFlow = null, spinSaved = true;
+  const roles = createRoles();
   const M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), SC = new THREE.Vector3(), P = new THREE.Vector3(), C = new THREE.Color(), C2 = new THREE.Color(), UP = new THREE.Vector3(0, 1, 0);
   const halo = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshBasicMaterial({ ...add }), 1024);
   halo.instanceMatrix.setUsage(THREE.DynamicDrawUsage); halo.frustumCulled = false; scene.add(halo);
@@ -91,7 +96,7 @@ export function createView(host, tip) {
     anat = Float32Array.from(d.pos); cur = Float32Array.from(d.pos); diag = Float32Array.from(d.pos);
     base = Array.from({ length: N }, () => new THREE.Color());
     member = null; depthArr = null; dead = o.net.dead; G = null; moved = true;
-    rfPrev = Float32Array.from(o.net.rf); spk = new Float32Array(N); tPrev = o.time;
+    rfPrev = Float32Array.from(o.net.rf); spk = new Float32Array(N); tPrev = o.time; roles.reset(N); desc = [];
     // the hearing field on the skin: every ear, onset and roughness receptor's direction
     const dirs = []; for (let i = 0; i < N && dirs.length < N_EARF; i++) if (d.type[i] <= T.ROUGH) { const l = Math.hypot(d.pos[3 * i], d.pos[3 * i + 1], d.pos[3 * i + 2]) || 1; dirs.push([d.pos[3 * i] / l, d.pos[3 * i + 1] / l, d.pos[3 * i + 2] / l]); }
     dirs.forEach((u, k) => skinMat.uniforms.uEar.value[k].set(...u)); skinMat.uniforms.uN.value = dirs.length;
@@ -106,7 +111,7 @@ export function createView(host, tip) {
     const N = org.dev.N, k = ease(m);
     for (let i = 0; i < N; i++) {
       for (let a = 0; a < 3; a++) cur[3 * i + a] = anat[3 * i + a] + k * (diag[3 * i + a] - anat[3 * i + a]);
-      placeCell(i, cur[3 * i], cur[3 * i + 1], cur[3 * i + 2], 1 - 0.4 * k);
+      placeCell(i, cur[3 * i], cur[3 * i + 1], cur[3 * i + 2], 1 - 0.5 * k);
     }
     meshes.forEach((mm) => { mm.instanceMatrix.needsUpdate = true; mm.boundingSphere = null; });
   }
@@ -137,7 +142,7 @@ export function createView(host, tip) {
     [...cs.entries()].filter(([, o]) => o.n >= 12).sort((a, b) => b[1].n - a[1].n).slice(0, 8).forEach(([c, o]) => {
       const top = o.types.map((n, t) => [n, t]).filter(([n]) => n > 0).sort((a, b) => b[0] - a[0]).slice(0, 2).map(([n, t]) => `${TYPE_NAMES[t]} ${Math.round(100 * n / o.n)}%`).join(', ');
       const el = document.createElement('div'); el.className = 'area'; el.style.color = '#' + communityColor(c).getHexString();
-      el.textContent = `area ${c + 1} · ${o.n} · ${top}`;
+      el.textContent = `area ${c + 1} · ${o.n} · ${top}`; el.dataset.area = c;
       const obj = new CSS2DObject(el), p = new THREE.Vector3(o.x, o.y, o.z), l = p.length();
       obj.position.copy(l > 0.05 ? p.multiplyScalar(1.12 / l) : p.set(0, 1.12, 0)); scene.add(obj); areaLabels.push(obj);
       const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(o.x, o.y, o.z), obj.position.clone().multiplyScalar(0.97)]), new THREE.LineBasicMaterial({ color: communityColor(c), transparent: true, opacity: 0.35 }));
@@ -187,37 +192,82 @@ export function createView(host, tip) {
         float end = smoothstep(0., .04, v.x) * smoothstep(1., .96, v.x);
         gl_FragColor = vec4(uC * (.05 + .16 * uW + 1.4 * uF * pulse * pulse) * uA * end, 1.); }` });
   function clearDiagram() {
-    for (const b of bundles) { scene.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); }
-    for (const b of blocks) { scene.remove(b.mesh, b.label); b.mesh.geometry.dispose(); b.mesh.material.dispose(); b.label.element.remove(); }
-    bundles = []; blocks = []; links = [];
+    for (const b of bundles) { scene.remove(b.mesh, b.head, b.label); b.mesh.geometry.dispose(); b.mesh.material.dispose(); b.head.geometry.dispose(); b.head.material.dispose(); b.label.element.remove(); }
+    for (const b of blocks) { scene.remove(b.mesh, b.label, b.card); b.mesh.geometry.dispose(); b.mesh.material.dispose(); b.card.geometry.dispose(); b.card.material.dispose(); b.label.element.remove(); }
+    for (const o of stageEls) { scene.remove(o); o.element.remove(); }
+    bundles = []; blocks = []; links = []; stageEls = [];
   }
+  const hex = (c) => '#' + new THREE.Color(c).getHexString();
   function buildDiagram() {
     clearDiagram(); if (!org) return;
     G = buildGroups(org, member, depthArr, (c) => communityColor(c).getHex(), TYPE_COL);
-    diag = diagramPositions(org, G);
-    for (const g of G.groups) {
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(g.rb + 0.02, 32, 20), rimMat(g.col, 0, 2.2)); mesh.position.set(...g.p); mesh.userData.group = g.id;
-      const el = document.createElement('div'); el.className = 'gl';
-      el.innerHTML = `<b style="color:#${new THREE.Color(g.col).getHexString()}">${g.name}</b> <span class="n">${g.cells.length}</span> <canvas width="72" height="16"></canvas> <span class="hz"></span><div class="ln"></div>`;
-      const label = new CSS2DObject(el); label.position.set(g.p[0], g.p[1] - g.rb - 0.05, g.p[2]); label.center.set(0.5, 0);
-      scene.add(mesh, label);
-      blocks.push({ g, mesh, label, el, cv: el.querySelector('canvas'), hz: el.querySelector('.hz'), ln: el.querySelector('.ln'), hist: new Float32Array(60), n: 0, act: 0 });
-    }
     const e = org.net.edges(); links = groupLinks(G, e);
-    const wMax = links.length ? links[0].w : 1, keep = links.filter((l) => l.w >= 0.04 * wMax).slice(0, 40);
-    const A = new THREE.Vector3(), B = new THREE.Vector3(), D = new THREE.Vector3(), O = new THREE.Vector3(), M = new THREE.Vector3();
-    for (const l of keep) {
-      const ga = G.groups[l.a], gb = G.groups[l.b];
-      A.set(...ga.p); B.set(...gb.p); D.subVectors(B, A); const len = D.length(); D.normalize();
-      O.crossVectors(D, UP); if (O.lengthSq() < 1e-4) O.set(1, 0, 0); O.normalize().multiplyScalar(0.035);   // A->B and B->A run side by side
-      const a = A.clone().addScaledVector(D, ga.rb).add(O), b = B.clone().addScaledVector(D, -gb.rb).add(O);
-      M.addVectors(a, b).multiplyScalar(0.5); const ctrl = M.clone().multiplyScalar(0.55).addScaledVector(O, 2);   // bend toward the centre: bundles
-      const curve = new THREE.QuadraticBezierCurve3(a, ctrl, b), q = Math.sqrt(l.w / wMax);
-      const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 40, 0.003 + 0.013 * q, 6, false), tubeMat(ga.col));
-      mesh.material.uniforms.uW.value = q; mesh.material.uniforms.uR.value = Math.max(1, Math.round(len / 0.35));
-      scene.add(mesh); bundles.push({ l, mesh, f: 0 });
+    roles.setGroups(G, links);
+    flow = flowLayout(G, links, roles.stageOf, (host.clientWidth || 900) / (host.clientHeight || 500));
+    diag = diagramPositions(org, G);
+    const row = flow.row;
+    for (const g of G.groups) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(g.rb + 0.012, 32, 20), rimMat(g.col, 0, 2.2)); mesh.position.set(...g.p); mesh.userData.group = g.id;
+      // the card: the block on its left, the text to its right; arrows meet its edges
+      const x0 = g.p[0] - FLOW.rbMax - 0.035, x1 = g.p[0] + FLOW.card, y0 = g.p[1] - 0.44 * row, y1 = g.p[1] + 0.44 * row;
+      const card = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x1, y0, 0), new THREE.Vector3(x1, y1, 0), new THREE.Vector3(x0, y1, 0)]),
+        new THREE.LineBasicMaterial({ color: g.col, transparent: true, opacity: 0, depthWrite: false }));
+      const el = document.createElement('div'); el.className = 'gl flow';
+      el.innerHTML = `<div class="t"><b style="color:${hex(g.col)}"></b> <span class="n"></span></div><div class="ln"></div>`;
+      const label = new CSS2DObject(el); label.position.set(g.p[0] + FLOW.rbMax + 0.03, g.p[1], 0); label.center.set(0, 0.5);
+      scene.add(mesh, card, label);
+      blocks.push({ g, mesh, card, label, el, title: el.querySelector('b'), sub: el.querySelector('.n'), ln: el.querySelector('.ln'), act: 0, x0, x1 });
     }
-    moved = true;
+    STAGES.forEach((st, k) => {
+      if (!flow.cols[k]) return;
+      const el = document.createElement('div'); el.className = 'gl stage'; el.innerHTML = `<b>${st.title}</b><div class="ln">${st.cap}</div>`;
+      const o = new CSS2DObject(el); o.position.set(flow.colX[k] - FLOW.rbMax - 0.035, flow.top + 0.04, 0); o.center.set(0, 1); scene.add(o); stageEls.push(o);
+    });
+    // which links to draw: each group's main inputs (up to 3, until 80% of its input weight) and its 2 main outputs
+    const keep = new Set(), inW = new Map();
+    for (const l of links) inW.set(l.b, (inW.get(l.b) || 0) + l.w);
+    for (const g of G.groups) {
+      let acc = 0, n = 0; for (const l of links) if (l.b === g.id && n < 3 && acc < 0.8 * inW.get(g.id)) { keep.add(l); acc += l.w; n++; }
+      n = 0; for (const l of links) if (l.a === g.id && n < 2) { keep.add(l); n++; }
+    }
+    const shown = links.filter((l) => keep.has(l)).slice(0, 48), wMax = shown.length ? Math.max(...shown.map((l) => l.w)) : 1;
+    const byId = new Map(blocks.map((b) => [b.g.id, b]));
+    for (const l of shown) {
+      const A = byId.get(l.a), B = byId.get(l.b), ga = A.g, gb = B.g, ya = ga.p[1], yb = gb.p[1], q = Math.sqrt(l.w / wMax);
+      const fwd = gb.stage > ga.stage, same = gb.stage === ga.stage;
+      let a, b, c1, c2;
+      if (fwd) { a = new THREE.Vector3(A.x1, ya, 0); b = new THREE.Vector3(B.x0 - 0.012, yb, 0); const dx = (b.x - a.x) * 0.5; c1 = new THREE.Vector3(a.x + dx, ya, 0); c2 = new THREE.Vector3(b.x - dx, yb, 0); }
+      else if (same) { a = new THREE.Vector3(A.x1, ya + 0.03, 0); b = new THREE.Vector3(B.x1 + 0.012, yb - 0.03, 0); const bow = 0.1 + 0.12 * Math.abs(ya - yb); c1 = new THREE.Vector3(a.x + bow, ya, 0); c2 = new THREE.Vector3(b.x + bow, yb, 0); }
+      else { a = new THREE.Vector3(A.x0, ya - 0.04, 0); b = new THREE.Vector3(B.x1 + 0.012, yb - 0.04, 0); const dip = -0.16 - 0.05 * (ga.stage - gb.stage); c1 = new THREE.Vector3(a.x - 0.15, Math.min(ya, yb) + dip, 0); c2 = new THREE.Vector3(b.x + 0.15, Math.min(ya, yb) + dip, 0); }
+      const curve = new THREE.CubicBezierCurve3(a, c1, c2, b), len = curve.getLength(), rad = fwd ? 0.0035 + 0.0125 * q : 0.0025 + 0.006 * q;
+      const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, rad, 6, false), tubeMat(ga.col));
+      mesh.material.uniforms.uW.value = q; mesh.material.uniforms.uR.value = Math.max(1, Math.round(len / 0.3));
+      const head = new THREE.Mesh(new THREE.ConeGeometry(Math.max(0.014, 2.4 * rad), 0.045, 10), new THREE.MeshBasicMaterial({ color: ga.col, ...add, opacity: 0 }));
+      const tan = curve.getTangentAt(1).normalize(); head.quaternion.setFromUnitVectors(UP, tan); head.position.copy(b).addScaledVector(tan, -0.022);
+      const lel = document.createElement('div'); lel.className = 'gl pct'; const label = new CSS2DObject(lel); label.position.copy(curve.getPoint(0.5)); label.visible = false;
+      scene.add(mesh, head, label); bundles.push({ l, mesh, head, label, el: lel, f: 0, fb: fwd ? 1 : 0.45, share: 0 });
+    }
+    camFlow = null; labelK = 0; descT = 1e9; moved = true;
+  }
+  /** the camera that frames the flow, front on */
+  function flowCamera() {
+    if (!flow) return null;
+    const w = host.clientWidth || 800, h = host.clientHeight || 500, asp = w / h, tn = Math.tan((camera.fov * Math.PI) / 360);
+    const cx = (flow.x0 + flow.x1) / 2, cy = (flow.y0 + flow.y1) / 2, W = flow.x1 - flow.x0 + 0.1, H = flow.y1 - flow.y0 + 0.1;
+    const D = Math.max(H / 2 / tn, W / 2 / (tn * asp));
+    return { pos: new THREE.Vector3(cx, cy, D), target: new THREE.Vector3(cx, cy, 0), asp };
+  }
+  /** Anatomy and Live orbit the body; the Diagram is framed front on (zoom and pan still work). The orbit is restored. */
+  function cameraMorph() {
+    const k = ease(m);
+    if (k > 0 && !camSaved) { camSaved = { pos: camera.position.clone(), target: controls.target.clone() }; spinSaved = controls.autoRotate; }
+    if (!camSaved) return;
+    if (!camFlow || Math.abs(camFlow.asp - (host.clientWidth || 1) / (host.clientHeight || 1)) > 0.02) camFlow = flowCamera();
+    if (!camFlow) return;
+    if (k < 1) { camera.position.lerpVectors(camSaved.pos, camFlow.pos, k); controls.target.lerpVectors(camSaved.target, camFlow.target, k); }
+    else if (moved) { camera.position.copy(camFlow.pos); controls.target.copy(camFlow.target); }
+    controls.autoRotate = k > 0 ? false : spinSaved; controls.enableRotate = k === 0;
+    if (k === 0) { camera.position.copy(camSaved.pos); controls.target.copy(camSaved.target); camSaved = null; }
   }
 
   // ---- time-lapse of development ---------------------------------------------------------------------------------------------
@@ -230,6 +280,7 @@ export function createView(host, tip) {
   function startLapse(seconds = 16) {
     if (!org) return; clearLapse(); const d = org.dev;
     lapse = { t: 0, dur: seconds, mode }; setMode('anatomy'); m = 0; live = 0;
+    if (camSaved) { camera.position.copy(camSaved.pos); controls.target.copy(camSaved.target); controls.autoRotate = spinSaved; controls.enableRotate = true; camSaved = null; }
     const P0 = [], TT = [], TI = [];
     for (const a of d.axons) {
       const n = a.pts.length / 3, col = new THREE.Color(TYPE_COL[d.type[a.cell]]);
@@ -266,7 +317,9 @@ export function createView(host, tip) {
   // ---- per frame ------------------------------------------------------------------------------------------------------------
   function resize() {
     const w = host.clientWidth, h = host.clientHeight;
-    if (renderer.domElement.width !== Math.round(w * renderer.getPixelRatio()) || renderer.domElement.height !== Math.round(h * renderer.getPixelRatio())) { renderer.setSize(w, h, false); renderer.domElement.style.width = w + 'px'; renderer.domElement.style.height = h + 'px'; labels.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+    if (renderer.domElement.width !== Math.round(w * renderer.getPixelRatio()) || renderer.domElement.height !== Math.round(h * renderer.getPixelRatio())) { renderer.setSize(w, h, false); renderer.domElement.style.width = w + 'px'; renderer.domElement.style.height = h + 'px'; labels.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); moved = true; labelK = 0;
+      if (G && flow && !lapse && Math.abs(Math.log(flow.aspect / (w / h))) > 0.05) { buildDiagram(); placeAll(); }   // the flow fills the view's shape
+    }
   }
   /** spikes per cell since the last frame, read from the fast rate's jumps (the page steps many network ticks per frame) */
   function spikesSince() {
@@ -315,38 +368,42 @@ export function createView(host, tip) {
     }
   }
   let readState = null;
-  // the group's essential-variable link, short, with the variable's live value
-  const linkVal = (g, s) => {
-    if (!s) return g.link;
-    const f = (x) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(2);
-    if (g.kind === 'sense') return g.key === 'proprio' ? `strain ${f(s.strain)}` : `→ need ${f(s.need)}`;
-    if (g.kind === 'area') return `costs energy ${f(s.energy)}`;
-    if (g.key === 'intero') return g.link;
-    if (g.key === 'mod') return `RPE ${f(s.rpe ?? 0)}`;
-    if (g.key === 'motor') return `brace ${f(s.brace ?? 0)} → integrity ${f(s.integrity)}`;
-    return `costs energy ${f(s.energy)}`;
-  };
+  /** role titles and lines (roles.mjs), the arrows' shares, and the Anatomy's area labels; once a second */
+  function setRoleTexts() {
+    desc = roles.describe();
+    blocks.forEach((b) => { const d = desc[b.g.id]; if (!d) return; b.title.textContent = d.title; b.sub.textContent = d.sub; b.ln.textContent = d.line; });
+    const sh = roles.linkShares();
+    for (const b of bundles) { b.share = sh.get(b.l) || 0; b.el.textContent = Math.round(100 * b.share) + '%'; }
+    for (const o of areaLabels) {
+      const el = o.element; if (!el || el.dataset.area == null || !G) continue;
+      const gi = G.groups.findIndex((g) => g.key === 'area' + el.dataset.area), d = desc[gi];
+      if (d) el.textContent = `${d.title} · area ${+el.dataset.area + 1} · ${G.groups[gi].cells.length} cells`;
+    }
+  }
   function diagramFrame(dt) {
     const k = ease(m), rf = org.net.rf;
+    descT += dt; if (descT > 1) { descT = 0; setRoleTexts(); }
+    // card text is sized to the card in screen pixels
+    const K = (host.clientHeight || 500) / (2 * Math.max(0.1, camera.position.distanceTo(controls.target)) * Math.tan((camera.fov * Math.PI) / 360));
+    if (!labelK || Math.abs(K - labelK) > 0.03 * labelK) {
+      labelK = K;
+      for (const b of blocks) b.el.style.width = Math.max(60, Math.round((FLOW.card - FLOW.rbMax - 0.06) * K)) + 'px';
+      for (const o of stageEls) o.element.style.width = Math.max(70, Math.round((FLOW.col - 0.1) * K)) + 'px';
+    }
     for (const b of bundles) {
       const l = b.l; let s = 0; for (let q = 0; q < l.pre.length; q++) s += l.wk[q] * rf[l.pre[q]];
       const f = c01(s / (l.w * 8 + 1e-6)); b.f += (1 - Math.exp(-dt / 0.15)) * (f - b.f);
-      const u = b.mesh.material.uniforms; u.uA.value = k; u.uF.value = b.f; u.uT.value = tAnim * (0.6 + 1.4 * b.f); b.mesh.visible = k > 0.01;
+      const u = b.mesh.material.uniforms; u.uA.value = k * b.fb; u.uF.value = b.f; u.uT.value = tAnim * (0.6 + 1.4 * b.f); b.mesh.visible = k > 0.01;
+      b.head.material.opacity = k * b.fb * (0.5 + 0.5 * b.f); b.head.visible = k > 0.01;
+      b.label.visible = k > 0.6 && b.share >= 0.25 && b.fb === 1; b.el.style.opacity = c01((k - 0.6) / 0.3);
     }
-    sampleT += dt; const doSample = sampleT > 0.15; if (doSample) sampleT = 0;
     for (const b of blocks) {
       let s = 0; for (const i of b.g.cells) s += rf[i]; s /= b.g.cells.length; b.act += (1 - Math.exp(-dt / 0.2)) * (s - b.act);
       b.mesh.material.uniforms.uA.value = k * (0.35 + 0.9 * c01(b.act / 12)); b.mesh.visible = k > 0.01;
-      // labels of blocks behind the centre recede, so the front ones read
-      P.set(...b.g.p).applyMatrix4(camera.matrixWorldInverse); const front = P.z > -camera.position.length() + 0.05;
-      b.label.visible = k > 0.35; b.el.style.opacity = c01((k - 0.35) / 0.4) * (front ? 1 : 0.28);
-      if (doSample && b.label.visible) {
-        b.hist[b.n++ % 60] = s; b.hz.textContent = s.toFixed(1) + ' Hz'; b.ln.textContent = linkVal(b.g, readState);
-        const g2 = b.cv.getContext('2d'), mx = Math.max(4, ...b.hist); g2.clearRect(0, 0, 72, 16); g2.strokeStyle = '#' + new THREE.Color(b.g.col).getHexString(); g2.lineWidth = 1.5; g2.beginPath();
-        for (let q = 0; q < 60; q++) { const v = b.hist[(b.n + q) % 60], x = (72 * q) / 59, y = 15 - 13 * (v / mx); if (q) g2.lineTo(x, y); else g2.moveTo(x, y); }
-        g2.stroke();
-      }
+      b.card.material.opacity = k * (0.2 + 0.3 * c01(b.act / 12)); b.card.visible = k > 0.01;
+      b.label.visible = k > 0.35; b.el.style.opacity = c01((k - 0.35) / 0.4);
     }
+    for (const o of stageEls) { o.visible = k > 0.35; o.element.style.opacity = c01((k - 0.35) / 0.4); }
   }
   function frame(dt) {
     resize(); controls.update(); tAnim += dt;
@@ -356,8 +413,9 @@ export function createView(host, tip) {
       const mT = mode === 'diagram' ? 1 : 0, lT = mode === 'live' ? 1 : 0, rate = dt / 0.9;
       if (m !== mT) { m = mT > m ? Math.min(mT, m + rate) : Math.max(mT, m - rate); moved = true; }
       live += (lT > live ? 1 : -1) * Math.min(Math.abs(lT - live), dt / 0.6);
-      if (moved) { placeAll(); moved = m !== mT; }
+      if (moved) { placeAll(); cameraMorph(); moved = m !== mT; }
       const d = org.dev, rf = org.net.rf, N = d.N, k = ease(m), A = 1 - k; let h = 0;
+      roles.update(org.time, org.net.rf);
       spikesSince(); let modSp = 0; for (const i of org.C.mod) modSp += spk[i];
       // cells: base colour (blended to the group's colour in the diagram), brightness by firing; Live is darker at rest
       for (let i = 0; i < N; i++) {
@@ -390,22 +448,29 @@ export function createView(host, tip) {
     renderer.render(scene, camera); labels.render(scene, camera);
   }
 
-  function setMode(md) { if (!['anatomy', 'live', 'diagram'].includes(md)) return; mode = md; controls.autoRotateSpeed = md === 'diagram' ? 0.2 : 0.35; }
+  function setMode(md) { if (!['anatomy', 'live', 'diagram'].includes(md)) return; mode = md; moved = true; }
 
   // ---- hover: a cell, or (in the diagram) a group --------------------------------------------------------------------------
-  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), PLANE = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), HIT = new THREE.Vector3();
   labels.domElement.addEventListener('pointermove', (ev) => {
     if (!org || lapse) return;
     const r = labels.domElement.getBoundingClientRect(); mouse.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
-    ray.setFromCamera(mouse, camera); const hit = ray.intersectObjects(meshes, false)[0];
+    ray.setFromCamera(mouse, camera);
+    // in the Diagram, anywhere on a card shows its group
+    let card = null;
+    if (m > 0.5 && G && flow && ray.ray.intersectPlane(PLANE, HIT)) card = blocks.find((b) => HIT.x >= b.x0 && HIT.x <= b.x1 && Math.abs(HIT.y - b.g.p[1]) <= 0.44 * flow.row);
+    const hit = card ? null : ray.intersectObjects(meshes, false)[0];
     const show = (txt) => { tip.textContent = txt; tip.style.left = ev.clientX + 14 + 'px'; tip.style.top = ev.clientY + 10 + 'px'; tip.hidden = false; };
     if (!hit) {
       if (m > 0.5 && G) {
-        const bh = ray.intersectObjects(blocks.map((b) => b.mesh), false)[0];
+        const bh = card ? { object: card.mesh } : ray.intersectObjects(blocks.map((b) => b.mesh), false)[0];
         if (bh) {
-          const g = G.groups[bh.object.userData.group], inn = links.filter((l) => l.b === g.id).slice(0, 3), out = links.filter((l) => l.a === g.id).slice(0, 3);
+          const g = G.groups[bh.object.userData.group], d = desc[g.id] || roles.describe()[g.id];
           let s = 0; for (const i of g.cells) s += org.net.rf[i];
-          return show(`${g.name}: ${g.cells.length} cells, ${(s / g.cells.length).toFixed(1)} Hz now${Number.isFinite(g.hops) ? `, ${g.hops.toFixed(1)} hops from the senses` : ''}\n${linkVal(g, readState)}\nstrongest in:  ${inn.map((l) => `${G.groups[l.a].name} ${l.w.toFixed(1)}`).join(' · ') || '-'}\nstrongest out: ${out.map((l) => `${G.groups[l.b].name} ${l.w.toFixed(1)}`).join(' · ') || '-'}`);
+          const mixTxt = (l) => l.filter(([, v]) => v >= 0.03).slice(0, 5).map(([k, v]) => `${k} ${Math.round(100 * v)}%`).join(' · ') || '-';
+          const tm = d.timing, hits = !roles.exact ? 'not measured' : tm.hits ? `peaks ${Math.abs(tm.hits.ms)} ms ${tm.hits.ms < 0 ? 'before' : 'after'} hits (×${tm.hits.gain.toFixed(1)} its usual rate)` : roles.impacts >= 4 ? 'no clear peak around hits' : 'not enough hits heard yet';
+          const beat = !roles.exact ? 'not measured' : tm.beat ? `locked to the beat (strength ${tm.beat.vs.toFixed(2)} of 1)` : roles.period ? 'not locked to the beat' : 'no beat known';
+          return show(`${d.title} (${g.name}): ${g.cells.length} cells, ${(s / g.cells.length).toFixed(1)} Hz now\n${d.line}\nfed by (last 20 s):  ${mixTxt(d.input)}\nsends to:  ${mixTxt(d.output)}\nfiring: ${hits}\nbeat: ${beat}${Number.isFinite(g.hops) ? `\n${g.hops.toFixed(1)} synapses from the senses on average` : ''}${roles.exact ? '' : '\n(timing is not measured: this build of ON sends no spike times)'}`);
         }
       }
       tip.hidden = true; return;
@@ -420,14 +485,38 @@ export function createView(host, tip) {
     if (t === T.PROPRIO) extra = `\nfires on ${d.extra[4 * cell] > 0 ? 'outward' : 'inward'} deformation here`;
     if (d.osc && d.osc[2 * cell] > 0) extra += `\nresonator, natural ${d.osc[2 * cell].toFixed(2)} Hz`;
     const rr = Math.hypot(d.pos[3 * cell], d.pos[3 * cell + 1], d.pos[3 * cell + 2]);
-    show(`cell ${cell}: ${TYPE_NAMES[t]}${isReceptor(t) ? '' : d.isI[cell] ? ' (inhibitory)' : ' (excitatory)'}${extra}\narea ${member ? member[cell] + 1 : '-'} · ${G && G.of[cell] >= 0 ? G.groups[G.of[cell]].name + ' · ' : ''}depth ${depthArr ? depthArr[cell] : '-'} hops · radius ${rr.toFixed(2)}\nrate ${org.net.rf[cell].toFixed(1)} Hz now, ${org.net.rbar[cell].toFixed(1)} Hz over 5 s\n${kin} synapses in, ${kout} out${dead[cell] ? '\nLESIONED' : ''}`);
+    show(`cell ${cell}: ${TYPE_NAMES[t]}${isReceptor(t) ? '' : d.isI[cell] ? ' (inhibitory)' : ' (excitatory)'}${extra}\narea ${member ? member[cell] + 1 : '-'} · ${G && G.of[cell] >= 0 && desc[G.of[cell]] ? desc[G.of[cell]].title + ' · ' : ''}depth ${depthArr ? depthArr[cell] : '-'} hops · radius ${rr.toFixed(2)}\nrate ${org.net.rf[cell].toFixed(1)} Hz now, ${org.net.rbar[cell].toFixed(1)} Hz over 5 s\n${kin} synapses in, ${kout} out${dead[cell] ? '\nLESIONED' : ''}`);
   });
   labels.domElement.addEventListener('pointerleave', () => { tip.hidden = true; });
 
   return {
     setOrganism, setPartition, frame, startLapse, get lapsing() { return !!lapse; },
+    /** spikes with their times, impacts and beat-phase samples, for the roles (roles.mjs observe()); the roles now */
+    observe: (ev) => roles.observe(ev), get roles() { return desc; },
+    get flowInfo() { return flow && { row: flow.row, aspect: flow.aspect, cols: flow.cols, host: [host.clientWidth, host.clientHeight], cam: camFlow && camFlow.pos.toArray() }; },
     setMode, get mode() { return mode; }, get morph() { return m; },
     setColorBy(c) { colorMode = c; recolor(); }, setThreshold(q) { threshold = q; rebuildEdges(); }, setEdges(on) { showEdges = on; rebuildEdges(); },
     rebuildEdges, controls, camera, get groups() { return G; }, get links() { return links; },
   };
+}
+
+// ---- words for a beginner: what each view shows, and a key to its shapes and colours (the dashboard panel and the lab page)
+const sw = (c, txt) => `<span class="k"><i style="background:#${new THREE.Color(c).getHexString()}"></i>${txt}</span>`;
+const gl = (g, txt, c = '#c9ced6') => `<span class="k"><b style="color:${c}">${g}</b> ${txt}</span>`;
+export const VIEW_WHAT = {
+  anatomy: 'Its body, cut open: every cell sits where it grew. Sense cells line the skin (the gold haze is where it can hear); thinking cells fill the inside; its feeling core is the violet ball at the centre; muscles and skin cells sit near the surface. Lines are synapses, brighter when stronger. Each colour is an area: cells wired mostly to each other. Labels say what each area was measured to do.',
+  live: 'The same body while it hears what ON hears. A cell lights up when it fires, and each spike sends a spark along its strongest synapses, so you can watch signals run in from the senses on the skin and out to the muscles and skin cells. A violet wave is the feeling core releasing its signal, which changes how every synapse learns.',
+  diagram: 'How signals flow, left to right: its senses, the areas it grew, its feeling core, and its muscles and skin. Each card is a group of cells. An area’s name is measured, not given: what feeds it, when it fires compared with the hits in the music, and where it sends, over the last 20 seconds. Arrows are wiring: thicker means stronger, moving pulses are signals flowing now. Hover a card for its numbers.',
+};
+/** the key for a view (HTML); colorBy: 'community' | 'type' | 'depth' | 'ei' */
+export function viewKey(mode, colorBy = 'community') {
+  if (mode === 'diagram') return [gl('●', 'a group of cells: size = how many, glow = how much they fire now'), gl('━▶', 'wiring from one group to another: thickness = strength, colour = the sender'),
+    gl('∙∙∙', 'pulses moving along it: signals now'), gl('62%', 'share of what the receiver gets'), gl('↩', 'faint arrows back: feedback'), gl('~80 ms before', 'when it fires, measured around hits and beats')].join('');
+  const shapes = [gl('▲', 'sense'), gl('●', 'thinking cell'), gl('◆', 'need sensor'), gl('✦', 'feeling core'), gl('■', 'muscle'), gl('⬭', 'skin cell')].join('');
+  if (mode === 'live') return shapes + gl('✧', 'bright = firing, sparks = a spike travelling a synapse') + gl('◯', 'violet wave = the feeling core’s signal', '#c58cff');
+  const colours = colorBy === 'type' ? [sw(TYPE_COL[T.EAR], 'ear'), sw(TYPE_COL[T.ONSET], 'onset'), sw(TYPE_COL[T.ROUGH], 'roughness'), sw(TYPE_COL[T.SUB], 'sub-bass'), sw(TYPE_COL[T.PROPRIO], 'body sense'), sw(TYPE_COL[T.INTER], 'thinking'), sw(I_COL, 'inhibitory'), sw(TYPE_COL[T.INTERO], 'need'), sw(TYPE_COL[T.MOD], 'feeling core'), sw(TYPE_COL[T.MOTOR], 'muscle'), sw(TYPE_COL[T.CHROM], 'skin')].join('')
+    : colorBy === 'ei' ? sw(0xf0a040, 'excites') + sw(I_COL, 'inhibits') + sw(0xe8e6e0, 'sense')
+    : colorBy === 'depth' ? '<span class="k">colour: synapses from the senses, blue 0 → red 6+, grey unreached</span>'
+    : '<span class="k">colour: its areas (cells wired mostly to each other)</span>';
+  return shapes + colours + gl('—', 'synapse, brighter = stronger');
 }

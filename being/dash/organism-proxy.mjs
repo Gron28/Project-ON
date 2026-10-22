@@ -7,7 +7,11 @@
 //            genomeLabel, earSpread, nOsc, extra?(4N), osc?(2N), seed? }
 //   live     { t, rf(N) Hz, spikes (cell indices that spiked since the last snapshot), dead(N)|null,
 //            resonators: { cells, hz, phase }|null, state: {...}, stats?, phys: { pos, slosh, modes, strain, omega? }, chrom? }
+//            optional: spikeAge (per spike, 4 ms network steps before t: exact spike times), beatPhase (the being's
+//            shown beat phase at t, 0..1)
 //   timing?  { impacts: [{ t, leadMs | braceMs | offsetMs, beatPhase, protection? }] }
+// takeEvents() hands the Diagram's roles (lab/prototypes/organism/roles.mjs) the spikes with their times, new impacts and
+// beat-phase samples. Without spikeAge a snapshot's spikes are dated to the middle of the interval they came in.
 // Between snapshots the rates are interpolated and each snapshot's spikes are released spread over the next interval,
 // so the Live view stays continuous at the display's frame rate (one snapshot interval behind).
 
@@ -20,6 +24,7 @@ export function createRemoteOrganism() {
   let prevRf = null, curRf = null, arrive = 0, interval = 0.125, tPrev = 0, tCur = 0, state = {}, stats = { born: 0, pruned: 0, sprouted: 0 };
   let res = null, phys = { pos: [0, 0, 0], slosh: [0, 0, 0], modes: [0, 0, 0, 0, 0], strain: 0, omega: [0, 0, 0] };
   let queue = { cells: new Int32Array(0), at: new Float32Array(0), next: 0 }, chromTarget = null, timing = null;
+  let ev = { cells: [], times: [], impacts: [], beats: [], exact: false }, lastLT = NaN, lastImp = -Infinity;
   const now = () => performance.now() / 1000;
 
   function setStatic(s) {
@@ -38,6 +43,7 @@ export function createRemoteOrganism() {
     prevRf = new Float32Array(N); curRf = new Float32Array(N); act = new Float32Array(N);
     queue = { cells: new Int32Array(0), at: new Float32Array(0), next: 0 };
     version = s.version; res = null;
+    ev = { cells: [], times: [], impacts: [], beats: [], exact: false }; lastLT = NaN; lastImp = -Infinity;
   }
   function resonators() {
     if (res && res.cells && res.cells.length) return { cells: Int32Array.from(res.cells), hz: f32(res.hz), phase: f32(res.phase) };
@@ -64,6 +70,7 @@ export function createRemoteOrganism() {
     const pairs = Array.from({ length: n }, (_, k) => [sp[k], t + interval * Math.random()]).sort((a, b) => a[1] - b[1]);
     pairs.forEach(([c, a], k) => { cells[left + k] = c; at[left + k] = a; });
     queue = { cells, at, next: 0 };
+    logEvents(L, o.timing, sp);
     if (L.state) { state = { ...L.state }; if (state.need == null && state.stimNeed != null) state.need = state.stimNeed; }
     if (L.stats) Object.assign(stats, L.stats);
     res = L.resonators || null;
@@ -73,6 +80,24 @@ export function createRemoteOrganism() {
     if (o.timing) timing = o.timing;
     return changed ? 'static' : 'live';
   }
+
+  /** spikes with their organism times, impacts and beat samples, for takeEvents() */
+  function logEvents(L, tm, sp) {
+    const t = +L.t; if (!Number.isFinite(t)) return;
+    const age = L.spikeAge && L.spikeAge.length === sp.length ? L.spikeAge : null;
+    const mid = Number.isFinite(lastLT) && t > lastLT && t - lastLT < 1 ? (t + lastLT) / 2 : t - interval / 2;
+    if (age || Number.isFinite(lastLT)) for (let k = 0; k < sp.length; k++) { ev.cells.push(sp[k]); ev.times.push(age ? t - 0.004 * age[k] : mid); }
+    ev.exact = !!age; lastLT = t;
+    if (Number.isFinite(L.beatPhase)) ev.beats.push({ t, ph: +L.beatPhase });
+    const imps = tm && Array.isArray(tm.impacts) ? tm.impacts.filter((i) => Number.isFinite(i.t)) : [];
+    if (imps.length && Math.max(...imps.map((i) => i.t)) < lastImp - 5) lastImp = -Infinity;   // a new run
+    for (const i of imps) {
+      if (i.t > lastImp + 1e-4) { lastImp = i.t; ev.impacts.push({ t: i.t, lead: i.leadMs ?? i.braceMs ?? (i.offsetMs != null ? -i.offsetMs : null) }); }
+    }
+    if (ev.cells.length > 60000) { ev.cells.splice(0, 30000); ev.times.splice(0, 30000); }   // nobody is taking them
+    if (ev.beats.length > 200) ev.beats.splice(0, 100); if (ev.impacts.length > 100) ev.impacts.splice(0, 50);
+  }
+  function takeEvents() { const o = ev; ev = { cells: [], times: [], impacts: [], beats: [], exact: o.exact }; return o; }
 
   /** advance the display: interpolate rates, decay the slow rate, ease the chromatophores (call once per frame) */
   function tick(dt) {
@@ -98,7 +123,7 @@ export function createRemoteOrganism() {
     get dev() { return dev; }, get net() { return net; }, get C() { return C; }, get act() { return act; }, get phys() { return phys; },
     get time() { return arrive ? tPrev + Math.min(1, (now() - arrive) / interval) * (tCur - tPrev) : 0; },
     rec: { motorSpikes: [], onsets: [], impacts: [] },
-    state: () => state, takeSpikes, poke() {}, record() {},
+    state: () => state, takeSpikes, takeEvents, poke() {}, record() {},
   };
   return { org, apply, tick, get ready() { return !!dev && !!arrive; }, get version() { return version; }, get timing() { return timing; }, get label() { return dev ? dev.label : ''; } };
 }

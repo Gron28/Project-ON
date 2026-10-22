@@ -1,8 +1,8 @@
 // lab/prototypes/organism/groups.mjs - the organism's functional groups for the Diagram view: ear receptors by band, the
 // other senses, the areas found by community detection (interneurons only), the interoceptive and modulatory cells of the
-// nucleus, and the effectors. Each group gets a place in a 3D schematic laid out by the order signals take: the senses
-// on an outer ring above, the areas between (shallower areas higher and further out, deeper ones lower and nearer the
-// centre), the nucleus's cells at the centre, the effectors on an outer ring below. Reads the organism, never drives it.
+// nucleus, and the effectors. flowLayout() places them as a left-to-right flow in five stages (senses, listeners,
+// integrators, feeling core, muscles and skin; roles.mjs says which stage an area is in), each group a card: its block of
+// cells on the left, its text to the right. Reads the organism, never drives it.
 
 import { T, MILIEU_VARS } from '../../organism/develop.mjs';
 
@@ -63,6 +63,28 @@ function layout(groups) {
   const core = groups.filter((g) => g.kind === 'core');
   core.forEach((g, k) => { g.p = [core.length > 1 ? (k ? 0.13 : -0.13) : 0, -0.12, 0]; });
   ring(groups.filter((g) => g.kind === 'effector'), 0.42, -0.5, Math.PI / 2);
+}
+
+/** the flow: stage s in column s (x), groups stacked in it (y), ordered so links cross little (senses keep their order;
+ *  the rest by the mean height of what feeds them). Sets g.p, g.rb, g.stage; returns the frame (world units). */
+export const FLOW = { col: 1.5, card: 1.22, rbMax: 0.11 };
+/** aspect: the view's width / height, so the rows use the height there is */
+export function flowLayout(G, links, stageOf, aspect = 1.8) {
+  const cols = [[], [], [], [], []];
+  for (const g of G.groups) { g.stage = stageOf(g.id); cols[g.stage].push(g); }
+  // an empty stage takes no column
+  const colX = []; let used = 0; for (let s = 0; s < 5; s++) { colX[s] = used * FLOW.col; if (cols[s].length) used++; }
+  const maxN = Math.max(1, ...cols.map((c) => c.length)), W = (used - 1) * FLOW.col + FLOW.card + 0.2, row = Math.max(0.28, Math.min(0.6, (W / aspect - 0.6) / maxN));
+  const y = new Map(), place = (c, s) => { c.forEach((g, k) => { g.p = [colX[s], ((c.length - 1) / 2 - k) * row, 0]; y.set(g.id, g.p[1]); }); };
+  place(cols[0], 0);
+  for (let s = 1; s < 5; s++) {
+    const bary = (g) => { let a = 0, w = 0; for (const l of links) if (l.b === g.id && y.has(l.a)) { a += l.w * y.get(l.a); w += l.w; } return w ? a / w : 0; };
+    const b = new Map(cols[s].map((g) => [g.id, bary(g)])); cols[s].sort((p, q) => b.get(q.id) - b.get(p.id));
+    place(cols[s], s);
+  }
+  for (const g of G.groups) g.rb = Math.min(FLOW.rbMax, 0.4 * row, 0.03 + 0.019 * Math.cbrt(g.cells.length));
+  const top = ((maxN - 1) / 2) * row + 0.5 * row;
+  return { row, top, aspect, colX, cols: cols.map((c) => c.length), x0: -FLOW.rbMax - 0.05, x1: (used - 1) * FLOW.col + FLOW.card, y0: -top, y1: top + 0.5 };
 }
 
 /** cell positions inside their block: a Fibonacci ball, cells ordered by anatomical radius (deep cells inside) */
