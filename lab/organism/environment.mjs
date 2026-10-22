@@ -82,9 +82,14 @@ export function earFrames(schedule, seed = 1) {
   const beats = env.grid.map((b, i, a) => { const nx = a[i + 1], pv = a[i - 1]; const period = nx && nx.seg === b.seg ? nx.t - b.t : pv && pv.seg === b.seg ? b.t - pv.t : 0.5; return { ...b, period }; });
   return { n, amp, onset, rough, sub, seg, schedule, beats };
 }
-/** a reusable frame view for organism.tick() */
+/** a reusable frame view for organism.tick(); stereo frames (worlds.mjs framesOf) also carry each channel's amplitudes
+ *  and onset (ampL, ampR, onsetL, onsetR) and the direction of the sounds that just began (pan); mono frames leave them
+ *  null (pan 0: from all around) */
 export function frameAt(F, f, view = { amp: null, onset: 0, rough: 0, sub: 0 }) {
-  view.amp = F.amp.subarray(f * NE, (f + 1) * NE); view.onset = F.onset[f]; view.rough = F.rough[f]; view.sub = F.sub[f]; return view;
+  view.amp = F.amp.subarray(f * NE, (f + 1) * NE); view.onset = F.onset[f]; view.rough = F.rough[f]; view.sub = F.sub[f];
+  if (F.ampL) { view.ampL = F.ampL.subarray(f * NE, (f + 1) * NE); view.ampR = F.ampR.subarray(f * NE, (f + 1) * NE); view.onsetL = F.onsetL[f]; view.onsetR = F.onsetR[f]; view.pan = F.pan ? F.pan[f] : 0; }
+  else { view.ampL = view.ampR = null; view.pan = 0; }
+  return view;
 }
 
 /** the standard mixed life used by measure and the tests (seconds, ~3.5 min): drum patterns at several tempi, with swing,

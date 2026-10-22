@@ -8,8 +8,10 @@ import { develop, fingerprint, isReceptor, T } from '../lab/organism/develop.mjs
 import { frozenDev } from '../lab/organism/bench.mjs';
 import { createOrganism, restoreOrganism } from '../lab/organism/organism.mjs';
 import { earFrames, live } from '../lab/organism/environment.mjs';
-import { louvain, graphOf, reciprocity, vectorStrength, cvISI, omissionBump } from '../lab/organism/analysis.mjs';
-import { createMuscle, protection, impactCost } from '../lab/organism/brace.mjs';
+import { louvain, graphOf, reciprocity, vectorStrength, cvISI, omissionBump, hubProfile } from '../lab/organism/analysis.mjs';
+import { createMilieu } from '../lab/organism/milieu.mjs';
+import { NE } from '../being/ear.mjs';
+import { createMuscle, impactCost, createImpact } from '../lab/organism/brace.mjs';
 import { MILIEU } from '../lab/organism/milieu.mjs';
 import { DT } from '../lab/organism/network.mjs';
 
@@ -159,18 +161,67 @@ test('a 28-gene genome (evolved before the new genes) decodes to finite values a
   assert.equal(fingerprint(develop(g, 1)), 3736667095);   // the fingerprint of this genome and seed under commit 481fd30
 });
 
-test('a brace in time costs less than a late or an early one (muscle delay, holding cost, impact law)', () => {
-  // four motor spikes 12 ms apart, starting at offset d from an impact at 0.6 s; energy-equivalent cost of the
-  // contraction (milieu costMotor x activation, for the whole trial) plus the impact's unbraced share
+test('under a brief impact, a brace in time protects and costs less; a reaction to the impact protects ~nothing', () => {
+  // four motor spikes 12 ms apart, starting at offset d from an impact at 0.6 s whose force rises and decays within
+  // ~60 ms (brace.mjs: stiffness after the 32 ms electromechanical delay, integrated against the force over the window);
+  // energy-equivalent cost of the contraction (milieu costMotor x activation, whole trial) plus the impact's unbraced share
   const trial = (d) => {
-    const m = createMuscle(), t0 = 0.6 + d, spikes = [0, 3, 6, 9].map((k) => Math.round((t0 + k * DT) / DT)); let hold = 0, p = 0;
-    for (let s = 0; s < Math.round(1.2 / DT); s++) { m.step(spikes.includes(s)); hold += MILIEU.costMotor * m.act * DT; if (s === Math.round(0.6 / DT)) p = protection(m.stiff); }
-    const c = impactCost(1, p); return { p, cost: hold + c.dE + c.dI };
+    const m = createMuscle(), t0 = 0.6 + d, spikes = [0, 3, 6, 9].map((k) => Math.round((t0 + k * DT) / DT)), s0 = Math.round(0.6 / DT), im = createImpact(1, 0, 0, 0.6); let hold = 0;
+    for (let s = 0; s < Math.round(1.2 / DT); s++) { m.step(spikes.includes(s)); hold += MILIEU.costMotor * m.act * DT; if (s >= s0 && !im.done) im.feed(m.stiff); }
+    const c = impactCost(1, im.p); return { p: im.p, cost: hold + c.dE + c.dI };
   };
-  const timed = trial(-0.08), late = trial(0.02), early = trial(-0.45), none = { cost: impactCost(1, 0).dE + impactCost(1, 0).dI };
-  console.log(`  protection timed ${timed.p.toFixed(2)}, late ${late.p.toFixed(2)}, early ${early.p.toFixed(2)}; cost x1e3 timed ${(1e3 * timed.cost).toFixed(3)}, late ${(1e3 * late.cost).toFixed(3)}, early ${(1e3 * early.cost).toFixed(3)}, no brace ${(1e3 * none.cost).toFixed(3)}`);
-  assert.ok(timed.p > 0.5 && late.p < 0.05 && early.p < 0.2);
-  assert.ok(late.cost > 1.5 * timed.cost && early.cost > 1.5 * timed.cost && late.cost > none.cost);
+  const timed = trial(-0.08), react = trial(0.012), late = trial(0.04), early = trial(-0.3), none = { cost: impactCost(1, 0).dE + impactCost(1, 0).dI };
+  console.log(`  protection timed ${timed.p.toFixed(2)}, reaction 12 ms after ${react.p.toFixed(2)}, 40 ms after ${late.p.toFixed(2)}, 300 ms early ${early.p.toFixed(2)}; cost x1e3 timed ${(1e3 * timed.cost).toFixed(3)}, reaction ${(1e3 * react.cost).toFixed(3)}, late ${(1e3 * late.cost).toFixed(3)}, early ${(1e3 * early.cost).toFixed(3)}, no brace ${(1e3 * none.cost).toFixed(3)}`);
+  assert.ok(timed.p > 0.9 && react.p < 0.2 && late.p < 0.02 && early.p < 0.5);
+  assert.ok(timed.p > react.p + 0.7, 'a late brace protects less than a timed one');
+  assert.ok(react.cost > 1.5 * timed.cost && early.cost > 1.5 * timed.cost && late.cost > none.cost);
+  // the protection is read over the window, not at one instant: stiffness while the force peaks counts most
+  const pulse = (k0) => { const im = createImpact(1, 0, 0, 0); for (let k = 0; !im.done; k++) im.feed(k >= k0 && k < k0 + 4 ? 1 : 0); return im.p; };
+  assert.ok(pulse(2) > 2 * pulse(14), 'stiffness at the force peak counts most');
+});
+
+test('sound comes from around the body: a receptor hears the channel it faces, mono input drives every receptor as before', () => {
+  const g = setGenes(randomGenome(4), { earSpread: 1 }), org = createOrganism({ genome: g, seed: 4, gestation: 0 });
+  const lat = (i) => org.dev.pos[3 * i] / Math.hypot(org.dev.pos[3 * i], org.dev.pos[3 * i + 1], org.dev.pos[3 * i + 2]);
+  const left = Array.from(org.C.ear).filter((i) => lat(i) < -0.6), right = Array.from(org.C.ear).filter((i) => lat(i) > 0.6);
+  assert.ok(left.length >= 3 && right.length >= 3, `${left.length} left-facing, ${right.length} right-facing hair cells`);
+  const loud = new Float32Array(NE).fill(0.6), quiet = new Float32Array(NE).fill(0.015);
+  const frame = (ampL, ampR, onsetL, onsetR) => ({ amp: ampL, ampL, ampR, onset: Math.max(onsetL, onsetR), onsetL, onsetR, rough: 0, sub: 0, pan: 0 });
+  for (let k = 0; k < 50; k++) org.tick(frame(quiet, quiet, 0, 0));
+  org.tick(frame(loud, quiet, 6, 0));                                 // a sound from the left only
+  const mean = (l) => l.reduce((s, i) => s + org.net.ext[i], 0) / l.length;
+  const onL = Array.from(org.C.onset).filter((i) => lat(i) < 0), onR = Array.from(org.C.onset).filter((i) => lat(i) > 0);
+  console.log(`  a sound from the left: left-facing hair cells driven at ${mean(left).toFixed(1)} Hz, right-facing ${mean(right).toFixed(1)} Hz`);
+  assert.ok(mean(left) > mean(right) + 20, 'the left-facing cells hear it, the right-facing ones barely');
+  if (onL.length && onR.length) assert.ok(mean(onL) > mean(onR), 'onset receptors too');
+  // mono: both channels equal -> the cardioid gains sum to one, every receptor gets the mono drive
+  const a = createOrganism({ genome: g, seed: 4, gestation: 0 }), b = createOrganism({ genome: g, seed: 4, gestation: 0 });
+  const amp = Float32Array.from({ length: NE }, (_, k) => 0.02 + 0.3 * Math.abs(Math.sin(k)));
+  a.tick({ amp, onset: 3, rough: 0, sub: 0 }); b.tick({ amp, ampL: amp, ampR: amp, onset: 3, onsetL: 3, onsetR: 3, rough: 0, sub: 0, pan: 0 });
+  for (const i of [...a.C.ear, ...a.C.onset]) assert.ok(Math.abs(a.net.ext[i] - b.net.ext[i]) < 1e-3, 'mono and centred stereo drive the same');
+});
+
+test('wiring economy: a spike costs by its axon arbor, so longer wiring costs more energy at the same firing', () => {
+  // the law in the milieu: the same spikes, twice the arbor length
+  const G = decode(randomGenome(1)), m1 = createMilieu(G), m2 = createMilieu(G);
+  for (let k = 0; k < 2500; k++) { const inp = { dt: DT, rateHz: 3, interHz: 3, motor: 0, chrom: 0, synMass: 1, strain: 0, stim: 0.5, impact: null }; m1.update({ ...inp, wireHz: 3 }); m2.update({ ...inp, wireHz: 6 }); }
+  console.log(`  energy after 10 s: arbor x1 ${m1.s.energy.toFixed(4)}, arbor x2 ${m2.s.energy.toFixed(4)} (costWire ${MILIEU.costWire})`);
+  assert.ok(m1.s.energy - m2.s.energy > 0.9 * MILIEU.costWire * 3 * 10, 'longer wires cost more');
+  // and the arbor follows development: the axon length gene lengthens every cell's arbor (network.mjs: path to its
+  // farthest synapse on each branch)
+  const arbor = (len) => { const o = createOrganism({ genome: setGenes(randomGenome(3), { axonLen: len }), seed: 3, gestation: 0 }); let s = 0, n = 0; for (const i of o.C.inter) { s += o.net.arbor[i]; n++; } return s / n; };
+  const short = arbor(0.4), long = arbor(1.2);
+  console.log(`  mean interneuron arbor: axonLen 0.4 -> ${short.toFixed(2)}, 1.2 -> ${long.toFixed(2)}`);
+  assert.ok(long > 1.8 * short);
+});
+
+test('hub profile: hearing integration sits on the side of a one-sided ear, nearer the nucleus with a whole-skin ear', () => {
+  const g = randomGenome(8), one = createOrganism({ genome: setGenes(g, { earSpread: 0 }), seed: 8, gestation: 0 }), all = createOrganism({ genome: setGenes(g, { earSpread: 1 }), seed: 8, gestation: 0 });
+  const h1 = hubProfile(one), h2 = hubProfile(all);
+  console.log(`  hair cells' centroid ${h1.earOffset.toFixed(2)} vs ${h2.earOffset.toFixed(2)}; hearing integration centroid ${h1.hearOffset.toFixed(2)} vs ${h2.hearOffset.toFixed(2)}; all senses ${h1.offset.toFixed(2)} vs ${h2.offset.toFixed(2)}`);
+  assert.ok(h1.earOffset > 0.8 && h2.earOffset < 0.3);
+  assert.ok(h1.hearOffset > h2.hearOffset, 'a one-sided ear pulls hearing integration to its side');
+  for (const k of ['offset', 'rInt', 'rInter', 'corrRadInt', 'arbor', 'wireOffset']) assert.ok(Number.isFinite(h1[k]), k);
 });
 
 // a genome whose development gives resonators sensory input (random genome 3, development seed 3) with its lead gene set
@@ -207,7 +258,7 @@ test('anticipation credit pays only for inhibition in place before an impact: a 
     const L = live(org, F, { each: (o, f, st) => {
       if (mode === 'react' && st.impact > 0) for (let k = 1; k <= 9; k++) due[f + k] = 1;
       for (const i of oracle) net.ext[i] = due[f + 1] ? 3 : 0;
-      if (f * DT > 8 && st.impact > 0) A.push(o.milieu.s.lastImpact.A);
+      if (f * DT > 8 && st.impactDone > 0) A.push(o.milieu.s.lastImpact.A);
     } });
     const m = A.reduce((x, y) => x + y, 0) / A.length, se = Math.sqrt(A.reduce((x, y) => x + (y - m) ** 2, 0) / (A.length - 1) / A.length);
     return { m, se, income: L.segs[0].anticIncome / L.segs[0].events, n: oracle.length };
@@ -225,7 +276,7 @@ test('emergent anticipation in a genome with resonators (measured, reported, not
   const g = setGenes(RES, { oscLead: 0.18 }), out = [];
   for (const shuffle of [false, true]) {
     const F = earFrames([{ mode: 'rhythm', pattern: 'rock', bpm: 100, shuffle, dur: 40 }], 5), org = createOrganism({ genome: g, seed: 3 }), A = [];
-    live(org, F, { each: (o, f, st) => { if (f * DT > 15 && st.impact > 0) A.push(o.milieu.s.lastImpact.A); } });
+    live(org, F, { each: (o, f, st) => { if (f * DT > 15 && st.impactDone > 0) A.push(o.milieu.s.lastImpact.A); } });
     out.push(A.reduce((x, y) => x + y, 0) / A.length);
   }
   console.log(`  random genome 3 with resonators (lead 0.18 s): anticipation at impacts steady ${out[0].toFixed(3)}, shuffled ${out[1].toFixed(3)}`);

@@ -220,5 +220,51 @@ export function radialProfile(org, { bins = [0, 0.3, 0.45, 0.6, 0.75, 0.9, 1.01]
   const ii = [], ih = []; for (let i = 0; i < N; i++) if (d.type[i] === T.INTER) { ii.push(i); if (D[i] >= 0) ih.push(i); }
   return { rows, corrHops: pear(ih.map((i) => rad[i]), ih.map((i) => D[i])), corrConv: pear(ii.map((i) => rad[i]), ii.map((i) => conv[i])), rad, conv };
 }
+/** where integration sits. Each interneuron's integration is the share of all receptor cells (hair cells, onset,
+ *  roughness, sub-bass, proprioceptors) that reach it within 2 synapses (weight > minW). Returns
+ *    offset      distance from the nucleus of the integration-weighted centroid of interneurons (0: the hub is centred;
+ *                ~0.5+: it sits on one side); hearOffset: the same with integration counted over hearing receptors only
+ *                (hair cells, onset, roughness); wireOffset: the synapses' weight-weighted centroid (at their targets)
+ *    rInt        integration-weighted mean radius, against rInter (the plain mean radius of interneurons)
+ *    corrRadInt  Pearson correlation of radius with integration over interneurons (negative: deeper cells integrate more)
+ *    earOffset   distance from the nucleus of the hair cells' centroid (a one-sided ear: ~0.9; the whole skin: ~0)
+ *    areas       Louvain communities with >= 10 non-receptor cells: size, centroid offset, mean radius, mean integration;
+ *                the most integrative one is the hub area (areaOffset, areaRadius)
+ *    arbor       mean axon arbor length of network cells (network.mjs), rows: mean integration per radial bin */
+export function hubProfile(org, { minW = 0.02, bins = [0, 0.3, 0.45, 0.6, 0.75, 0.9, 1.01] } = {}) {
+  const d = org.dev, N = d.N, g = graphOf(org), inc = Array.from({ length: N }, () => []);
+  for (let k = 0; k < g.m; k++) if (g.w[k] > minW) inc[g.post[k]].push(g.pre[k]);
+  let nRec = 0; for (let i = 0; i < N; i++) if (isReceptor(d.type[i])) nRec++;
+  const P = d.pos, rad = (i) => Math.hypot(P[3 * i], P[3 * i + 1], P[3 * i + 2]);
+  const hear = (t) => t === T.EAR || t === T.ONSET || t === T.ROUGH;
+  let nHear = 0; for (let i = 0; i < N; i++) if (hear(d.type[i])) nHear++;
+  const integ = new Float32Array(N), integH = new Float32Array(N), seen = new Int32Array(N).fill(-1);
+  for (let i = 0; i < N; i++) {
+    if (isReceptor(d.type[i]) || d.type[i] === T.MOTOR || d.type[i] === T.CHROM) continue;
+    let c = 0, h = 0; const mark = (q) => { if (isReceptor(d.type[q]) && seen[q] !== i) { seen[q] = i; c++; if (hear(d.type[q])) h++; } };
+    for (const p of inc[i]) { mark(p); for (const q of inc[p]) mark(q); }
+    integ[i] = c / Math.max(1, nRec); integH[i] = h / Math.max(1, nHear);
+  }
+  const inter = []; for (let i = 0; i < N; i++) if (d.type[i] === T.INTER) inter.push(i);
+  let sw = 0, cx = 0, cy = 0, cz = 0, rw = 0, rm = 0, hw = 0, hx = 0, hy = 0, hz = 0;
+  for (const i of inter) { const w = integ[i], v = integH[i]; sw += w; cx += w * P[3 * i]; cy += w * P[3 * i + 1]; cz += w * P[3 * i + 2]; rw += w * rad(i); rm += rad(i); hw += v; hx += v * P[3 * i]; hy += v * P[3 * i + 1]; hz += v * P[3 * i + 2]; }
+  // the wiring's centre of mass: synapses at their postsynaptic cell, by weight
+  let ww = 0, wx = 0, wy = 0, wz = 0; for (let k = 0; k < g.m; k++) { const j = g.post[k], w = g.w[k]; ww += w; wx += w * P[3 * j]; wy += w * P[3 * j + 1]; wz += w * P[3 * j + 2]; }
+  let ex = 0, ey = 0, ez = 0, ne = 0; for (let i = 0; i < N; i++) if (d.type[i] === T.EAR) { ex += P[3 * i]; ey += P[3 * i + 1]; ez += P[3 * i + 2]; ne++; }
+  const pear = (x, y) => { const n = x.length; if (n < 3) return NaN; const mx = x.reduce((a, b) => a + b, 0) / n, my = y.reduce((a, b) => a + b, 0) / n; let sxy = 0, sxx = 0, syy = 0; for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2; syy += (y[i] - my) ** 2; } return sxy / Math.sqrt(sxx * syy + 1e-12); };
+  const rows = [];
+  for (let b = 0; b + 1 < bins.length; b++) { let s = 0, n = 0; for (const i of inter) { const r = rad(i); if (r >= bins[b] && r < bins[b + 1]) { s += integ[i]; n++; } } rows.push({ r: [bins[b], Math.min(1, bins[b + 1])], n, integration: n ? s / n : NaN }); }
+  // areas
+  const L = louvain(g, minW), byC = new Map();
+  for (let i = 0; i < N; i++) { if (isReceptor(d.type[i])) continue; const c = L.member[i]; if (!byC.has(c)) byC.set(c, []); byC.get(c).push(i); }
+  const areas = [...byC.values()].filter((l) => l.length >= 10).map((l) => {
+    let x = 0, y = 0, z = 0, r = 0, s = 0; for (const i of l) { x += P[3 * i]; y += P[3 * i + 1]; z += P[3 * i + 2]; r += rad(i); s += integ[i]; }
+    const n = l.length; return { n, offset: Math.hypot(x / n, y / n, z / n), radius: r / n, integration: s / n };
+  }).sort((a, b) => b.integration - a.integration);
+  let arb = 0, na = 0; if (org.net.arbor) for (let i = 0; i < N; i++) if (!isReceptor(d.type[i]) && d.type[i] !== T.MOTOR && d.type[i] !== T.CHROM) { arb += org.net.arbor[i]; na++; }
+  return { offset: sw > 0 ? Math.hypot(cx, cy, cz) / sw : NaN, hearOffset: hw > 0 ? Math.hypot(hx, hy, hz) / hw : NaN, wireOffset: ww > 0 ? Math.hypot(wx, wy, wz) / ww : NaN, rInt: sw > 0 ? rw / sw : NaN, rInter: rm / Math.max(1, inter.length), corrRadInt: pear(inter.map(rad), inter.map((i) => integ[i])),
+    nReach: inter.reduce((s, i) => s + integ[i], 0) / Math.max(1, inter.length), earOffset: ne ? Math.hypot(ex, ey, ez) / ne : NaN,
+    areas, areaOffset: areas.length ? areas[0].offset : NaN, areaRadius: areas.length ? areas[0].radius : NaN, arbor: na ? arb / na : NaN, rows };
+}
 const TYPE_KEY = ['ear', 'onset', 'rough', 'sub', 'proprio', 'inter', 'intero', 'mod', 'motor', 'chrom'];
 const RECEPTOR_KEYS = new Set(['ear', 'onset', 'rough', 'sub', 'proprio']);

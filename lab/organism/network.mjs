@@ -39,6 +39,10 @@
 // with T-type calcium bursts; the milieu's energy factor is each spike's probability). Otherwise it is an
 // ordinary interneuron. So an entrained resonator fires ahead of the input it expects, and keeps firing when that input
 // is missing.
+// Wiring (Cajal's conservation of space and material): every synapse remembers the axon path length from its cell to it
+// and the branch it lies on; a cell's arbor is the sum over its branches of the path to the farthest live synapse (a
+// branch retracts behind its last synapse when pruning removes it; a sprouted synapse lies where its neighbour did).
+// A spike runs down the whole arbor, so the milieu charges each spike by the arbor's length (organism.mjs, milieu.mjs).
 // Anticipation (read by the milieu at each impact, not used by any rule): at a sensory event, the inhibition that was
 // ALREADY on the cells receiving the senses 20-60 ms before it (a ring of past conductances), above each cell's own
 // quiet level (its mean inhibition over the stretches >= 200 ms after any impact, so the responses to impacts do not set
@@ -71,14 +75,17 @@ export function createNetwork(dev, opt = {}) {
 
   // ---- synapses: KMAX slots per presynaptic cell ---------------------------------------------------------------------------
   const tgt = new Int32Array(N * KMAX), w = new Float32Array(N * KMAX), w0 = new Float32Array(N * KMAX), elig = new Float32Array(N * KMAX);
-  const delay = new Uint8Array(N * KMAX), nOut = new Uint16Array(N);
+  const delay = new Uint8Array(N * KMAX), nOut = new Uint16Array(N), len = new Float32Array(N * KMAX), br = new Uint8Array(N * KMAX);
+  const arbor = new Float32Array(N);                                 // axon length per cell (see the header)
   const stats = { born: 0, pruned: 0, sprouted: 0 };
-  function addSyn(pre, post, wt, dl) {
-    const s = pre * KMAX + nOut[pre]++; tgt[s] = post; w[s] = wt; w0[s] = wt; elig[s] = 0; delay[s] = dl; return s;
+  // path length when development did not record it: delays were set as 1 + round(6 x length)
+  const lenOf = (dl) => Math.max(0, (dl - 1) / 6);
+  function addSyn(pre, post, wt, dl, ln = lenOf(dl), b = 0) {
+    const s = pre * KMAX + nOut[pre]++; tgt[s] = post; w[s] = wt; w0[s] = wt; elig[s] = 0; delay[s] = dl; len[s] = ln; br[s] = b; return s;
   }
   for (let k = 0; k < dev.syn.pre.length; k++) {
     const pre = dev.syn.pre[k], wt = (isI[pre] ? G.gI * W_E0 : W_E0) * Math.exp(0.4 * gauss());
-    addSyn(pre, dev.syn.post[k], wt, dev.syn.delay[k]); stats.born++;
+    addSyn(pre, dev.syn.post[k], wt, dev.syn.delay[k], dev.syn.len ? dev.syn.len[k] : undefined, dev.syn.br ? dev.syn.br[k] : 0); stats.born++;
   }
   // incoming index (rebuilt after structural change)
   let inStart = new Int32Array(N + 1), inList = new Int32Array(0);
@@ -88,9 +95,16 @@ export function createNetwork(dev, opt = {}) {
     for (let i = 0; i < N; i++) inStart[i + 1] += inStart[i];
     inList = new Int32Array(inStart[N]); const fill = inStart.slice(0, N);
     for (let p = 0; p < N; p++) for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) inList[fill[tgt[s]]++] = s;
+    for (let p = 0; p < N; p++) { let a0 = 0, a1 = 0; for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) { const l = len[s]; if (br[s]) { if (l > a1) a1 = l; } else if (l > a0) a0 = l; } arbor[p] = a0 + a1; }
   }
-  const fanS = new Float32Array(N);                                  // exteroceptive excitatory fan-in per cell
-  function fanIn() { fanS.fill(0); for (let p = 0; p < N; p++) if (type[p] <= T.SUB && !isI[p]) for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) fanS[tgt[s]] += w[s]; }
+  // exteroceptive excitatory fan-in per cell; and the same weighted by a cardioid on each receptor's lateral position (x
+  // axis: the stereo field's left-right), for impacts that come from one side
+  const fanS = new Float32Array(N), fanL = new Float32Array(N), fanR = new Float32Array(N);
+  const latX = Float32Array.from({ length: N }, (_, i) => { const p = dev.pos, l = Math.hypot(p[3 * i], p[3 * i + 1], p[3 * i + 2]) || 1; return p[3 * i] / l; });
+  function fanIn() {
+    fanS.fill(0); fanL.fill(0); fanR.fill(0);
+    for (let p = 0; p < N; p++) if (type[p] <= T.SUB && !isI[p]) { const cl = 0.5 * (1 - latX[p]), cr = 0.5 * (1 + latX[p]); for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) { const t = tgt[s]; fanS[t] += w[s]; fanL[t] += cl * w[s]; fanR[t] += cr * w[s]; } }
+  }
   rebuildIn(); fanIn();
   // neighbours within reach of a dendrite (for sprouting)
   const nb = []; {
@@ -234,7 +248,7 @@ export function createNetwork(dev, opt = {}) {
       for (let k = inStart[i], e = inStart[i + 1]; k < e; k++) { const s = inList[k]; if (!isI[(s / KMAX) | 0]) w[s] = Math.min(W_MAX_E, w[s] * f); }
     }
   }
-  function removeSyn(p, s) { const last = p * KMAX + nOut[p] - 1; tgt[s] = tgt[last]; w[s] = w[last]; w0[s] = w0[last]; elig[s] = elig[last]; delay[s] = delay[last]; nOut[p]--; }
+  function removeSyn(p, s) { const last = p * KMAX + nOut[p] - 1; tgt[s] = tgt[last]; w[s] = w[last]; w0[s] = w0[last]; elig[s] = elig[last]; delay[s] = delay[last]; len[s] = len[last]; br[s] = br[last]; nOut[p]--; }
   function restructure() {
     for (let p = 0; p < N; p++) for (let s = p * KMAX + nOut[p] - 1; s >= p * KMAX; s--) if (w[s] < G.pruneThr * w0[s]) { removeSyn(p, s); stats.pruned++; }
     for (let p = 0; p < N && LAW.sprout; p++) {
@@ -243,18 +257,19 @@ export function createNetwork(dev, opt = {}) {
       const k = l[(rnd() * l.length) | 0]; if (k === p || dead[k] || rbar[k] < 0.5 * G.rTarget) continue;
       let dup = false; for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) if (tgt[s] === k) { dup = true; break; }
       if (dup) continue;
-      let d = 1; for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) if (tgt[s] === via) { d = delay[s]; break; }
-      addSyn(p, k, 0.5 * (isI[p] ? G.gI * W_E0 : W_E0), d); stats.sprouted++;
+      let d = 1, ln = 0, b = 0; for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) if (tgt[s] === via) { d = delay[s]; ln = len[s]; b = br[s]; break; }
+      addSyn(p, k, 0.5 * (isI[p] ? G.gI * W_E0 : W_E0), d, ln, b); stats.sprouted++;
     }
     rebuildIn(); fanIn();
   }
 
   /** anticipation at a sensory event happening now: inhibition already present 20-60 ms before it on the cells that
-   *  receive the senses, above each cell's own mean, relative to that mean (see the header) */
-  function anticipation(from = 5, to = 15) {
-    let num = 0, den = 0;
+   *  receive the senses, above each cell's own mean, relative to that mean (see the header). side (-1 left .. 1 right, 0:
+   *  from all around): the cells are weighted by their fan-in from receptors facing the side the event comes from */
+  function anticipation(from = 5, to = 15, side = 0) {
+    let num = 0, den = 0; const kl = 0.5 * (1 - side), kr = 0.5 * (1 + side);
     for (let i = 0; i < N; i++) {
-      const f = fanS[i]; if (f <= 0 || dead[i]) continue;
+      const f = side === 0 ? fanS[i] : kl * fanL[i] + kr * fanR[i]; if (f <= 0 || dead[i]) continue;
       let g = 0; for (let l = from; l < to; l++) g += histI[((n - l + H * 8) % H) * N + i];
       g /= to - from; num += f * (g - gIq[i]); den += f * (gIq[i] + 0.05);
     }
@@ -268,19 +283,19 @@ export function createNetwork(dev, opt = {}) {
     let m = 0; for (let p = 0; p < N; p++) m += nOut[p];
     const pre = new Int32Array(m), post = new Int32Array(m), wt = new Float32Array(m), sl = new Int32Array(m); let k = 0;
     for (let p = 0; p < N; p++) for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) { pre[k] = p; post[k] = tgt[s]; wt[k] = w[s]; sl[k++] = s; }
-    return { pre, post, w: wt, slot: sl, m };
+    return { pre, post, w: wt, slot: sl, m, len: Float32Array.from(sl, (s) => len[s]) };
   }
   function lesion(cellsToKill) { for (const i of cellsToKill) { dead[i] = 1; nOut[i] = 0; } for (let p = 0; p < N; p++) for (let s = p * KMAX + nOut[p] - 1; s >= p * KMAX; s--) if (dead[tgt[s]]) removeSyn(p, s); rebuildIn(); fanIn(); }
 
   function serialize() {
     const e = edges(), rs = RS[0];
-    return { n, slot, pre: Array.from(e.pre), post: Array.from(e.post), w: Array.from(e.w, (q) => +q.toFixed(5)), w0: Array.from(e.slot, (s) => +w0[s].toFixed(5)), delay: Array.from(e.slot, (s) => delay[s]),
+    return { n, slot, pre: Array.from(e.pre), post: Array.from(e.post), w: Array.from(e.w, (q) => +q.toFixed(5)), w0: Array.from(e.slot, (s) => +w0[s].toFixed(5)), delay: Array.from(e.slot, (s) => delay[s]), len: Array.from(e.slot, (s) => +len[s].toFixed(4)), br: Array.from(e.slot, (s) => br[s]),
       v: Array.from(v), a: Array.from(a), th: Array.from(th, (q) => +q.toFixed(5)), rbar: Array.from(rbar), modBar: Array.from(modBar), dead: Array.from(dead), stats: { ...stats }, rs,
       osc: Array.from(OSC, (i) => [phi[i], omega[i], geBar[i], lastP[i] - n * DT]) };
   }
   function restore(o) {
     nOut.fill(0);
-    for (let k = 0; k < o.pre.length; k++) { const s = addSyn(o.pre[k], o.post[k], o.w[k], o.delay[k]); w0[s] = o.w0[k]; }
+    for (let k = 0; k < o.pre.length; k++) { const s = addSyn(o.pre[k], o.post[k], o.w[k], o.delay[k], o.len ? o.len[k] : undefined, o.br ? o.br[k] : 0); w0[s] = o.w0[k]; }
     v.set(o.v); a.set(o.a); if (o.th) th.set(o.th); rbar.set(o.rbar); modBar.set(o.modBar); dead.set(o.dead); Object.assign(stats, o.stats); n = o.n; slot = o.slot; RS[0] = o.rs;
     if (o.osc) OSC.forEach((i, q) => { [phi[i], omega[i], geBar[i]] = o.osc[q]; lastP[i] = (o.osc[q][3] ?? -10) + o.n * DT; });
     rebuildIn(); fanIn();
@@ -289,5 +304,5 @@ export function createNetwork(dev, opt = {}) {
   /** birth: the weights a synapse is born with are the ones it has at the end of gestation (pruning compares with them) */
   function birth() { w0.set(w); }
 
-  return { N, step, birth, LAW, th, ext, spk, rf, rbar, v, gE, gI, modc, dead, w, w0, tgt, nOut, delay, S, stats, edges, lesion, serialize, restore, recep, isI, type, anticipation, resonators, OSC, phi, omega, fanS, get t() { return n * DT; } };
+  return { N, step, birth, LAW, th, ext, spk, rf, rbar, v, gE, gI, modc, dead, w, w0, tgt, nOut, delay, S, stats, edges, lesion, serialize, restore, recep, isI, type, anticipation, resonators, OSC, phi, omega, fanS, fanL, fanR, arbor, latX, get t() { return n * DT; } };
 }

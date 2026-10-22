@@ -4,8 +4,9 @@
 // Three variables, each 0..1, each with a bound beyond which the organism dies:
 //   energy       basal income, minus the cost of every spike of the nervous system (Laughlin & Sejnowski 2003; receptor
 //                cells' firing is not charged: sensory transduction runs on the sense organ's own supply, as the cochlea's on
-//                the stria vascularis, so loud sound is not a drain the network cannot control), of keeping synapses, of moving
-//                and of repair. At each impact (a sensory event, brace.mjs) income is paid for inhibition that was
+//                the stria vascularis, so loud sound is not a drain the network cannot control), of conducting each
+//                spike down its cell's axon arbor (costWire per spike per unit of arbor length: wiring economy, Cajal
+//                1899; Chklovskii, Schikorski & Stevens 2002), of keeping synapses, of moving and of repair. At each impact (a sensory event, brace.mjs) income is paid for inhibition that was
 //                already waiting for it 20-60 ms before (network.mjs anticipation: predicted in advance, chance-corrected,
 //                so a reaction earns nothing; paid on its running mean over the last ~4 impacts, so chance
 //                fluctuations average down; a reactive network whose inhibition decays before each beat is not
@@ -24,7 +25,7 @@ import { impactCost } from './brace.mjs';
 const c01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 export const MILIEU = {
-  income: 0.004, anticIncome: 0.004, costSpike: 0.0011, costSyn: 0.00012, costMotor: 0.004, costChrom: 0.001,
+  income: 0.004, anticIncome: 0.004, costSpike: 0.0007, costWire: 0.0003, costSyn: 0.00012, costMotor: 0.004, costChrom: 0.001,
   repairRate: 1 / 120, repairCost: 0.5, riotHz: 25, riotDamage: 0.02, strainBear: 0.06, strainDamage: 2,
   needRise: 120, needFeed: 10, restHz: 2,
 };
@@ -38,7 +39,8 @@ export function createMilieu(G, P = MILIEU) {
   function viab() { const m = margins(); return 0.5 * Math.min(...m) + 0.5 * (m[0] + m[1] + m[2]) / 3; }
   s.viability = viab();
 
-  /** inp: { dt, rateHz (spikes of non-receptor cells per cell of the body, Hz), interHz (interneurons), motor, chrom, synMass (sum w / N), strain, stim,
+  /** inp: { dt, rateHz (spikes of non-receptor cells per cell of the body, Hz), wireHz (the same spikes times their
+   *  arbor length), interHz (interneurons), motor, chrom, synMass (sum w / N), strain, stim,
    *  impact: null or { a (0..1), p (protection 0..1), A (anticipation) } } */
   function update(inp) {
     const dt = inp.dt; if (!s.alive) return s;
@@ -58,7 +60,7 @@ export function createMilieu(G, P = MILIEU) {
     const income = P.income * eff;
     const rest = c01(1 - inp.interHz / P.restHz);
     const repair = P.repairRate * (1 - s.integrity) * (1 + 3 * rest) * c01(s.energy / 0.2);
-    const cost = (P.costSpike * inp.rateHz + P.costSyn * inp.synMass + P.costMotor * inp.motor + P.costChrom * inp.chrom) / eff + P.repairCost * repair;
+    const cost = (P.costSpike * inp.rateHz + P.costWire * (inp.wireHz || 0) + P.costSyn * inp.synMass + P.costMotor * inp.motor + P.costChrom * inp.chrom) / eff + P.repairCost * repair;
     const riot = Math.max(0, inp.interHz / P.riotHz - 1), strain = Math.max(0, inp.strain - P.strainBear);
     const damage = P.riotDamage * riot * riot + P.strainDamage * strain * strain + (s.energy < 0.1 ? 0.01 * (0.1 - s.energy) / 0.1 : 0);
     s.energy = c01(s.energy + dt * (income - cost) + lumpE);
