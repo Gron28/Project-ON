@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { TRAIN, TEST, VARIANTS, makeWorld, framesOf, onsetCount } from '../lab/organism/worlds.mjs';
 import { beatLock, benchSeed, fitGenome } from '../lab/organism/bench.mjs';
-import { createArchive, archiveFrom, descriptorAxis } from '../lab/organism/evolve.mjs';
+import { createArchive, archiveFrom, descriptorAxis, attunementOf, fitnessFrom } from '../lab/organism/evolve.mjs';
 import { NG } from '../lab/organism/genome.mjs';
 
 test('worlds: deterministic by seed, train and held-out tempi do not overlap', () => {
@@ -57,10 +57,20 @@ test('bench: the committed best genome gives finite metrics in both conditions',
     const s = r[c + 'Summary'];
     for (const k of ['vs', 'vsShuffled', 'credit', 'vsReflex', 'beyondReflex', 'errMs', 'iqrMs', 'braceErrMs', 'braceLock', 'protect', 'protectShuffled', 'viability', 'interHz', 'msPerSimS']) assert.ok(Number.isFinite(s[k]), `${c} ${k} = ${s[k]}`);
     assert.ok(s.vs >= 0 && s.vs <= 1 && s.viability > 0 && s.viability <= 1);
+    assert.ok(s.worldsWithAreaBefore >= 0 && s.worldsWithAreaBefore <= 1, 'areas measured against the strikes');
+    assert.ok(r[c].some((w) => w.areaRows && w.areaRows.length > 0 && w.areaRows.every((a) => Number.isFinite(a.z) && Number.isFinite(a.lagMs))));
     assert.ok(r[c].every((w) => w.omission && w.omission.nOmit > 0), `${c}: omissions measured`);
     console.log(`  ${c}: vs ${s.vs.toFixed(3)}, shuffled ${s.vsShuffled.toFixed(3)}, reflex ${s.vsReflex.toFixed(3)}, err ${s.errMs.toFixed(1)} ms, omission ${s.omissionHz.toFixed(3)} Hz, ${s.msPerSimS.toFixed(1)} ms per simulated s`);
   }
   assert.ok(r.life && Number.isFinite(r.life.viability));
+});
+
+test('fitness: protection credit over the shuffled control outweighs a brace peak on the beat; survival gates it', () => {
+  const lockedReflex = attunementOf({ braceErrMs: 0, braceLock: 1, protectCredit: 0, credit: 0, beyondReflex: 0 });
+  const anticipates = attunementOf({ braceErrMs: 120, braceLock: 0.5, protectCredit: 0.1, credit: 0, beyondReflex: 0 });
+  const worse = attunementOf({ braceErrMs: 0, braceLock: 1, protectCredit: -0.1, credit: 0, beyondReflex: 0 });
+  assert.ok(anticipates > lockedReflex && worse < lockedReflex, `${anticipates} ${lockedReflex} ${worse}`);
+  assert.ok(fitnessFrom(0.8, 0.3) > fitnessFrom(0.6, 0.6), 'a viable body beats a dying attuned one');
 });
 
 test('MAP-Elites archive: new cells, replacement only by a fitter genome, rejection of undefined descriptors, round trip', () => {

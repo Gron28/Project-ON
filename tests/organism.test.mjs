@@ -10,8 +10,10 @@ import { createOrganism, restoreOrganism } from '../lab/organism/organism.mjs';
 import { earFrames, live } from '../lab/organism/environment.mjs';
 import { louvain, graphOf, reciprocity, vectorStrength, cvISI, omissionBump, hubProfile } from '../lab/organism/analysis.mjs';
 import { createMilieu } from '../lab/organism/milieu.mjs';
-import { NE } from '../being/ear.mjs';
-import { createMuscle, impactCost, createImpact } from '../lab/organism/brace.mjs';
+import { NE, EAR_CF } from '../being/ear.mjs';
+import { createMuscle, impactCost, createImpact, createImpactDetector, createLowBand, BRACE } from '../lab/organism/brace.mjs';
+import { oneShots } from '../lab/prototypes/nervous-system/stimuli.mjs';
+import { TRAIN, TEST, makeWorld, framesOf } from '../lab/organism/worlds.mjs';
 import { MILIEU } from '../lab/organism/milieu.mjs';
 import { DT } from '../lab/organism/network.mjs';
 
@@ -180,6 +182,59 @@ test('under a brief impact, a brace in time protects and costs less; a reaction 
   assert.ok(pulse(2) > 2 * pulse(14), 'stiffness at the force peak counts most');
 });
 
+test('co-contraction: staying stiff costs more than brief timed braces for the same protection, fatigues, and drains a body', () => {
+  // impacts every 0.5 s for 30 s; one muscle (brace.mjs) either braces with two spikes 80 ms before each impact or is
+  // driven at a constant rate; cost: milieu costMotor x activation + costStiff x commanded stiffness squared (energy / s)
+  const PER = 0.5, DUR = 30, perS = Math.round(PER / DT), pre = Math.round(0.08 / DT);
+  const trial = (spikeAt) => {
+    const m = createMuscle(), n = Math.round(DUR / DT), ps = []; let hold = 0, im = null, fat = 0, nf = 0;
+    for (let s = 0; s < n; s++) {
+      m.step(spikeAt(s)); hold += (MILIEU.costMotor * m.act + MILIEU.costStiff * m.raw * m.raw) * DT;
+      if (s * DT >= 2 && s % perS === 0) im = createImpact(1, 0, 0, s * DT);
+      if (im && !im.done && im.feed(m.stiff)) ps.push(im.p);
+      if (s * DT > 10) { fat += m.fat; nf++; }
+    }
+    const tail = ps.slice(10); return { p: tail.reduce((a, b) => a + b, 0) / tail.length, hold: hold / DUR, fat: fat / nf };
+  };
+  const timed = trial((s) => { const j = (s + pre) % perS; return j === 0 || j === 3; });
+  const constant = [8, 12, 20, 30, 50].map((every) => ({ every, ...trial((s) => s % every === 0) }));
+  const f = (o) => `p ${o.p.toFixed(3)}, fatigue ${o.fat.toFixed(2)}, tension cost x1e3 ${(1e3 * o.hold).toFixed(2)}/s`;
+  console.log(`  timed brace: ${f(timed)}; constant: ${constant.map((c) => `every ${4 * c.every} ms ${f(c)}`).join('; ')}; basal income x1e3 ${(1e3 * MILIEU.income).toFixed(1)}/s`);
+  const match = constant.filter((c) => c.p >= timed.p - 0.05);
+  assert.ok(match.length >= 1, 'some constant drive reaches the timed protection');
+  for (const c of match) assert.ok(c.hold > 2 * timed.hold, `constant every ${4 * c.every} ms costs ${c.hold} vs timed ${timed.hold}`);
+  const stiffest = constant[0];
+  assert.ok(stiffest.fat > 0.5 && timed.fat < 0.15, 'sustained tension fatigues the muscle, brief braces barely');
+  const timed4 = trial((s) => { const j = (s + pre) % perS; return j < 12 && j % 3 === 0; });   // a fuller brace: four spikes
+  console.log(`  four-spike timed brace: ${f(timed4)}`);
+  assert.ok(stiffest.p < timed4.p && stiffest.hold > 5 * timed4.hold, 'a fatigued muscle held stiff protects less than a fuller timed brace, at many times its cost');
+  assert.ok(stiffest.hold > 2 * MILIEU.income, 'staying stiff costs more than twice the basal income');
+  // in the milieu: the same body, held stiff (commanded 0.8) or bracing briefly (mean squared 0.05), for 60 s
+  const G = decode(randomGenome(1)), held = createMilieu(G), brief = createMilieu(G);
+  for (let k = 0; k < 60 / DT; k++) { const inp = { dt: DT, rateHz: 3, wireHz: 3, interHz: 3, motor: 0.2, chrom: 0, synMass: 1, strain: 0, stim: 0.5, impact: null }; held.update({ ...inp, stiff2: 0.64 }); brief.update({ ...inp, stiff2: 0.05 }); }
+  console.log(`  viability after 60 s: held stiff ${held.s.viability.toFixed(3)} (energy ${held.s.energy.toFixed(3)}), brief braces ${brief.s.viability.toFixed(3)} (energy ${brief.s.energy.toFixed(3)})`);
+  assert.ok(held.s.energy < brief.s.energy - 0.5 && held.s.viability < brief.s.viability - 0.15, 'a body held stiff loses viability');
+});
+
+test('only strong hits strike: loud hi-hats are heard but never strike; kicks and snares do, >= 250 ms apart', () => {
+  const sh = oneShots(), org = createOrganism({ genome: randomGenome(2), seed: 2, gestation: 0 });
+  const play = (buf, amp, every, dur) => { let strikes = 0, inter = 0; const chunk = new Float32Array(192); let n = 0; for (let c = 0; c < dur / DT; c++) { for (let i = 0; i < 192; i++, n++) { const k = n % every; chunk[i] = k < buf.length ? amp * buf[k] : 0; } const s = org.step(0, chunk); strikes += s.impact > 0 ? 1 : 0; inter += s.interHz; } return { strikes, inter: inter / (dur / DT) }; };
+  const hats = play(sh.hat, 2.4, 6000, 10), kicks = play(sh.kick, 0.8, 24000, 10), snares = play(sh.snare, 0.7, 24000, 10);
+  console.log(`  strikes in 10 s: 80 loud hats ${hats.strikes} (interneurons ${hats.inter.toFixed(1)} Hz), 20 kicks ${kicks.strikes}, 20 snares ${snares.strikes}`);
+  assert.equal(hats.strikes, 0, 'hats never strike');
+  assert.ok(hats.inter > 0.5, 'but they are heard');
+  assert.ok(kicks.strikes >= 18 && snares.strikes >= 18, 'kicks and snares strike');
+  // in the scored worlds, strikes come at natural intervals
+  const iv = [];
+  for (const spec of [TRAIN[1], TRAIN[2], TEST[2], TEST[6]]) {
+    const Fw = framesOf(makeWorld(spec, 'groove', { dur: 12 })), det = createImpactDetector(), lb = createLowBand(EAR_CF); let last = -1;
+    for (let f = 0; f < Fw.n; f++) if (det(Fw.onset[f], lb(Fw.amp.subarray(f * NE, (f + 1) * NE))) > 0) { if (last >= 0) iv.push((f - last) * DT); last = f; }
+  }
+  iv.sort((a, b) => a - b);
+  console.log(`  strike intervals in dense grooves (sync, build): min ${iv[0].toFixed(3)} s, 5th percentile ${iv[Math.floor(0.05 * iv.length)].toFixed(3)} s, median ${iv[iv.length >> 1].toFixed(3)} s (${iv.length})`);
+  assert.ok(iv[0] >= BRACE.refr - 1e-9 && iv[Math.floor(0.05 * iv.length)] >= 0.25);
+});
+
 test('sound comes from around the body: a receptor hears the channel it faces, mono input drives every receptor as before', () => {
   const g = setGenes(randomGenome(4), { earSpread: 1 }), org = createOrganism({ genome: g, seed: 4, gestation: 0 });
   const lat = (i) => org.dev.pos[3 * i] / Math.hypot(org.dev.pos[3 * i], org.dev.pos[3 * i + 1], org.dev.pos[3 * i + 2]);
@@ -229,9 +284,11 @@ const RES = setGenes(randomGenome(3), { tropM: 0 });
 
 test('omission response: after entraining to a steady pulse, sensory-driven resonators fire at the time of a missing beat', () => {
   const F = earFrames([{ mode: 'rhythm', pattern: 'pulse', bpm: 96, omit: 0.3, dur: 140 }], 3);
+  // the resonator law in isolation: the milieu is held as in gestation (this random genome cannot afford its own tension
+  // over 140 s under the co-contraction law, and a starved network falls quiet, which is metabolism, not timing)
   const run = (g) => {
     const org = createOrganism({ genome: g, seed: 3 }), net = org.net, qs = Array.from(net.OSC).filter((i) => net.fanS[i] > 0.05), c = new Float32Array(F.n);
-    live(org, F, { each: (o, f) => { for (const i of qs) c[f] += net.spk[i]; } });
+    live(org, F, { each: (o, f) => { for (const i of qs) c[f] += net.spk[i]; const m = o.milieu.s; m.energy = 0.8; m.integrity = 0.9; m.alive = true; } });
     return { b: omissionBump(c, F.beats, { cells: qs.length, from: 15 }), hz: qs.map((i) => net.omega[i] / (2 * Math.PI)).sort((a, b) => a - b), n: qs.length };
   };
   const learned = run(setGenes(RES, { oscLead: 0.2 })), frozen = run(setGenes(RES, { oscLead: 0.2, oscK: 0, oscEta: 0 }));

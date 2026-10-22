@@ -24,6 +24,12 @@
 //   omission    interneuron rate 30-150 ms after an omitted beat, minus the same window in the shuffled world at the same
 //               delay since the last onset with nothing heard in it (a gap that nothing predicted); Hz and a z score.
 //               Any numeric state() readout the organism adds (feature-detected, plus predFrac) gets the same contrast
+//   areas       does any emergent area fire BEFORE the strikes? Louvain areas of the network (non-receptor cells, >= 8
+//               cells) at the start of the bench; per area, its rate 8-60 ms before each strike (after `warm`) in the
+//               groove minus the same window before the shuffled control's strikes (z over strikes), and the latency of
+//               its peak rate within +-200 ms of a groove strike. An area 'fires before' when z > 3, the excess > 0.5 Hz
+//               and its peak comes before the strike. Caveat: a reflex to an onset that regularly precedes a strike in
+//               the groove (a hat an 8th before) can also put spikes in that window; the peak latency tells them apart
 //   viability   mean viability over the run; alive; interneuron rate; runaway share; cost (wall ms per simulated second)
 // Reported per world and condition, then averaged over worlds, then mean +- sd over development seeds.
 
@@ -31,7 +37,8 @@ import { isMainThread, parentPort, workerData, Worker } from 'node:worker_thread
 import { createOrganism, restoreOrganism } from './organism.mjs';
 import { develop } from './develop.mjs';
 import { live } from './environment.mjs';
-import { depth, hubProfile } from './analysis.mjs';
+import { depth, hubProfile, louvain, graphOf } from './analysis.mjs';
+import { isReceptor } from './develop.mjs';
 import { WIN } from './brace.mjs';
 import { mix, NG } from './genome.mjs';
 import { TRAIN, TEST, VARIANTS, makeWorld, framesOf, DT_FRAME } from './worlds.mjs';
@@ -39,6 +46,14 @@ import { TRAIN, TEST, VARIANTS, makeWorld, framesOf, DT_FRAME } from './worlds.m
 export const BENCH = { warm: 4, dur: 24, seeds: 3, post: [0.03, 0.15] };
 // readouts the current organism's state() has; anything else numeric is a new law's readout and is probed at omissions
 const KNOWN = new Set(['t', 'alive', 'energy', 'integrity', 'need', 'viability', 'valence', 'arousal', 'rateHz', 'interHz', 'predShare', 'strain', 'motor', 'chrom', 'gE', 'gI', 'brace', 'protection', 'impact', 'events', 'wireHz', 'impactDone', 'impactP', 'impactAt', 'impactSide']);
+export const AREA = { minCells: 8, pre: [0.06, 0.008], span: 0.2, z: 3, hz: 0.5 };
+/** emergent areas: Louvain communities of the network's non-receptor cells (-1 for receptors and areas under minCells) */
+export function areasOf(org) {
+  const m = louvain(graphOf(org)).member, N = org.dev.N, size = new Map();
+  for (let i = 0; i < N; i++) if (!isReceptor(org.dev.type[i])) size.set(m[i], (size.get(m[i]) || 0) + 1);
+  const ids = new Map(); for (const [c, n] of size) if (n >= AREA.minCells) ids.set(c, ids.size);
+  return Int32Array.from({ length: N }, (_, i) => (!isReceptor(org.dev.type[i]) && ids.has(m[i]) ? ids.get(m[i]) : -1));
+}
 
 /** a stored genome as a Float64Array, at most NG genes, non-finite genes at mid-range. A shorter (legacy) genome stays
  *  short: genome.mjs decode() pads it so it develops exactly as it did when it was evolved */
@@ -63,7 +78,9 @@ export function framesFor(spec, variant, { seed = 1, dur = BENCH.dur, set = '' }
 }
 
 /** live an organism through a world's frames, recording motor spike times, interneuron spikes per frame and new readouts */
-export function runRecord(org, F) {
+export function runRecord(org, F, { areas = null } = {}) {
+  const K = areas ? Math.max(0, ...areas) + 1 : 0, area = K ? new Uint16Array(F.n * K) : null, areaN = new Float64Array(K);
+  if (K) for (const a of areas) if (a >= 0) areaN[a]++;
   const motor = [], inter = new Uint16Array(F.n), sig = {}, C = org.C, brace = new Float32Array(F.n), impacts = [], reson = [];
   const osc = org.net.resonators ? Int32Array.from(org.net.resonators().cells || []) : new Int32Array(0);
   const s0 = org.state();
@@ -76,12 +93,13 @@ export function runRecord(org, F) {
     let c = 0; for (let q = 0; q < C.inter.length; q++) c += spk[C.inter[q]]; inter[f] = c;
     for (const k of keys) { const v = s[k]; sig[k][f] = Number.isFinite(v) ? v : 0; }
     for (let q = 0; q < osc.length; q++) if (spk[osc[q]]) reson.push(t);
+    if (K) { const o0 = f * K; for (let i = 0; i < spk.length; i++) if (spk[i] && areas[i] >= 0) area[o0 + areas[i]]++; }
     if (Number.isFinite(s.brace)) brace[f] = s.brace;
     // an impact is judged when its window has passed (brace.mjs): its time is the detection's, WIN - 1 frames earlier
     if (s.impactDone > 0) impacts.push({ t: (f + 2 - WIN) * DT_FRAME, a: s.impactDone, p: s.impactP, side: s.impactSide });
   } });
   const ms = performance.now() - t0;
-  return { world: F.world, motor, inter, brace, impacts, reson, nOsc: osc.length, nInter: C.inter.length, sig, viability: L.viability, alive: L.died < 0, died: L.died, interHz: L.interHz, runaway: L.runaway, maxInter1s: L.maxInter1s, msPerSimS: ms / (F.n * DT_FRAME) };
+  return { world: F.world, motor, inter, brace, impacts, reson, area, areaN, K, nOsc: osc.length, nInter: C.inter.length, sig, viability: L.viability, alive: L.died < 0, died: L.died, interHz: L.interHz, runaway: L.runaway, maxInter1s: L.maxInter1s, msPerSimS: ms / (F.n * DT_FRAME) };
 }
 
 // ---- metrics -------------------------------------------------------------------------------------------------------------------
@@ -183,6 +201,27 @@ export function braceTiming(rec, beats, { from = BENCH.warm } = {}) {
     protectBeat: pb.length ? mean(pb) : NaN, protectAll: pa.length ? mean(pa) : NaN, impacts: pa.length };
 }
 
+/** does an area fire before the strikes? (see the header: areas) */
+export function areaTiming(g, s, { from = BENCH.warm } = {}) {
+  if (!g.K || !s || s.K !== g.K) return null;
+  const K = g.K, n0 = Math.round(AREA.pre[0] / DT_FRAME), n1 = Math.round(AREA.pre[1] / DT_FRAME), sp = Math.round(AREA.span / DT_FRAME);
+  const pre = (rec, f, a) => { let c = 0; for (let k = f - n0; k < f - n1; k++) if (k >= 0) c += rec.area[k * K + a]; return c / (rec.areaN[a] * (n0 - n1) * DT_FRAME); };
+  const frames = (rec) => rec.impacts.filter((x) => x.t >= from).map((x) => Math.round(x.t / DT_FRAME)).filter((f) => f - sp >= 0 && f + sp < rec.inter.length);
+  const fg = frames(g), fs = frames(s); if (fg.length < 4 || fs.length < 4) return null;
+  const rows = [];
+  for (let a = 0; a < K; a++) {
+    if (!(g.areaN[a] > 0)) continue;
+    const A = fg.map((f) => pre(g, f, a)), B = fs.map((f) => pre(s, f, a)), d = mean(A) - mean(B), se = Math.sqrt(sd(A) ** 2 / A.length + sd(B) ** 2 / B.length);
+    const psth = new Float64Array(2 * sp + 1); for (const f of fg) for (let k = -sp; k <= sp; k++) psth[k + sp] += g.area[(f + k) * K + a];
+    let pk = 0; for (let k = 1; k < psth.length; k++) if (psth[k] > psth[pk]) pk = k;
+    const lagMs = 1000 * (pk - sp) * DT_FRAME, z = se > 0 ? d / se : 0;
+    rows.push({ area: a, cells: g.areaN[a], hz: d, z, lagMs, before: z > AREA.z && d > AREA.hz && lagMs < 0 });
+  }
+  if (!rows.length) return null;
+  const best = rows.reduce((b, r) => (r.z > b.z ? r : b));
+  return { areas: rows.length, before: rows.filter((r) => r.before).length, bestZ: best.z, bestHz: best.hz, bestLagMs: best.lagMs, bestCells: best.cells, rows };
+}
+
 /** the metrics of one world for one condition, from its three variant runs */
 export function scoreWorld(runs, opt = {}) {
   const g = runs.groove, s = runs.shuffled, o = runs.omission;
@@ -190,10 +229,12 @@ export function scoreWorld(runs, opt = {}) {
   const vsReflex = s ? reflexVS(s, g, opt) : NaN;
   const bg = braceTiming(g, g.world.beats, opt), bs = s ? braceTiming(s, s.world.beats, opt) : null;
   const resonVs = g.nOsc ? beatLock(g.reson, g.world.beats, opt).vs : NaN;
+  const ar = areaTiming(g, s, opt);
   const all = Object.values(runs);
   return {
     braceErrMs: bg?.braceErrMs ?? NaN, braceIqrMs: bg?.braceIqrMs ?? NaN, braceLock: bg?.braceLock ?? NaN, braceLockShuffled: bs?.braceLock ?? NaN, braceMod: bg?.braceMod ?? NaN, braceErrs: bg?.errs ?? [],
     protect: bg?.protectBeat ?? NaN, protectShuffled: bs?.protectBeat ?? NaN, protectCredit: (bg?.protectBeat ?? NaN) - (bs?.protectBeat ?? NaN), resonVs, nOsc: g.nOsc || 0,
+    areaPreZ: ar ? ar.bestZ : NaN, areaPreHz: ar ? ar.bestHz : NaN, areaLagMs: ar ? ar.bestLagMs : NaN, areasBefore: ar ? ar.before : NaN, areaRows: ar ? ar.rows : null,
     world: g.world.name, vs: lg.vs, vsShuffled: ls ? ls.vs : NaN, credit: ls ? lg.vs - ls.vs : NaN, vsReflex, beyondReflex: lg.vs - vsReflex, phase: lg.phase, motorSpikes: lg.n,
     errMs: lg.errMs, iqrMs: lg.iqrMs, errs: lg.errs, omission: o && s ? omissionResponse(o, s) : null,
     viability: mean(all.map((r) => r.viability)), alive: all.every((r) => r.alive), interHz: mean(all.map((r) => r.interHz)),
@@ -209,6 +250,8 @@ export function summarizeCondition(rows) {
     vs: mean(rows.map((r) => r.vs)), vsShuffled: mean(rows.map((r) => r.vsShuffled)), credit: mean(rows.map((r) => r.credit)),
     braceErrMs: quant(berrs, 0.5), braceIqrMs: quant(berrs, 0.75) - quant(berrs, 0.25), braceLock: mean(rows.map((r) => r.braceLock).filter(Number.isFinite)), braceLockShuffled: mean(rows.map((r) => r.braceLockShuffled).filter(Number.isFinite)),
     protect: mean(rows.map((r) => r.protect).filter(Number.isFinite)), protectShuffled: mean(rows.map((r) => r.protectShuffled).filter(Number.isFinite)), protectCredit: mean(rows.map((r) => r.protectCredit).filter(Number.isFinite)), resonVs: mean(rows.map((r) => r.resonVs).filter(Number.isFinite)),
+    areaPreZ: mean(rows.map((r) => r.areaPreZ).filter(Number.isFinite)), areaPreHz: mean(rows.map((r) => r.areaPreHz).filter(Number.isFinite)), areaLagMs: mean(rows.map((r) => r.areaLagMs).filter(Number.isFinite)),
+    areasBefore: mean(rows.map((r) => r.areasBefore).filter(Number.isFinite)), worldsWithAreaBefore: rows.filter((r) => r.areasBefore > 0).length / rows.length,
     vsReflex: mean(rows.map((r) => r.vsReflex).filter(Number.isFinite)), beyondReflex: mean(rows.map((r) => r.beyondReflex).filter(Number.isFinite)),
     errMs: quant(errs, 0.5), iqrMs: quant(errs, 0.75) - quant(errs, 0.25), beats: errs.length,
     omissionHz: om.length ? mean(om.map((x) => x.hz)) : NaN, omissionZ: om.length ? mean(om.map((x) => x.z).filter(Number.isFinite)) : NaN,
@@ -223,29 +266,29 @@ export function benchSeed(genome, seed, { set = 'test', dur = BENCH.dur, variant
   genome = fitGenome(genome);
   const specs = set === 'train' ? TRAIN : set === 'test' ? TEST : set;
   const out = { seed };
-  const runAll = (make) => specs.map((spec) => {
-    const runs = {}; for (const v of variants) runs[v] = runRecord(make(), framesFor(spec, v, { seed: worldSeed, dur }));
+  const runAll = (make, areas = null) => specs.map((spec) => {
+    const runs = {}; for (const v of variants) runs[v] = runRecord(make(), framesFor(spec, v, { seed: worldSeed, dur }), { areas });
     return scoreWorld(runs);
   });
   if (conditions.includes('newborn')) {
     // one gestation (organism.mjs), then every world hears a copy of the same newborn
     const fd = frozenDev(genome, seed), nbo = createOrganism({ dev: fd, seed }), nb = nbo.serialize();
     out.hubNewborn = hubProfile(nbo);
-    out.newborn = runAll(() => { const o = createOrganism({ dev: fd, seed, gestation: 0 }); o.restore(nb); return o; });
+    out.newborn = runAll(() => { const o = createOrganism({ dev: fd, seed, gestation: 0 }); o.restore(nb); return o; }, areasOf(nbo));
   }
   if (conditions.includes('adult')) {
     const org = createOrganism({ genome, seed }); let lifeOk = true, lifeV = 0, lifeHz = 0;
     for (const spec of TRAIN) { const L = live(org, framesFor(spec, 'groove', { seed: worldSeed + 1000, dur: lifeDur })); lifeOk = lifeOk && L.died < 0; lifeV += L.viability / TRAIN.length; lifeHz += L.interHz / TRAIN.length; }
     const snap = org.serialize(), D = depth(org);
     out.life = { alive: lifeOk, viability: lifeV, interHz: lifeHz, simS: TRAIN.length * lifeDur, motorDepth: D.motorDepth, motorReached: D.motorReached, hub: hubProfile(org) };
-    out.adult = runAll(() => restoreOrganism(snap));
+    out.adult = runAll(() => restoreOrganism(snap), areasOf(org));
   }
   for (const c of conditions) if (out[c]) out[c + 'Summary'] = summarizeCondition(out[c]);
   return out;
 }
 
 const HUB = ['offset', 'hearOffset', 'wireOffset', 'rInt', 'rInter', 'corrRadInt', 'earOffset', 'areaOffset', 'areaRadius', 'arbor', 'nReach'];
-const HEAD = ['vs', 'vsShuffled', 'credit', 'vsReflex', 'beyondReflex', 'errMs', 'iqrMs', 'braceErrMs', 'braceIqrMs', 'braceLock', 'braceLockShuffled', 'protect', 'protectShuffled', 'protectCredit', 'resonVs', 'omissionHz', 'omissionZ', 'viability', 'interHz', 'msPerSimS'];
+const HEAD = ['vs', 'vsShuffled', 'credit', 'vsReflex', 'beyondReflex', 'errMs', 'iqrMs', 'braceErrMs', 'braceIqrMs', 'braceLock', 'braceLockShuffled', 'protect', 'protectShuffled', 'protectCredit', 'resonVs', 'areaPreZ', 'areaPreHz', 'areaLagMs', 'areasBefore', 'worldsWithAreaBefore', 'omissionHz', 'omissionZ', 'viability', 'interHz', 'msPerSimS'];
 /** mean +- sd over development seeds, per condition, plus per-world means */
 export function aggregate(perSeed) {
   const out = { seeds: perSeed.map((p) => p.seed) };
@@ -258,7 +301,7 @@ export function aggregate(perSeed) {
     const worlds = perSeed[0][c].map((r) => r.world);
     h.worlds = worlds.map((w) => {
       const rows = perSeed.map((p) => p[c].find((r) => r.world === w)).filter(Boolean), m = (k) => mean(rows.map((r) => r[k]).filter(Number.isFinite));
-      return { world: w, vs: m('vs'), vsShuffled: m('vsShuffled'), credit: m('credit'), vsReflex: m('vsReflex'), beyondReflex: m('beyondReflex'), errMs: m('errMs'), iqrMs: m('iqrMs'), braceErrMs: m('braceErrMs'), braceLock: m('braceLock'), protect: m('protect'), protectCredit: m('protectCredit'), resonVs: m('resonVs'), omissionHz: mean(rows.map((r) => r.omission?.hz).filter(Number.isFinite)), viability: m('viability') };
+      return { world: w, vs: m('vs'), vsShuffled: m('vsShuffled'), credit: m('credit'), vsReflex: m('vsReflex'), beyondReflex: m('beyondReflex'), errMs: m('errMs'), iqrMs: m('iqrMs'), braceErrMs: m('braceErrMs'), braceLock: m('braceLock'), protect: m('protect'), protectCredit: m('protectCredit'), resonVs: m('resonVs'), areaPreZ: m('areaPreZ'), areaLagMs: m('areaLagMs'), areasBefore: m('areasBefore'), omissionHz: mean(rows.map((r) => r.omission?.hz).filter(Number.isFinite)), viability: m('viability') };
     });
     out[c] = h;
   }
@@ -301,6 +344,7 @@ export function table(agg, title = '') {
     L.push(`  reflex model     vs a reflex alone would give ${pm(h.vsReflex)}   beyond reflex (vs - that) ${pm(h.beyondReflex)}`);
     L.push(`  brace            peak ${pm(h.braceErrMs, 1)} ms   IQR ${pm(h.braceIqrMs, 1)} ms   lock ${pm(h.braceLock)} (shuffled ${pm(h.braceLockShuffled)})`);
     L.push(`  protection       at beat impacts ${pm(h.protect)}   shuffled ${pm(h.protectShuffled)}   credit ${pm(h.protectCredit)}   resonators vs ${pm(h.resonVs)}`);
+    L.push(`  areas            best pre-strike excess over shuffled ${pm(h.areaPreHz)} Hz, z ${pm(h.areaPreZ, 2)}, its peak at ${pm(h.areaLagMs, 0)} ms; areas firing before strikes per world ${pm(h.areasBefore, 2)}, share of worlds with one ${pm(h.worldsWithAreaBefore, 2)}`);
     L.push(`  alignment        median ${pm(h.errMs, 1)} ms   IQR ${pm(h.iqrMs, 1)} ms   (negative: early)`);
     L.push(`  omission         ${pm(h.omissionHz, 3)} Hz   z ${pm(h.omissionZ, 2)}${h.omissionSignals ? '   readouts ' + Object.entries(h.omissionSignals).map(([k, v]) => `${k} ${pm(v, 4)}`).join(', ') : ''}`);
     L.push(`  viability ${pm(h.viability)}   interneurons ${pm(h.interHz, 2)} Hz   cost ${pm(h.msPerSimS, 1)} ms per simulated s`);

@@ -7,14 +7,17 @@
 // Rating (rateGenome, one development seed at a time, `--seeds` seeds per genome): the organism lives the train worlds
 // (worlds.mjs TRAIN, groove variant, `--dur` s each) once as experience, then hears each of them again as groove and as
 // the shuffled control, plasticity on throughout, motor spikes recorded (bench.mjs metrics). Per world
-//   attunement = braceLock exp(-|braceErrMs| / 80) + max(0, protectCredit) + 0.5 max(0, credit) + 0.25 max(0, beyondReflex)
-// (brace: when the body's stiffness peaks relative to the beat and how consistently; protectCredit: protection at beat
-// impacts in the groove minus in the shuffled control; credit: motor vector strength groove minus shuffled;
-// beyondReflex: motor vector strength above what a pure reflex would give). Fitness = mean attunement x min(1, viability / 0.75). Balance and life are hard
-// constraints: a seed that dies, or whose interneurons average below 1 Hz or above 25 Hz, or exceed 40 Hz for more than
+//   attunement = 3 protectCredit + 0.25 braceLock exp(-|braceErrMs| / 80) + 0.5 max(0, credit) + 0.25 max(0, beyondReflex)
+// (protectCredit, signed and clamped to [-0.5, 1]: protection at beat impacts in the groove minus in the shuffled control,
+// what only anticipation buys, so it carries the weight and a negative credit costs; brace: when the body's stiffness
+// peaks relative to the beat and how consistently, a minor term since a reflex locked to the beat also peaks
+// consistently; credit: motor vector strength groove minus shuffled; beyondReflex: motor vector strength above what a
+// pure reflex would give). Fitness = (0.5 viability + mean attunement) x min(1, viability / 0.8)^2: survival is paid
+// for directly and gates the rest steeply. Balance and life are hard constraints: a seed that dies, or whose interneurons average below 1 Hz or above 25 Hz, or exceed 40 Hz for more than
 // 2% of the time, sets the genome's fitness to 0.02 x viability.
-// Search: MAP-Elites (Mouret & Clune 2015) over two descriptors (default: an ear-spread gene if the genome has one, else
-// sensor -> motor depth after the life; and the mean interneuron rate), 8 x 8 cells; steady state, each offspring a
+// Search: MAP-Elites (Mouret & Clune 2015) over two descriptors (default: the resonator count and the motor trophic
+// tropism genes when the genome has them, so resonator and trophic solutions keep their own cells; else sensor -> motor
+// depth after the life and the mean interneuron rate), 8 x 8 cells; steady state, each offspring a
 // mutated (sometimes crossed) copy of a uniformly chosen elite. The archive keeps diverse stepping stones instead of one
 // population converging. Checkpoint after every batch (lab/results/organism-evolve-checkpoint.json; --resume continues it).
 // After the budget: the 5 best elites are re-rated on fresh seeds, the winner is benched on the HELD-OUT worlds
@@ -45,9 +48,9 @@ export function descriptorAxis(name, bins = 8) {
   if (!R) throw new Error('unknown descriptor ' + name);
   return { name, ...R, bins };
 }
-/** default descriptors: the hearing-field gene and the resonator count when the genome has them, else sensor -> motor
+/** default descriptors: the resonator count and the motor trophic tropism when the genome has them, else sensor -> motor
  *  depth and interneuron rate */
-export function defaultDescriptors() { const has = (n) => GENES.some(([g]) => g === n); return has('earSpread') && has('nOsc') ? ['gene:earSpread', 'gene:nOsc'] : ['motorDepth', 'interHz']; }
+export function defaultDescriptors() { const has = (n) => GENES.some(([g]) => g === n); return has('nOsc') && has('tropM') ? ['gene:nOsc', 'gene:tropM'] : ['motorDepth', 'interHz']; }
 
 export function createArchive(axes) {
   const cells = new Map();
@@ -80,15 +83,18 @@ export function archiveFrom(json) { const A = createArchive(json.axes); for (con
 
 // ---- rating -----------------------------------------------------------------------------------------------------------------
 
-export const RATE = { dur: 12, seeds: 2, vGate: 0.75 };
-/** per world: a brace that peaks on the beat, consistently (brace lock x closeness of its peak to the beat), plus the
- *  protection the groove's predictability buys over the shuffled control, plus motor timing beyond reflex and vs shuffled.
- *  Without brace readouts (older organisms) only the motor terms count. */
+export const RATE = { dur: 12, seeds: 2, vGate: 0.8, wProtect: 3, wBrace: 0.25, wViab: 0.5 };
+/** per world: the protection the groove's predictability buys over the shuffled control (signed: a body that braces
+ *  worse in the groove pays), plus a minor term for a brace that peaks on the beat consistently, plus motor timing
+ *  beyond reflex and vs shuffled. Without brace readouts (older organisms) only the motor terms count. */
 export function attunementOf(w) {
   const pos = (x) => (Number.isFinite(x) ? Math.max(0, x) : 0), fin = (x) => (Number.isFinite(x) ? x : 0);
   const brace = Number.isFinite(w.braceErrMs) ? fin(w.braceLock) * Math.exp(-Math.abs(w.braceErrMs) / 80) : 0;
-  return brace + pos(w.protectCredit) + 0.5 * pos(w.credit) + 0.25 * pos(w.beyondReflex);
+  const pc = Math.max(-0.5, Math.min(1, fin(w.protectCredit)));
+  return RATE.wProtect * pc + RATE.wBrace * brace + 0.5 * pos(w.credit) + 0.25 * pos(w.beyondReflex);
 }
+/** fitness from viability and attunement (see the header); balance failures are handled by the caller */
+export const fitnessFrom = (viability, att) => (RATE.wViab * viability + att) * Math.min(1, viability / RATE.vGate) ** 2;
 
 /** one development seed: a life through the train worlds, then each world again as groove and shuffled */
 export function rateSeed(genome, seed, { dur = RATE.dur, worlds = TRAIN, structure = false } = {}) {
@@ -113,7 +119,7 @@ export function rateSeed(genome, seed, { dur = RATE.dur, worlds = TRAIN, structu
 export function rateGenome(genome, seeds, opt = {}) {
   const per = seeds.map((s) => rateSeed(genome, s, opt)), mean = (k) => per.reduce((a, p) => a + (Number.isFinite(p[k]) ? p[k] : 0), 0) / per.length;
   const ok = per.every((p) => p.ok), viability = mean('viability'), att = mean('att');
-  const fitness = ok ? att * Math.min(1, viability / RATE.vGate) : 0.02 * viability;
+  const fitness = ok ? fitnessFrom(viability, att) : 0.02 * viability;
   const o = { fitness, ok, alive: per.every((p) => p.alive), viability, att, interHz: mean('interHz'), runaway: Math.max(...per.map((p) => p.runaway)), vs: mean('vs'), credit: mean('credit'), beyondReflex: mean('beyondReflex'), errMs: mean('errMs'), braceErrMs: mean('braceErrMs'), braceLock: mean('braceLock'), protect: mean('protect'), protectCredit: mean('protectCredit'), resonVs: mean('resonVs'), motorDepth: mean('motorDepth'), motorReached: mean('motorReached'), ms: per.reduce((a, p) => a + p.ms, 0), simS: per.reduce((a, p) => a + p.simS, 0), seeds };
   if (per[0].modularity !== undefined) o.modularity = mean('modularity');
   return o;
@@ -206,7 +212,7 @@ if (isCli) {
     const archiveSummary = { axes, filled: A.size, of: axes.reduce((s, a) => s * a.bins, 1), qd: A.qd(), cells: [...A.cells.entries()].map(([key, e]) => ({ key, desc: e.desc.map((x) => +(+x).toFixed(4)), fitness: +e.fitness.toFixed(4), ok: e.ok, viability: +e.viability.toFixed(4), vs: +(+e.vs).toFixed(4), credit: +(+e.credit).toFixed(4), beyondReflex: +(+e.beyondReflex).toFixed(4), braceErrMs: +(+e.braceErrMs).toFixed(1), braceLock: +(+e.braceLock).toFixed(4), protectCredit: +(+e.protectCredit).toFixed(4), resonVs: +(+e.resonVs).toFixed(4), errMs: +(+e.errMs).toFixed(1), interHz: +e.interHz.toFixed(2), motorDepth: +(+e.motorDepth).toFixed(3), born: e.born, genome: toArray(e.genome) })) };
     fs.mkdirSync(outDir, { recursive: true });
     const trainWorlds = TRAIN.map((w) => w.name);
-    fs.writeFileSync(evoFile, JSON.stringify({ algorithm: 'map-elites', pop: BATCH, gens: history.length, evals, minutes: MIN, workers: NW, seedsPerGenome: NS, life: { trainWorlds, dur, protocol: 'live each train world (groove) once, then hear each again as groove and shuffled' }, fitness: 'mean over seeds and worlds of braceLock exp(-|braceErrMs|/80) + max(0, protectCredit) + 0.5 max(0, credit) + 0.25 max(0, beyondReflex), x min(1, viability/0.75); 0.02 x viability when any seed dies or balance fails', cost, history, archive: archiveSummary, winner: { desc: win.desc, fitness: win.fitness, rerated: win.rerated }, heldOut: { headline: headline(heldOut), bench: heldOut }, baseline: baseline ? { headline: headline(baseline), bench: baseline } : null }, null, 1));
+    fs.writeFileSync(evoFile, JSON.stringify({ algorithm: 'map-elites', pop: BATCH, gens: history.length, evals, minutes: MIN, workers: NW, seedsPerGenome: NS, life: { trainWorlds, dur, protocol: 'live each train world (groove) once, then hear each again as groove and shuffled' }, fitness: '(0.5 viability + att) x min(1, viability/0.8)^2, att = mean over seeds and worlds of 3 clamp(protectCredit, -0.5, 1) + 0.25 braceLock exp(-|braceErrMs|/80) + 0.5 max(0, credit) + 0.25 max(0, beyondReflex); 0.02 x viability when any seed dies or balance fails', laws: 'co-contraction cost and fatigue; strikes only from strong low-band hits (brace.mjs)', cost, history, archive: archiveSummary, winner: { desc: win.desc, fitness: win.fitness, rerated: win.rerated }, heldOut: { headline: headline(heldOut), bench: heldOut }, baseline: baseline ? { headline: headline(baseline), bench: baseline } : null }, null, 1));
     console.log('measuring the best genome...');
     const best = { genome: toArray(win.genome), seed: win.seeds[0], gen: history.length - 1, born: win.born, fitness: win.rerated.fitness, viability: win.rerated.viability, genes: describe(win.genome), cost, rating: { fitness: win.fitness, vs: win.vs, credit: win.credit, beyondReflex: win.beyondReflex, errMs: win.errMs, braceErrMs: win.braceErrMs, braceLock: win.braceLock, protectCredit: win.protectCredit, interHz: win.interHz, motorDepth: win.motorDepth, desc: win.desc }, heldOut: headline(heldOut) };
     best.measures = measure(win.genome, best.seed, { log: console.log });
