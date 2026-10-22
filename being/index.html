@@ -2174,6 +2174,9 @@ renderer.setAnimationLoop(ts => {
   U.uCoreI.value = (.3 + st.lead * .9 * S.awake) * (1 + sing * .25 * Math.sin(t * 34)) * (1 + vm * (speak * 1.4 - .4)) * flick * T.bright * COS.core;
   U.uRays.value = Math.min(1.3, sm(.35, .8, cu.vocal) * T.voice * c01(.25 + st.lead * 1.5)) * S.awake;
   U.uThick.value = THREE.MathUtils.clamp((.085 - (st.lead * .06 + st.voice * .03) * T.open + st.bass * .055) * T.thick * (1 + wt * .5), 0, .3);   // lead opens the metal, bass closes it
+  // ...but only into windows: at zero thickness the wobble (uVar) cut away about half the shell and the body seemed to fall
+  // apart under a voice with no bass; at 0.6 x the wobble at most about a fifth of it opens
+  U.uThick.value = Math.max(U.uThick.value, .6 * U.uVar.value);
   U.uOpen.value = THREE.MathUtils.clamp((st.lead * .7 + st.voice * .3) * T.open - st.bass * .3 - wt * .3, 0, 1) * S.awake;
   U.uHalo.value = Math.min(1.5, st.pads * S.awake * T.halo);
   U.uMote.value = Math.min(.5, (.02 + st.pads * .12) * T.motes);
