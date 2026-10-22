@@ -23,6 +23,15 @@ test('a write replaces an existing file whole, text or bytes', () => {
   assert.deepEqual([...fs.readFileSync(p)], [1, 2, 3]);
 });
 
+test('a file held open by another handle is still saved', () => {
+  const dir = tmp(), f = path.join(dir, 'a.json');
+  fs.writeFileSync(f, 'old');
+  const fd = fs.openSync(f, 'r');   // what antivirus or an indexer does; on Windows it blocks a rename over the file
+  try { writeFileAtomic(f, 'new'); } finally { fs.closeSync(fd); }
+  assert.equal(fs.readFileSync(f, 'utf8'), 'new');
+  assert.deepEqual(fs.readdirSync(dir).filter((n) => n.endsWith('.tmp')), []);
+});
+
 test('no temporary file is left behind, after success or failure', () => {
   const dir = tmp();
   writeFileAtomic(path.join(dir, 'a.json'), '1');
