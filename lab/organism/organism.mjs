@@ -3,8 +3,10 @@
 // Inputs come only from real sensors: being/ear.mjs (28 unit amplitudes, onset, roughness, sub-bass) and being/physics.mjs
 // proprioception (local surface deformation from the l=2 modes, displacement and slosh at each receptor, plus jolt). No
 // analyzer, no ML, no beat tracker. Receptor transduction is physiology (adapting hair cells, a saturating rate), not
-// wiring. Interoceptive cells feel the milieu's variables as an input current. Outputs: motor cells add forces and
-// torques to the physical body; chromatophores expand with their cell's firing and set the skin's colour.
+// wiring. Interoceptive cells feel the milieu's variables as an input current; modulatory cells feel the reward
+// prediction error of impacts (milieu.mjs). Outputs: motor cells add forces and torques to the physical body and stiffen
+// it (brace.mjs: an impact met by a brace already stiff costs little; only its unbraced share reaches the body as a hit);
+// chromatophores expand with their cell's firing and set the skin's colour.
 //
 //   const o = createOrganism({ genome, seed });  o.step(dt, audioChunk);  o.tick(earFrame)  (precomputed frames)
 // Cost: see lab/organism/evolve.mjs and tests/organism.test.mjs (measured, network and ear reported apart).
@@ -15,6 +17,7 @@ import { develop, T, KMAX } from './develop.mjs';
 import { createNetwork, DT } from './network.mjs';
 import { createMilieu } from './milieu.mjs';
 import { decode } from './genome.mjs';
+import { BRACE, protection, createImpactDetector } from './brace.mjs';
 
 export const FRAME = SR * DT;      // 192 audio samples per network step
 const MOTOR_F = 0.5;               // force of one fully contracted motor cell (the groove's own push peaks near 2-3)
@@ -34,10 +37,11 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
   const propY = Array.from(C.proprio, (i) => Y2(u3(i))), propU = Array.from(C.proprio, u3);
   const slow = new Float32Array(NE).fill(DELTA);
   const act = new Float32Array(N);                  // effector state: motor twitch summation, chromatophore expansion
-  const DEC_M = Math.exp(-DT / 0.08), DEC_C = Math.exp(-DT / 0.3), ADAPT = DT / 0.4;
-  const out = { force: [0, 0, 0], torque: [0, 0, 0], motor: 0, chrom: 0, stim: 0, interHz: 0, rateHz: 0 };
-  let inSamples = 0, time = 0, interE = 0, rateE = 0, synMass = 0, trophic = 1;
-  const rec = { motorSpikes: [], onsets: [] };      // optional recording for analysis (times in s)
+  const stiff = new Float32Array(N), impactOf = createImpactDetector(), K_RISE = 1 - Math.exp(-DT / BRACE.tauRise);
+  const DEC_M = Math.exp(-DT / BRACE.tauAct), DEC_C = Math.exp(-DT / 0.3), ADAPT = DT / 0.4;
+  const out = { force: [0, 0, 0], torque: [0, 0, 0], motor: 0, chrom: 0, stim: 0, interHz: 0, rateHz: 0, brace: 0, impact: 0 };
+  let sinceImpact = 1, inSamples = 0, time = 0, interE = 0, rateE = 0, synMass = 0, trophic = 1;
+  const rec = { motorSpikes: [], onsets: [], impacts: [] };   // optional recording for analysis (times in s)
   let recording = false;
 
   function senses(f) {
@@ -62,18 +66,20 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
     // interoception: each cell feels one variable, as a deficit or as sufficiency
     const lv = milieu.margins();
     for (const i of C.intero) { const l = lv[dev.extra[4 * i] | 0], drive = dev.extra[4 * i + 1] ? 1 - l : l; net.ext[i] = 0.4 + 0.9 * drive; }
+    const fe = (G.modFeel ?? 0) * milieu.s.rpe; for (const i of C.mod) net.ext[i] = fe;
     out.stim = c01(stim * 2 + 0.5 * on);            // sensory novelty (adapting hair cells and onsets)
   }
 
   /** one network step (4 ms) from an ear frame */
   function tick(f) {
     senses(f);
-    const E = milieu.s.energy; net.S.energyFactor = 1.15 * E / (E + 0.15);
+    const E = milieu.s.energy; net.S.energyFactor = 1.15 * E / (E + 0.15); net.S.quiet = sinceImpact >= 0.2 ? 1 : 0;
     const S = net.step();
     // effectors
-    let fx = 0, fy = 0, fz = 0, tx = 0, ty = 0, tz = 0, mot = 0, chr = 0;
+    let fx = 0, fy = 0, fz = 0, tx = 0, ty = 0, tz = 0, mot = 0, chr = 0, B = 0;
     for (const i of C.motor) {
-      let a = act[i] * DEC_M + (net.spk[i] ? 0.25 : 0); if (a > 1) a = 1; act[i] = a; mot += a;
+      let a = act[i] * DEC_M + (net.spk[i] ? BRACE.twitch : 0); if (a > 1) a = 1; act[i] = a; mot += a;
+      stiff[i] += K_RISE * (a - stiff[i]); B += stiff[i];
       if (a < 1e-4) continue;
       const v = dev.vec, p = dev.pos, f0 = MOTOR_F * a * (-0.7 * v[6 * i] + 0.7 * v[6 * i + 3]), f1 = MOTOR_F * a * (-0.7 * v[6 * i + 1] + 0.7 * v[6 * i + 4]), f2 = MOTOR_F * a * (-0.7 * v[6 * i + 2] + 0.7 * v[6 * i + 5]);
       fx += f0; fy += f1; fz += f2;
@@ -81,8 +87,13 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
     }
     for (const i of C.chrom) { let a = act[i] * DEC_C + (net.spk[i] ? 0.15 : 0); if (a > 1) a = 1; act[i] = a; chr += a; }
     out.force[0] = fx; out.force[1] = fy; out.force[2] = fz; out.torque[0] = tx; out.torque[1] = ty; out.torque[2] = tz;
-    out.motor = mot / Math.max(1, C.motor.length); out.chrom = chr / Math.max(1, C.chrom.length);
-    phys.step(DT, { fx, fy, fz, tx, ty, tz, sub: f.sub, hit: f.onset });
+    out.motor = mot / Math.max(1, C.motor.length); out.chrom = chr / Math.max(1, C.chrom.length); out.brace = B / Math.max(1, C.motor.length);
+    // impact: a sensory event strikes the body; the brace at this moment decides how much of it lands
+    const a = impactOf(f.onset), p = protection(out.brace); let impact = null;
+    sinceImpact += DT;
+    if (a > 0) { sinceImpact = 0; impact = { a, p, A: net.anticipation() }; if (recording) rec.impacts.push({ t: time, a, p, A: impact.A }); }
+    out.impact = a;
+    phys.step(DT, { fx, fy, fz, tx, ty, tz, sub: f.sub, hit: f.onset * (1 - p) });
     // rates for the milieu
     let ni = 0; for (const i of C.inter) ni += net.spk[i];
     const kk = 1 - Math.exp(-DT / 0.25);
@@ -94,7 +105,7 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
       for (let p = 0; p < N; p++) { const u = Math.min(1, net.rbar[p] / 2); for (let q = p * KMAX, e = q + net.nOut[p]; q < e; q++) { s += net.w[q]; use += u; m++; } }
       synMass = s / N; trophic = m ? use / m : 0;
     }
-    milieu.update({ dt: DT, rateHz: rateE, interHz: interE, credit: S.credit, creditNorm: S.creditNorm, sensoryIn: S.sensoryIn, motor: out.motor, chrom: out.chrom, synMass, strain: phys.strain, stim: 0.7 * out.stim + 0.3 * trophic });
+    milieu.update({ dt: DT, rateHz: rateE, interHz: interE, motor: out.motor, chrom: out.chrom, synMass, strain: phys.strain, stim: 0.7 * out.stim + 0.3 * trophic, impact });
     if (recording) { for (const i of C.motor) if (net.spk[i]) rec.motorSpikes.push(time); if (f.onset > 1) rec.onsets.push(time); }
     time += DT;
   }
@@ -112,7 +123,8 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
   function state() {
     const m = milieu.s;
     return { t: time, alive: m.alive, energy: m.energy, integrity: m.integrity, need: m.need, viability: m.viability, valence: m.valence, arousal: net.S.mod, rateHz: out.rateHz, interHz: out.interHz,
-      predFrac: m.predFrac, predShare: m.predShare, strain: phys.strain, motor: out.motor, chrom: out.chrom, gE: net.S.gEmean, gI: net.S.gImean };
+      predFrac: m.predFrac, predShare: m.predShare, strain: phys.strain, motor: out.motor, chrom: out.chrom, gE: net.S.gEmean, gI: net.S.gImean,
+      brace: out.brace, protection: protection(out.brace), impact: out.impact, rpe: m.rpe, events: m.events, anticIncome: m.anticIncome, impactLoss: m.impactLoss };
   }
   /** the skin: per chromatophore expansion and pigment, plus a summary (brightness, mean hue, patchiness) */
   function skin() {
@@ -121,13 +133,20 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
     b /= Math.max(1, C.chrom.length); for (const a of ex) v += (a - b) ** 2;
     return { expansion: ex, cells: C.chrom, brightness: b, hue: ((Math.atan2(hs, hc) / (2 * Math.PI)) + 1) % 1, pattern: Math.sqrt(v / Math.max(1, ex.length)) };
   }
-  function serialize() { return { genome: Array.from(dev.genome), seed: dev.seed, t: time, net: net.serialize(), milieu: milieu.serialize(), act: Array.from(act), slow: Array.from(slow) }; }
-  function restore(o) { net.restore(o.net); milieu.restore(o.milieu); act.set(o.act); slow.set(o.slow); time = o.t; }
+  function serialize() { return { genome: Array.from(dev.genome), seed: dev.seed, t: time, net: net.serialize(), milieu: milieu.serialize(), act: Array.from(act), stiff: Array.from(stiff), slow: Array.from(slow) }; }
+  function restore(o) { net.restore(o.net); milieu.restore(o.milieu); act.set(o.act); if (o.stiff) stiff.set(o.stiff); slow.set(o.slow); time = o.t; }
 
   return {
-    dev, G, net, milieu, C, act, out, rec, step, tick, state, skin, serialize, restore,
+    dev, G, net, milieu, C, act, stiff, out, rec, step, tick, state, skin, serialize, restore,
     get phys() { return phys; }, get ear() { return ear; }, get time() { return time; }, get lastFrame() { return last; },
-    record(on = true) { recording = on; if (on) { rec.motorSpikes.length = 0; rec.onsets.length = 0; } },
+    /** the new laws' readouts in one place: brace, last impact, reward prediction error, anticipation (running), the
+     *  resonators' rates and phases, and the genome's hearing field */
+    readouts() {
+      const m = milieu.s, r = net.resonators();
+      return { brace: out.brace, protection: protection(out.brace), impact: out.impact, lastImpact: m.lastImpact, rpe: m.rpe, anticipation: m.predFrac, events: m.events, anticIncome: m.anticIncome, impactLoss: m.impactLoss,
+        resonators: { cells: r.cells, hz: r.hz, phase: r.phase, sensory: Uint8Array.from(r.cells, (i) => (net.fanS[i] > 0.05 ? 1 : 0)) }, earSpread: G.earSpread };
+    },
+    record(on = true) { recording = on; if (on) { rec.motorSpikes.length = 0; rec.onsets.length = 0; rec.impacts.length = 0; } },
     poke(s = 1) { phys.impulse(s * (Math.random() - 0.5) * 2, s * (Math.random() - 0.5) * 2, s * (Math.random() - 0.5) * 2); },
   };
 }

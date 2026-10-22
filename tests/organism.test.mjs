@@ -2,11 +2,14 @@
 // a balanced regime by its own rules, the milieu responds to the world as its laws say, and it is cheap enough to run.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomGenome, GENES, NG, mutate, crossover, lcg, decode } from '../lab/organism/genome.mjs';
+import { randomGenome, GENES, NG, NG_LEGACY, mutate, crossover, lcg, decode } from '../lab/organism/genome.mjs';
 import { develop, fingerprint, isReceptor, T } from '../lab/organism/develop.mjs';
 import { createOrganism, restoreOrganism } from '../lab/organism/organism.mjs';
 import { earFrames, live } from '../lab/organism/environment.mjs';
-import { louvain, graphOf, reciprocity, vectorStrength, cvISI } from '../lab/organism/analysis.mjs';
+import { louvain, graphOf, reciprocity, vectorStrength, cvISI, omissionBump } from '../lab/organism/analysis.mjs';
+import { createMuscle, protection, impactCost } from '../lab/organism/brace.mjs';
+import { MILIEU } from '../lab/organism/milieu.mjs';
+import { DT } from '../lab/organism/network.mjs';
 
 const geneIndex = (name) => GENES.findIndex(([n]) => n === name);
 
@@ -125,5 +128,103 @@ test('cost: the organism (network, body, milieu) runs well under real time', () 
   const u = process.cpuUsage(t0), ms = (u.user + u.system) / 1000 / ((F.n - 1000) * 0.004);
   console.log(`  ${ms.toFixed(2)} ms of CPU per simulated second (${(ms / 10).toFixed(2)}% of one core); the ear (being/ear.mjs) is extra`);
   assert.ok(ms < 20, `${ms} ms per simulated second`);
+});
+
+// ---- the hearing field, the laws of timing, and their controls -------------------------------------------------------------
+const setGenes = (g, o) => { const c = Float64Array.from(g); for (const [k, v] of Object.entries(o)) { const [, lo, hi] = GENES[geneIndex(k)]; c[geneIndex(k)] = (v - lo) / (hi - lo); } return c; };
+
+test('the ear spread gene moves hair cells from one placode to the whole skin; tonotopy stays a Q-gradient read-out', () => {
+  const g = randomGenome(11), ang = (d) => {
+    const P = d.G.dP; let s = 0, n = 0;
+    for (let i = 0; i < d.N; i++) if (d.type[i] === T.EAR) { const p = [d.pos[3 * i], d.pos[3 * i + 1], d.pos[3 * i + 2]], l = Math.hypot(...p); s += Math.acos(Math.max(-1, Math.min(1, (p[0] * P[0] + p[1] * P[1] + p[2] * P[2]) / l))); n++; }
+    return s / n;
+  };
+  const one = develop(setGenes(g, { earSpread: 0 }), 1), all = develop(setGenes(g, { earSpread: 1 }), 1);
+  console.log(`  mean angle of hair cells from the P source: placode ${ang(one).toFixed(2)} rad, whole skin ${ang(all).toFixed(2)} rad`);
+  assert.ok(ang(one) < 0.35 && ang(all) > 1.2);
+  // frequency follows the local Q level in both: unit order is Q order
+  for (const d of [one, all]) {
+    const { dQ, lamQ } = d.morph, q = (i) => Math.exp(-Math.hypot(d.pos[3 * i] - dQ[0], d.pos[3 * i + 1] - dQ[1], d.pos[3 * i + 2] - dQ[2]) / lamQ);
+    const cells = []; for (let i = 0; i < d.N; i++) if (d.type[i] === T.EAR) cells.push([d.extra[4 * i], q(i)]);
+    cells.sort((a, b) => a[0] - b[0]); for (let k = 1; k < cells.length; k++) assert.ok(cells[k][1] >= cells[k - 1][1] - 1e-9, 'tonotopy by Q');
+  }
+});
+
+test('a 28-gene genome (evolved before the new genes) decodes to finite values and develops the same organism as before', () => {
+  const g = randomGenome(3).slice(0, NG_LEGACY), d = decode(g);
+  for (const [n] of GENES) assert.ok(Number.isFinite(d[n]), n);
+  assert.equal(d.nOsc, 0); assert.equal(d.earSpread, 0); assert.equal(d.modFeel, 0); assert.ok(Math.abs(d.tauElig - 1) < 1e-9);
+  assert.equal(fingerprint(develop(g, 1)), 3736667095);   // the fingerprint of this genome and seed under commit 481fd30
+});
+
+test('a brace in time costs less than a late or an early one (muscle delay, holding cost, impact law)', () => {
+  // four motor spikes 12 ms apart, starting at offset d from an impact at 0.6 s; energy-equivalent cost of the
+  // contraction (milieu costMotor x activation, for the whole trial) plus the impact's unbraced share
+  const trial = (d) => {
+    const m = createMuscle(), t0 = 0.6 + d, spikes = [0, 3, 6, 9].map((k) => Math.round((t0 + k * DT) / DT)); let hold = 0, p = 0;
+    for (let s = 0; s < Math.round(1.2 / DT); s++) { m.step(spikes.includes(s)); hold += MILIEU.costMotor * m.act * DT; if (s === Math.round(0.6 / DT)) p = protection(m.stiff); }
+    const c = impactCost(1, p); return { p, cost: hold + c.dE + c.dI };
+  };
+  const timed = trial(-0.08), late = trial(0.02), early = trial(-0.45), none = { cost: impactCost(1, 0).dE + impactCost(1, 0).dI };
+  console.log(`  protection timed ${timed.p.toFixed(2)}, late ${late.p.toFixed(2)}, early ${early.p.toFixed(2)}; cost x1e3 timed ${(1e3 * timed.cost).toFixed(3)}, late ${(1e3 * late.cost).toFixed(3)}, early ${(1e3 * early.cost).toFixed(3)}, no brace ${(1e3 * none.cost).toFixed(3)}`);
+  assert.ok(timed.p > 0.5 && late.p < 0.05 && early.p < 0.2);
+  assert.ok(late.cost > 1.5 * timed.cost && early.cost > 1.5 * timed.cost && late.cost > none.cost);
+});
+
+// a genome whose development gives resonators sensory input (random genome 3, development seed 3) with its lead gene set
+const RES = randomGenome(3);
+
+test('omission response: after entraining to a steady pulse, sensory-driven resonators fire at the time of a missing beat', () => {
+  const F = earFrames([{ mode: 'rhythm', pattern: 'pulse', bpm: 96, omit: 0.3, dur: 100 }], 3);
+  const run = (g) => {
+    const org = createOrganism({ genome: g, seed: 3 }), net = org.net, qs = Array.from(net.OSC).filter((i) => net.fanS[i] > 0.05), c = new Float32Array(F.n);
+    live(org, F, { each: (o, f) => { for (const i of qs) c[f] += net.spk[i]; } });
+    return { b: omissionBump(c, F.beats, { cells: qs.length, from: 15 }), hz: qs.map((i) => net.omega[i] / (2 * Math.PI)).sort((a, b) => a - b), n: qs.length };
+  };
+  const learned = run(setGenes(RES, { oscLead: 0.2 })), frozen = run(setGenes(RES, { oscLead: 0.2, oscK: 0, oscEta: 0 }));
+  const med = learned.hz[learned.hz.length >> 1];
+  console.log(`  ${learned.n} sensory resonators, median rate ${med.toFixed(2)} Hz (beat 1.60 Hz); bump at omitted beats ${learned.b.bump.toFixed(2)} Hz (z ${learned.b.z.toFixed(1)}, n ${learned.b.n}) vs frozen oscillators ${frozen.b.bump.toFixed(2)} Hz (z ${frozen.b.z.toFixed(1)})`);
+  assert.ok(Math.abs(med - 1.6) < 0.2, 'resonators learned the beat');
+  assert.ok(learned.b.z > 2.5 && frozen.b.z < 1.5 && learned.b.bump > frozen.b.bump + 1);
+});
+
+test('anticipation credit pays only for inhibition in place before an impact: a clock on the beat earns, the same clock on shuffled drums and a reaction do not', () => {
+  // the law, tested with a controlled predictor: inhibitory interneurons that synapse onto cells receiving the senses are
+  // driven (input current) either 50-15 ms before every beat of the nominal grid (a clock), or 4-40 ms after every impact
+  // (a reaction); the drums are a steady rock pattern or the same hits with shuffled intervals
+  const g = setGenes(RES, { nOsc: 0 });
+  const run = (shuffle, mode) => {
+    const F = earFrames([{ mode: 'rhythm', pattern: 'rock', bpm: 100, shuffle, dur: 40 }], 5), org = createOrganism({ genome: g, seed: 3 }), net = org.net;
+    const e = net.edges(), targets = new Set(); for (let i = 0; i < org.dev.N; i++) if (net.fanS[i] > 0.05) targets.add(i);
+    const oracle = [...new Set(Array.from(e.pre).filter((p, k) => org.dev.type[p] === T.INTER && org.dev.isI[p] && targets.has(e.post[k])))].slice(0, 40);
+    const due = new Uint8Array(F.n + 20);
+    if (mode === 'clock') for (const bt of F.beats) for (let f = Math.round((bt.t - 0.05) / DT); f < Math.round((bt.t - 0.015) / DT); f++) if (f >= 0) due[f] = 1;
+    const A = [];
+    const L = live(org, F, { each: (o, f, st) => {
+      if (mode === 'react' && st.impact > 0) for (let k = 1; k <= 9; k++) due[f + k] = 1;
+      for (const i of oracle) net.ext[i] = due[f + 1] ? 3 : 0;
+      if (f * DT > 8 && st.impact > 0) A.push(o.milieu.s.lastImpact.A);
+    } });
+    const m = A.reduce((x, y) => x + y, 0) / A.length, se = Math.sqrt(A.reduce((x, y) => x + (y - m) ** 2, 0) / (A.length - 1) / A.length);
+    return { m, se, income: L.segs[0].anticIncome / L.segs[0].events, n: oracle.length };
+  };
+  const clock = run(false, 'clock'), clockShuffled = run(true, 'clock'), react = run(false, 'react'), none = run(false, 'none');
+  const f = (x) => `${x.m.toFixed(3)} +- ${x.se.toFixed(3)} (income/impact x1e3 ${(1e3 * x.income).toFixed(3)})`;
+  console.log(`  ${clock.n} driven inhibitory cells. anticipation: clock ${f(clock)}; clock on shuffled drums ${f(clockShuffled)}; reaction ${f(react)}; no drive ${f(none)}`);
+  assert.ok(clock.m - clockShuffled.m > 3 * Math.hypot(clock.se, clockShuffled.se), 'structure-specific');
+  assert.ok(clock.m - react.m > 3 * Math.hypot(clock.se, react.se), 'a reaction is not anticipation');
+  assert.ok(Math.abs(react.m - none.m) < 3 * Math.hypot(react.se, none.se) + 0.05, 'a reaction earns what no drive earns');
+  assert.ok(clock.income > 2 * clockShuffled.income && clock.income > 2 * react.income);
+});
+
+test('emergent anticipation in a genome with resonators (measured, reported, not asserted: it depends on how development wires them)', () => {
+  const g = setGenes(RES, { oscLead: 0.18 }), out = [];
+  for (const shuffle of [false, true]) {
+    const F = earFrames([{ mode: 'rhythm', pattern: 'rock', bpm: 100, shuffle, dur: 40 }], 5), org = createOrganism({ genome: g, seed: 3 }), A = [];
+    live(org, F, { each: (o, f, st) => { if (f * DT > 15 && st.impact > 0) A.push(o.milieu.s.lastImpact.A); } });
+    out.push(A.reduce((x, y) => x + y, 0) / A.length);
+  }
+  console.log(`  random genome 3 with resonators (lead 0.18 s): anticipation at impacts steady ${out[0].toFixed(3)}, shuffled ${out[1].toFixed(3)}`);
+  for (const x of out) assert.ok(Number.isFinite(x));
 });
 void T;

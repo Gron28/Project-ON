@@ -22,24 +22,42 @@
 //   atrophy             synapses whose presynaptic cell is silent waste away over ~10 min (trophic support needs activity)
 //   pruning / sprouting every 5 s synapses below pruneThr x their birth weight are removed; active cells sprout a new
 //                       synapse onto an active neighbour of one of their targets
-// Prediction credit (read by the milieu, not used by any rule): exteroceptive excitation (ear, onset, roughness, sub-bass;
-// not proprioception, which the organism causes itself) arriving at a cell, times the inhibition already above that
-// cell's own 1 s mean at that moment, before this step's spikes. Its covariance is ~0 when input and inhibition are
-// independent and positive when inhibition arrives on time with the input (predictive cancellation).
+//   (the eligibility trace's time constant is a gene, tauElig 0.3-2 s, so learning can bridge a beat interval)
+// Resonators (dev.osc): interneurons with an intrinsic oscillation, each a phase oscillator pulled by its input
+// (d phi = omega - K F sin(phi), as in the adaptive-frequency oscillators of Righetti, Buchli & Ijspeert 2006) whose
+// period learns the interval between successive input pulses (rising edges of F) when that interval lies within
+// 0.6-1.7x of its current period: P += rate (interval - P), rate = oscEta / 12 (interval tuning; the plain AFO rate law
+// drifts to sub-harmonics from far detunings, this one does not). F is the cell's
+// exteroceptive excitation (synapses from ear, onset, roughness, sub-bass cells; smoothed over 20 ms) as a contrast to its own 0.5 s mean
+// (0..4; Weber-like, so a pulse pulls alike whatever the cell's fan-in): a resonator
+// entrains only to what reaches it from the senses, not to the network's own echo of its bursts. Input pulls the phase so phi = 0 falls on it and the rate learns the input's
+// period. Pacemaker law: once per cycle, when its phase crosses -omega * lead (lead seconds before phi = 0), the cell
+// fires a rebound burst of 3 spikes, one each time it leaves refractoriness (as thalamic and other pacemaker cells do
+// with T-type calcium bursts; the milieu's energy factor is each spike's probability). Otherwise it is an
+// ordinary interneuron. So an entrained resonator fires ahead of the input it expects, and keeps firing when that input
+// is missing.
+// Anticipation (read by the milieu at each impact, not used by any rule): at a sensory event, the inhibition that was
+// ALREADY on the cells receiving the senses 20-60 ms before it (a ring of past conductances), above each cell's own
+// quiet level (its mean inhibition over the stretches >= 200 ms after any impact, so the responses to impacts do not set
+// the baseline), weighted by the cell's exteroceptive fan-in and normalised by that level. A reaction to the event cannot
+// precede it, so feed-forward responses earn nothing; ~0 when inhibition and events are independent (chance-corrected).
 
 import { T, isReceptor, KMAX } from './develop.mjs';
 
 export const DT = 0.004, HZ = 250;
-const D = 20, SLOW = 25;                          // delay ring; the slow plasticity cadence (steps)
+const D = 20, SLOW = 25, H = 16;                  // H: steps of conductance history kept for anticipation                          // delay ring; the slow plasticity cadence (steps)
 const TAU_M = 0.02, VE = 4.3, VI = -0.33, THETA = 1, DELTA = 0.25, RHO0 = 20, REFR = 2;
 const DEC_E = Math.exp(-DT / 0.005), DEC_I = Math.exp(-DT / 0.01), DEC_X = Math.exp(-DT / 0.02);
-const W_MAX_E = 1.5, W_MAX_I = 4, A_PLUS = 1, A_MINUS = 1.05, TAU_ELIG = 1, W_E0 = 0.3;
+const W_MAX_E = 1.5, W_MAX_I = 4, A_PLUS = 1, A_MINUS = 1.05, W_E0 = 0.3;
+const BURST = 3, W_LO = 2 * Math.PI * 0.6, W_HI = 2 * Math.PI * 4;
 
 // exp on [-40, 8] from a table with linear interpolation (relative error < 4e-5); Math.exp was a third of the step
 const EXP_LO = -40, EXP_RES = 64, EXP_T = Float64Array.from({ length: 48 * EXP_RES + 2 }, (_, i) => Math.exp(EXP_LO + i / EXP_RES));
 export function fexp(u) { if (u <= EXP_LO) return 0; if (u >= 8) return EXP_T[48 * EXP_RES]; const x = (u - EXP_LO) * EXP_RES, i = x | 0; return EXP_T[i] + (x - i) * (EXP_T[i + 1] - EXP_T[i]); }
 // probability of at least one event in a step at rate lam
 const hazardP = (lam) => (lam < 0.02 ? lam * (1 - 0.5 * lam) : 1 - fexp(-lam));
+
+const lcg32 = (seed) => { let s = (seed * 2246822519 >>> 0) || 7; return () => { s = (Math.imul(s, 1664525) + 1013904223) | 0; return (s >>> 0) / 4294967296; }; };
 
 export function createNetwork(dev, opt = {}) {
   const G = dev.G, N = dev.N, type = dev.type, isI = dev.isI;
@@ -68,7 +86,9 @@ export function createNetwork(dev, opt = {}) {
     inList = new Int32Array(inStart[N]); const fill = inStart.slice(0, N);
     for (let p = 0; p < N; p++) for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) inList[fill[tgt[s]]++] = s;
   }
-  rebuildIn();
+  const fanS = new Float32Array(N);                                  // exteroceptive excitatory fan-in per cell
+  function fanIn() { fanS.fill(0); for (let p = 0; p < N; p++) if (type[p] <= T.SUB && !isI[p]) for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) fanS[tgt[s]] += w[s]; }
+  rebuildIn(); fanIn();
   // neighbours within reach of a dendrite (for sprouting)
   const nb = []; {
     const P = dev.pos;
@@ -88,24 +108,31 @@ export function createNetwork(dev, opt = {}) {
   const ext = new Float32Array(N);                                   // receptors: rate (Hz); others: input current
   const modc = new Float32Array(N), modBar = new Float32Array(N);    // modulator concentration (0..1) and its slow mean
   const dead = new Uint8Array(N);                                    // lesioned cells
+  const histI = new Float32Array(H * N);                             // inhibitory conductance, last H steps
+  const gIq = new Float32Array(N);                                   // quiet-time inhibition (S.quiet set by the organism)
+  // resonators
+  const oscIdx = []; for (let i = 0; i < N; i++) if (dev.osc && dev.osc[2 * i] > 0 && !recep[i]) oscIdx.push(i);
+  const OSC = Int32Array.from(oscIdx), phi = new Float32Array(N), omega = new Float32Array(N), geBar = new Float32Array(N), sens = new Float32Array(N);
+  const lastP = new Float32Array(N).fill(-10), armed = new Float32Array(N).fill(1), sf = new Float32Array(N);   // last pulse (s), re-arm clock, smoothed input
+  const K_SF = 1 - Math.exp(-DT / 0.02), pace = new Uint8Array(N);   // pace: the pacemaker spike is due this step   // last input pulse (s), edge detector
+  { const r0 = lcg32(dev.seed); for (const i of OSC) { omega[i] = 2 * Math.PI * dev.osc[2 * i]; phi[i] = 2 * Math.PI * r0(); } }
+  const oscK = G.oscK ?? 0, oscEta = G.oscEta ?? 0, DEC_GB = DT / 0.5;
   const DEC_A = Math.exp(-DT / G.tauAdapt), DEC_RB = Math.exp(-DT / 5), DEC_RF = Math.exp(-DT / 0.1);
   const alphaI = 2 * G.rTarget * 0.02;
   let slot = 0, n = 0;
-  const S = { energyFactor: 1, credit: 0, creditNorm: 0, sensoryIn: 0, spikes: 0, spikesByType: new Float32Array(10), gEmean: 0, gImean: 0, mod: 0 };
+  const S = { energyFactor: 1, quiet: 1, sensoryIn: 0, spikes: 0, spikesByType: new Float32Array(10), gEmean: 0, gImean: 0, mod: 0 };
 
   function step() {
-    const eF = S.energyFactor, base = slot * N, mg = G.modGain * 0.3 / DELTA, kv = DT / TAU_M;
-    let credit = 0, cnorm = 0, sIn = 0, nsp = 0, gEs = 0, gIs = 0, nEc = 0, modSum = 0;
+    const eF = S.energyFactor, base = slot * N, mg = G.modGain * 0.3 / DELTA, kv = DT / TAU_M, hs = (n % H) * N, quiet = S.quiet;
+    let sIn = 0, nsp = 0, gEs = 0, gIs = 0, nEc = 0, modSum = 0;
     S.spikesByType.fill(0);
     for (let i = 0; i < N; i++) {
       const sArr = ringS[base + i];
       let ge = gE[i] * DEC_E + ringE[base + i], gi = gI[i] * DEC_I + ringI[base + i];
       ringE[base + i] = 0; ringI[base + i] = 0; ringS[base + i] = 0;
-      // predictive cancellation: sensory excitation arriving now, met by inhibition already above its own recent level
-      // (chance-corrected: the covariance of input with inhibition above its own 1 s mean, ~0 when they are independent,
-      // normalised by the input times that mean; computed before this step's spikes, so a reflex cannot count)
-      if (sArr > 0) { sIn += sArr; credit += sArr * (gi - gIbar[i]); cnorm += sArr * (gIbar[i] + 0.05); }
-      gIbar[i] += 0.004 * (gi - gIbar[i]);
+      // conductance history for anticipation (see the header); quiet-time inhibition only while no impact is near
+      if (sArr > 0) sIn += sArr; sens[i] = sArr;
+      gIbar[i] += 0.004 * (gi - gIbar[i]); histI[hs + i] = gi; if (quiet) gIq[i] += 0.004 * (gi - gIq[i]);
       gE[i] = ge; gI[i] = gi;
       x[i] *= DEC_X; y[i] *= DEC_X; a[i] *= DEC_A; spk[i] = 0;
       if (dead[i]) { rbar[i] *= DEC_RB; rf[i] *= DEC_RF; continue; }
@@ -121,8 +148,8 @@ export function createNetwork(dev, opt = {}) {
       }
       let fired = 0;
       if (refr[i]) refr[i]--;
-      else if (hz > 0 && rnd() < hazardP(DT * hz * eF)) {
-        fired = 1; spk[i] = 1; refr[i] = REFR; v[i] = 0; a[i] += 0.15; x[i] += 1; y[i] += 1; nsp++; S.spikesByType[type[i]]++;
+      else if ((pace[i] && rnd() < eF) || (hz > 0 && rnd() < hazardP(DT * hz * eF))) {
+        fired = 1; spk[i] = 1; if (pace[i]) pace[i]--; refr[i] = REFR; v[i] = 0; a[i] += 0.15; x[i] += 1; y[i] += 1; nsp++; S.spikesByType[type[i]]++;
       }
       rbar[i] = rbar[i] * DEC_RB + fired * (1 - DEC_RB) * HZ;
       rf[i] = rf[i] * DEC_RF + fired * (1 - DEC_RF) * HZ;
@@ -146,6 +173,22 @@ export function createNetwork(dev, opt = {}) {
         else elig[s] += A_PLUS * x[pre];
       }
     }
+    // resonators: phase and rate follow the input (adaptive-frequency oscillators); the oscillation is next step's current
+    for (let q = 0; q < OSC.length; q++) {
+      const i = OSC[q]; if (dead[i]) { pace[i] = 0; continue; }
+      sf[i] += K_SF * (sens[i] - sf[i]); const se = sf[i], gb = geBar[i], c = (se - gb) / (gb + 0.05), F = c <= 0 ? 0 : c > 4 ? 4 : c; geBar[i] += DEC_GB * (se - gb);
+      const sn = Math.sin(phi[i]); let p = phi[i] + DT * (omega[i] - oscK * F * sn), om = omega[i];
+      if (F > 1 && armed[i] >= 0.12) {                            // an input pulse begins (after >= 120 ms of quiet input)
+        armed[i] = 0; const t = n * DT, I = t - lastP[i], P0 = 2 * Math.PI / om; lastP[i] = t;
+        if (I > 0.6 * P0 && I < 1.7 * P0) { const P1 = P0 + (oscEta / 12) * (I - P0); om = 2 * Math.PI / P1; }
+      } else if (F < 0.3) armed[i] += DT; else if (armed[i] < 0.12) armed[i] = 0;
+      om = om < W_LO ? W_LO : om > W_HI ? W_HI : om; omega[i] = om;
+      // firing phase -om * lead (mod 2 pi): the pacemaker spike is due when the phase crosses it this step
+      let pf = -om * dev.osc[2 * i + 1]; pf %= 2 * Math.PI; if (pf < 0) pf += 2 * Math.PI;
+      const q0 = phi[i];
+      if (p > q0 && ((q0 < pf && p >= pf) || p >= pf + 2 * Math.PI)) pace[i] = BURST;   // only moving forward
+      p %= 2 * Math.PI; if (p < 0) p += 2 * Math.PI; phi[i] = p;
+    }
     slot = (slot + 1) % D; n++;
     // every 100 ms: modulator field, three-factor update, atrophy (eligibility lasts ~1 s, so this loses nothing)
     if (n % SLOW === 0) {
@@ -155,7 +198,7 @@ export function createNetwork(dev, opt = {}) {
         const m = c / (c + 5); modc[i] = m; modBar[i] += 0.005 * (m - modBar[i]); modSum += m;
       }
       S.mod = modSum / N;
-      const decE = Math.exp(-SLOW * DT / TAU_ELIG), atro = SLOW * DT / 600, hk = G.etaH * SLOW * DT / 0.04;   // etaH is per 40 ms
+      const decE = Math.exp(-SLOW * DT / (G.tauElig ?? 1)), atro = SLOW * DT / 600, hk = G.etaH * SLOW * DT / 0.04;   // etaH is per 40 ms
       for (let p = 0; p < N; p++) {
         const use = Math.min(1, rbar[p] / 1), lose = atro * (1 - use), inh = isI[p];
         for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) {
@@ -171,7 +214,7 @@ export function createNetwork(dev, opt = {}) {
     }
     if (n % HZ === 0) scale();
     if (n % (5 * HZ) === 0) restructure();
-    S.credit = credit; S.creditNorm = cnorm; S.sensoryIn = sIn; S.spikes = nsp; S.gEmean = nEc ? gEs / nEc : 0; S.gImean = nEc ? gIs / nEc : 0;
+    S.sensoryIn = sIn; S.spikes = nsp; S.gEmean = nEc ? gEs / nEc : 0; S.gImean = nEc ? gIs / nEc : 0;
     return S;
   }
 
@@ -194,8 +237,22 @@ export function createNetwork(dev, opt = {}) {
       let d = 1; for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) if (tgt[s] === via) { d = delay[s]; break; }
       addSyn(p, k, 0.5 * (isI[p] ? G.gI * W_E0 : W_E0), d); stats.sprouted++;
     }
-    rebuildIn();
+    rebuildIn(); fanIn();
   }
+
+  /** anticipation at a sensory event happening now: inhibition already present 20-60 ms before it on the cells that
+   *  receive the senses, above each cell's own mean, relative to that mean (see the header) */
+  function anticipation(from = 5, to = 15) {
+    let num = 0, den = 0;
+    for (let i = 0; i < N; i++) {
+      const f = fanS[i]; if (f <= 0 || dead[i]) continue;
+      let g = 0; for (let l = from; l < to; l++) g += histI[((n - l + H * 8) % H) * N + i];
+      g /= to - from; num += f * (g - gIq[i]); den += f * (gIq[i] + 0.05);
+    }
+    return den > 0 ? num / den : 0;
+  }
+  /** resonators' state, for the view and the analysis: rate (Hz) and phase per resonator */
+  function resonators() { return { cells: OSC, hz: Float32Array.from(OSC, (i) => omega[i] / (2 * Math.PI)), phase: Float32Array.from(OSC, (i) => phi[i] / (2 * Math.PI)) }; }
 
   /** every live synapse as parallel arrays (for analysis and the view) */
   function edges() {
@@ -204,19 +261,21 @@ export function createNetwork(dev, opt = {}) {
     for (let p = 0; p < N; p++) for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) { pre[k] = p; post[k] = tgt[s]; wt[k] = w[s]; sl[k++] = s; }
     return { pre, post, w: wt, slot: sl, m };
   }
-  function lesion(cellsToKill) { for (const i of cellsToKill) { dead[i] = 1; nOut[i] = 0; } for (let p = 0; p < N; p++) for (let s = p * KMAX + nOut[p] - 1; s >= p * KMAX; s--) if (dead[tgt[s]]) removeSyn(p, s); rebuildIn(); }
+  function lesion(cellsToKill) { for (const i of cellsToKill) { dead[i] = 1; nOut[i] = 0; } for (let p = 0; p < N; p++) for (let s = p * KMAX + nOut[p] - 1; s >= p * KMAX; s--) if (dead[tgt[s]]) removeSyn(p, s); rebuildIn(); fanIn(); }
 
   function serialize() {
     const e = edges(), rs = RS[0];
     return { n, slot, pre: Array.from(e.pre), post: Array.from(e.post), w: Array.from(e.w, (q) => +q.toFixed(5)), w0: Array.from(e.slot, (s) => +w0[s].toFixed(5)), delay: Array.from(e.slot, (s) => delay[s]),
-      v: Array.from(v), a: Array.from(a), rbar: Array.from(rbar), modBar: Array.from(modBar), dead: Array.from(dead), stats: { ...stats }, rs };
+      v: Array.from(v), a: Array.from(a), rbar: Array.from(rbar), modBar: Array.from(modBar), dead: Array.from(dead), stats: { ...stats }, rs,
+      osc: Array.from(OSC, (i) => [phi[i], omega[i], geBar[i], lastP[i] - n * DT]) };
   }
   function restore(o) {
     nOut.fill(0);
     for (let k = 0; k < o.pre.length; k++) { const s = addSyn(o.pre[k], o.post[k], o.w[k], o.delay[k]); w0[s] = o.w0[k]; }
     v.set(o.v); a.set(o.a); rbar.set(o.rbar); modBar.set(o.modBar); dead.set(o.dead); Object.assign(stats, o.stats); n = o.n; slot = o.slot; RS[0] = o.rs;
-    rebuildIn();
+    if (o.osc) OSC.forEach((i, q) => { [phi[i], omega[i], geBar[i]] = o.osc[q]; lastP[i] = (o.osc[q][3] ?? -10) + o.n * DT; });
+    rebuildIn(); fanIn();
   }
 
-  return { N, step, ext, spk, rf, rbar, v, gE, gI, modc, dead, w, w0, tgt, nOut, delay, S, stats, edges, lesion, serialize, restore, recep, isI, type, get t() { return n * DT; } };
+  return { N, step, ext, spk, rf, rbar, v, gE, gI, modc, dead, w, w0, tgt, nOut, delay, S, stats, edges, lesion, serialize, restore, recep, isI, type, anticipation, resonators, OSC, phi, omega, fanS, get t() { return n * DT; } };
 }

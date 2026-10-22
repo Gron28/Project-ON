@@ -4,7 +4,9 @@
 // The genes set LAWS, never connections: where two signalling centres sit on the body and how far their morphogens reach,
 // how many interneurons are born and how deep they migrate, which way axons are drawn (radial and morphogen tropism),
 // how readily a passing axon makes a synapse, the E/I fate bias, plasticity rates, the neuromodulator's gain, effector
-// counts, the homeostatic set point and a narrow metabolic efficiency. Development (develop.mjs) turns them into a body.
+// counts, the homeostatic set point and a narrow metabolic efficiency; how far hearing spreads over the skin; how many
+// interneurons become resonators and how they entrain; the eligibility span and the modulator's feel for outcomes.
+// Development (develop.mjs) turns them into a body.
 
 /** seedable LCG (the repo's constants: Numerical Recipes, as in being/ear.mjs) */
 export function lcg(seed) {
@@ -35,15 +37,30 @@ export const GENES = [
   ['rTarget', 2, 8],                                                     // homeostatic set-point rate (Hz)
   ['tauAdapt', 0.08, 0.4],                                               // spike-frequency adaptation time constant (s)
   ['effic', 0.9, 1.1],                                                   // metabolic efficiency (narrow: no free lunch)
+  // appended (older genomes keep their first 28 genes' meaning)
+  ['earSpread', 0, 1],                                                   // hearing field: one placode at P (0) .. the whole skin (1)
+  ['nOsc', 0, 48, true],                                                 // interneurons that become resonators (intrinsic oscillation)
+  ['oscHz', 0.9, 3.2], ['oscSpread', 0, 0.6],                            // resonators' natural rate and its log spread across cells
+  ['oscK', 0, 10], ['oscEta', 0, 6],                                     // resonators: phase pull and frequency learning by input
+  ['oscLead', 0, 0.2], ['oscRad', -1, 1],                                // firing lead before the expected input (s); fate bias deep (+) / shallow (-)
+  ['tauElig', 0.3, 2],                                                   // eligibility trace of the three-factor rule (s)
+  ['modFeel', 0, 3],                                                     // modulatory cells' drive by the impact outcome (reward prediction error)
 ];
 export const NG = GENES.length;
+export const NG_LEGACY = 28;                     // genomes evolved before the hearing-field and resonator genes
+/** values (0..1) for the appended genes that reproduce the 28-gene organism: one ear placode (the original strip
+ *  layout, see develop.mjs), no resonators, a 1 s eligibility trace, a modulator blind to impact outcomes */
+export const LEGACY_PAD = { earSpread: 0, nOsc: 0, oscHz: 0.5, oscSpread: 0, oscK: 0, oscEta: 0, oscLead: 0, oscRad: 0.5, tauElig: (1 - 0.3) / 1.7, modFeel: 0 };
+/** a full-length genome: a shorter (legacy) one is padded with LEGACY_PAD */
+export function padGenome(g) { return g.length >= NG ? g : Float64Array.from({ length: NG }, (_, i) => (i < g.length ? g[i] : LEGACY_PAD[GENES[i][0]])); }
 
 export function randomGenome(seed) { const r = lcg(mix(seed, 101)); return Float64Array.from({ length: NG }, () => r()); }
 /** the middle of every range */
 export function defaultGenome() { return new Float64Array(NG).fill(0.5); }
 
-export function decode(g) {
-  const o = {};
+export function decode(g0) {
+  const o = {}, g = padGenome(g0);
+  o.legacy = g0.length < NG;                     // develop.mjs keeps the original ear placode and random sequence
   GENES.forEach(([name, lo, hi, int], i) => { const u = Math.min(1, Math.max(0, g[i])); const v = lo + (hi - lo) * u; o[name] = int ? Math.round(v) : v; });
   const dir = (c, phi) => { const s = Math.sqrt(Math.max(0, 1 - c * c)); return [s * Math.cos(phi), s * Math.sin(phi), c]; };
   o.dP = dir(o.pCos, o.pPhi); o.dQ = dir(o.qCos, o.qPhi);

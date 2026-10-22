@@ -114,3 +114,111 @@ export function summarize(org) {
     reciprocity: R.r, reciprocityRandom: R.random, reciprocityRatio: R.ratio, pruned: st.pruned / formed, sprouted: st.sprouted, inhibitoryShare: org.dev.isI.reduce((s, x) => s + x, 0) / org.dev.N, member: L.member };
 }
 export { T };
+
+// ---- timing to the beat ---------------------------------------------------------------------------------------------------
+// beats: [{ t, omitted, period }] (environment.mjs earFrames). A trace is sampled every dt seconds from time t0.
+
+/** per beat (not omitted, inside [from, to)), when the trace peaks within half a period around it: the error in ms
+ *  (negative = ahead of the beat). Returns { n, median, sd, mean, errs } */
+export function beatAlignment(trace, beats, { dt = 0.004, t0 = 0, from = -Infinity, to = Infinity } = {}) {
+  const errs = [];
+  for (const b of beats) {
+    if (b.omitted || b.t < from || b.t >= to) continue;
+    const T = b.period || 0.5, i0 = Math.max(0, Math.ceil((b.t - T / 2 - t0) / dt)), i1 = Math.min(trace.length, Math.floor((b.t + T / 2 - t0) / dt));
+    if (i1 - i0 < 3) continue;
+    let best = -Infinity, bi = -1, mean = 0; for (let i = i0; i < i1; i++) { mean += trace[i]; if (trace[i] > best) { best = trace[i]; bi = i; } }
+    mean /= i1 - i0; if (!(best > mean * 1.05 + 1e-6)) continue;      // a flat trace has no peak to place
+    errs.push(1000 * (t0 + bi * dt - b.t));
+  }
+  if (!errs.length) return { n: 0, median: NaN, sd: NaN, mean: NaN, errs };
+  const s = [...errs].sort((a, b) => a - b), m = errs.reduce((x, y) => x + y, 0) / errs.length;
+  return { n: errs.length, median: s[s.length >> 1], sd: Math.sqrt(errs.reduce((x, y) => x + (y - m) ** 2, 0) / errs.length), mean: m, errs };
+}
+/** phase locking of event times to the beat grid (each time's phase within its own beat interval, so tempo ramps and
+ *  swing are handled): vector strength, mean phase and the mean phase as ms ahead (-) / behind (+) the beat */
+export function beatLocking(times, beats, { from = -Infinity, to = Infinity } = {}) {
+  const g = beats.filter((b) => b.t >= from - 2 && b.t < to + 2);
+  let c = 0, s = 0, n = 0, Tsum = 0, k = 0;
+  for (const t of times) {
+    if (t < from || t >= to) continue;
+    while (k + 1 < g.length && g[k + 1].t <= t) k++;
+    if (k + 1 >= g.length || g[k].t > t) continue;
+    const T = g[k + 1].t - g[k].t; if (T <= 0 || T > 2) continue;
+    const ph = 2 * Math.PI * (t - g[k].t) / T; c += Math.cos(ph); s += Math.sin(ph); n++; Tsum += T;
+  }
+  if (!n) return { vs: NaN, phase: NaN, ms: NaN, n: 0 };
+  const phase = Math.atan2(s, c) / (2 * Math.PI);
+  return { vs: Math.hypot(c, s) / n, phase, ms: 1000 * phase * (Tsum / n), n };
+}
+/** activity after omitted beats, as a function of latency since the last beat that sounded (bins of 20 ms, 0..1.6 s),
+ *  from per-frame population counts. Units: spikes per cell per second. Use omissionContrast() to compare two tempi. */
+export function omissionResponse(counts, beats, { dt = 0.004, t0 = 0, cells = 1, from = -Infinity, to = Infinity, bin = 0.02, span = 1.6 } = {}) {
+  const nb = Math.round(span / bin), lat = new Float64Array(nb), nn = new Float64Array(nb); let n = 0, T = 0;
+  for (let k = 1; k < beats.length; k++) {
+    const b = beats[k], p = beats[k - 1];
+    if (!b.omitted || p.omitted || b.t < from || b.t >= to || p.seg !== b.seg) continue;
+    const nx = beats.slice(k + 1).find((x) => !x.omitted), end = nx ? nx.t : b.t + b.period;   // up to the next sound
+    for (let j = 0; j < nb; j++) {
+      const a0 = p.t + j * bin; if (a0 + bin > end) break;
+      const i0 = Math.round((a0 - t0) / dt), i1 = Math.round((a0 + bin - t0) / dt); if (i0 < 0 || i1 > counts.length) continue;
+      let c = 0; for (let i = i0; i < i1; i++) c += counts[i]; lat[j] += c / (bin * cells); nn[j]++;
+    }
+    n++; T += b.t - p.t;
+  }
+  // the segment's mean rate, so profiles from louder and quieter worlds can be compared
+  const i0 = Math.max(0, Math.round((Math.max(from, t0) - t0) / dt)), i1 = Math.min(counts.length, Math.round((Math.min(to, t0 + counts.length * dt) - t0) / dt));
+  let c = 0; for (let i = i0; i < i1; i++) c += counts[i]; const mean = i1 > i0 ? c / ((i1 - i0) * dt * cells) : NaN;
+  return { n, period: n ? T / n : NaN, bin, mean, lat: Array.from(lat, (x, j) => (nn[j] ? x / nn[j] : NaN)) };
+}
+/** the omission response: at each omitted beat (expected at T after the last sound), the population rate in
+ *  [T - 200, T + 100] ms above the chord between its flanks [T - 350, T - 200] and [T + 100, T + 250] ms. The response to
+ *  the last sound decays convexly, so it lies below the chord (bias <= 0: conservative); only activity that marks the
+ *  expected time stands above it. Mean, SE and z over omissions (spikes per cell per second). Needs T >= ~0.5 s. */
+export function omissionBump(counts, beats, { dt = 0.004, t0 = 0, cells = 1, from = -Infinity, to = Infinity } = {}) {
+  const rate = (a, b) => { const i0 = Math.round((a - t0) / dt), i1 = Math.round((b - t0) / dt); if (i0 < 0 || i1 > counts.length || i1 <= i0) return NaN; let s = 0; for (let i = i0; i < i1; i++) s += counts[i]; return s / ((i1 - i0) * dt * cells); };
+  const d = [];
+  for (let k = 1; k < beats.length; k++) {
+    const b = beats[k], p = beats[k - 1]; if (!b.omitted || p.omitted || b.t < from || b.t >= to || p.seg !== b.seg) continue;
+    const x = rate(b.t - 0.2, b.t + 0.1) - 0.5 * (rate(b.t - 0.35, b.t - 0.2) + rate(b.t + 0.1, b.t + 0.25));
+    if (Number.isFinite(x)) d.push(x);
+  }
+  const n = d.length, m = d.reduce((s, x) => s + x, 0) / Math.max(1, n), se = n > 1 ? Math.sqrt(d.reduce((s, x) => s + (x - m) ** 2, 0) / (n - 1) / n) : NaN;
+  return { n, bump: m, se, z: m / (se || Infinity) };
+}
+
+// ---- radial organisation --------------------------------------------------------------------------------------------------
+const MODALITY = (t) => (t === T.EAR ? 0 : t === T.ONSET ? 1 : t === T.ROUGH ? 2 : t === T.SUB ? 3 : t === T.PROPRIO ? 4 : t === T.INTERO ? 5 : -1);
+/** where kinds of cells sit between the nucleus (r = 0) and the skin (r = 1), and whether integration moves inward:
+ *  per radial bin, the cell kinds, the mean synaptic hops from the senses and the mean convergence (how many of the six
+ *  modalities - ear, onset, roughness, sub-bass, proprioception, interoception - reach the cell within 2 synapses).
+ *  corr: Pearson correlations over interneurons of radius with hops and with convergence (negative: deeper = more
+ *  integrative). intero: false leaves interoception out (interoceptors sit near the nucleus by their morphogen, so
+ *  counting them favours deep cells by construction). */
+export function radialProfile(org, { bins = [0, 0.3, 0.45, 0.6, 0.75, 0.9, 1.01], minW = 0.02, intero = true } = {}) {
+  const NM = intero ? 6 : 5, MOD = (t) => { const m = MODALITY(t); return !intero && m === 5 ? -1 : m; };
+  const d = org.dev, N = d.N, g = graphOf(org), D = depth(org, minW).d;
+  const inc = Array.from({ length: N }, () => []);
+  for (let k = 0; k < g.m; k++) if (g.w[k] > minW) inc[g.post[k]].push(g.pre[k]);
+  const conv = new Float32Array(N), rad = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    rad[i] = Math.hypot(d.pos[3 * i], d.pos[3 * i + 1], d.pos[3 * i + 2]);
+    let mask = 0; for (const p of inc[i]) { const m = MOD(d.type[p]); if (m >= 0) mask |= 1 << m; for (const q of inc[p]) { const m2 = MOD(d.type[q]); if (m2 >= 0) mask |= 1 << m2; } }
+    let c = 0; for (let b = 0; b < NM; b++) c += (mask >> b) & 1; conv[i] = c / NM;
+  }
+  const rows = [];
+  for (let b = 0; b + 1 < bins.length; b++) {
+    const lo = bins[b], hi = bins[b + 1], kinds = {}; let n = 0, h = 0, hn = 0, cv = 0, osc = 0;
+    for (let i = 0; i < N; i++) {
+      if (rad[i] < lo || rad[i] >= hi) continue; n++; const nm = TYPE_KEY[d.type[i]]; kinds[nm] = (kinds[nm] || 0) + 1;
+      if (d.osc && d.osc[2 * i] > 0) osc++;
+      if (!isReceptor(d.type[i])) { cv += conv[i]; if (D[i] >= 0) { h += D[i]; hn++; } }
+    }
+    const nn = n - Object.entries(kinds).filter(([k]) => RECEPTOR_KEYS.has(k)).reduce((s, [, v]) => s + v, 0);
+    rows.push({ r: [lo, Math.min(1, hi)], n, kinds, resonators: osc, hops: hn ? h / hn : NaN, convergence: nn ? cv / nn : NaN });
+  }
+  const pear = (x, y) => { const n = x.length; if (n < 3) return NaN; const mx = x.reduce((a, b) => a + b, 0) / n, my = y.reduce((a, b) => a + b, 0) / n; let sxy = 0, sxx = 0, syy = 0; for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2; syy += (y[i] - my) ** 2; } return sxy / Math.sqrt(sxx * syy + 1e-12); };
+  const ii = [], ih = []; for (let i = 0; i < N; i++) if (d.type[i] === T.INTER) { ii.push(i); if (D[i] >= 0) ih.push(i); }
+  return { rows, corrHops: pear(ih.map((i) => rad[i]), ih.map((i) => D[i])), corrConv: pear(ii.map((i) => rad[i]), ii.map((i) => conv[i])), rad, conv };
+}
+const TYPE_KEY = ['ear', 'onset', 'rough', 'sub', 'proprio', 'inter', 'intero', 'mod', 'motor', 'chrom'];
+const RECEPTOR_KEYS = new Set(['ear', 'onset', 'rough', 'sub', 'proprio']);
