@@ -1,238 +1,286 @@
 {
  "genome": [
-  0.833472,
-  0.955129,
-  0.016572,
+  0.853986,
+  0.96612,
+  0.036178,
   0.584011,
-  0.564613,
-  0.665988,
+  0.182325,
+  0.646902,
   0.557772,
-  0.818553,
+  0.609954,
   0.072892,
-  0.189299,
-  0.752481,
-  0.892713,
-  0.18684,
-  0.93796,
-  0.990663,
-  0.923284,
-  0.208366,
-  0.734518,
-  0.020578,
-  0.395355,
+  0.972491,
+  0.789023,
+  0.778441,
+  0.411671,
+  0.715873,
+  0.422483,
+  0.376941,
+  0.077685,
+  0.781721,
+  0.099195,
+  0.244333,
   0.841088,
-  0.086312,
-  0.148831,
-  0.133717,
-  0.179822,
-  0.095945,
-  0.699701,
-  0.991491
+  0.2053,
+  0.355392,
+  0.276534,
+  0.270721,
+  0.110489,
+  0.80712,
+  0.914153
  ],
- "seed": 201382,
- "gen": 26,
- "fitness": 0.8509220745895971,
- "viability": 0.8509220745895971,
+ "seed": 879671,
+ "gen": 37,
+ "born": 497,
+ "fitness": 0.3159176394996519,
+ "viability": 0.7835873206452529,
  "genes": {
-  "pCos": 0.6669,
-  "pPhi": 6.0013,
-  "lamP": 0.2657,
+  "pCos": 0.708,
+  "pPhi": 6.0703,
+  "lamP": 0.2844,
   "qCos": 0.168,
-  "qPhi": 3.5476,
-  "lamQ": 0.8827,
+  "qPhi": 1.1456,
+  "lamQ": 0.8646,
   "nInter": 360,
-  "migDepth": 0.5274,
+  "migDepth": 0.444,
   "fracI": 0.1331,
-  "qFateI": -0.6214,
-  "axonLen": 0.9772,
-  "capture": 0.1871,
-  "synDensity": 0.2714,
-  "tropRs": 0.8759,
-  "tropRi": 0.9813,
-  "tropPi": 0.8466,
-  "tropRb": -0.5833,
-  "gI": 3.2036,
-  "etaH": 0.0004,
-  "etaI": 0.0079,
+  "qFateI": 0.945,
+  "axonLen": 1.0101,
+  "capture": 0.1734,
+  "synDensity": 0.4176,
+  "tropRs": 0.4317,
+  "tropRi": -0.155,
+  "tropPi": -0.2461,
+  "tropRb": -0.8446,
+  "gI": 3.3452,
+  "etaH": 0.002,
+  "etaI": 0.0049,
   "etaS": 0.1682,
-  "pruneThr": 0.0399,
-  "modGain": 0.2232,
-  "nMotor": 14,
-  "nChrom": 20,
-  "rTarget": 2.5757,
-  "tauAdapt": 0.3039,
-  "effic": 1.0983
+  "pruneThr": 0.0672,
+  "modGain": 0.5331,
+  "nMotor": 16,
+  "nChrom": 21,
+  "rTarget": 2.6629,
+  "tauAdapt": 0.3383,
+  "effic": 1.0828
  },
  "cost": {
-  "msPerSimSecond": 25.048,
-  "note": "wall ms per simulated second per organism in a worker: network, body and milieu (ear frames precomputed once per generation)"
+  "msPerSimSecond": 21.233,
+  "note": "wall ms per simulated second per organism in a worker: network, body, milieu and bench recording (ear frames precomputed once per worker)"
+ },
+ "rating": {
+  "fitness": 0.32537104466581923,
+  "vs": 0.43884120686077555,
+  "credit": 0.2261117398504755,
+  "beyondReflex": 0.18079590521621774,
+  "errMs": 97.72623347692814,
+  "interHz": 2.8163386111801643,
+  "motorDepth": 1.46875,
+  "desc": [
+   1.46875,
+   2.8163386111801643
+  ]
+ },
+ "heldOut": {
+  "newborn": {
+   "vs": 0.3981,
+   "vsShuffled": 0.229,
+   "credit": 0.1691,
+   "vsReflex": 0.2875,
+   "beyondReflex": 0.1106,
+   "errMs": 71.3635,
+   "iqrMs": 98.8042,
+   "omissionHz": 0.8992,
+   "omissionZ": -4.6629,
+   "viability": 0.754,
+   "interHz": 12.6407,
+   "msPerSimS": 36.8468
+  },
+  "adult": {
+   "vs": 0.397,
+   "vsShuffled": 0.2412,
+   "credit": 0.1558,
+   "vsReflex": 0.3139,
+   "beyondReflex": 0.0831,
+   "errMs": 89.0713,
+   "iqrMs": 122.6362,
+   "omissionHz": -0.1019,
+   "omissionZ": -0.4915,
+   "viability": 0.7994,
+   "interHz": 2.7538,
+   "msPerSimS": 20.1215
+  },
+  "learned": {
+   "vs": -0.0011,
+   "credit": -0.0133,
+   "beyondReflex": -0.0276,
+   "errMs": 17.7078
+  }
  },
  "measures": {
-  "costMsPerSimS": 7.232051282051282,
+  "costMsPerSimS": 14.71014564102635,
   "life": {
-   "viability": 0.8484069812445221,
+   "viability": 0.8360572767252927,
    "died": -1,
-   "interHz": 2.5577536378040215,
-   "rateHz": 3.8775799523065704,
+   "interHz": 2.8215101123503876,
+   "rateHz": 4.1203670501528675,
    "runaway": 0,
-   "maxInter1s": 8.159352657676717,
+   "maxInter1s": 7.60234869930672,
    "segs": [
     {
      "mode": "silence",
-     "inter": 1.96,
-     "dE": 0.022,
-     "dI": 0.012,
-     "need": 0.278,
-     "pred": 0.376
+     "inter": 2.74,
+     "dE": 0.01,
+     "dI": 0.014,
+     "need": 0.269,
+     "pred": 0.248
     },
     {
      "mode": "groove 120",
-     "inter": 2.83,
-     "dE": 0.083,
-     "dI": -0.003,
-     "need": 0.184,
-     "pred": 0.67
+     "inter": 3.29,
+     "dE": 0.08,
+     "dI": -0.045,
+     "need": 0.179,
+     "pred": 0.821
     },
     {
      "mode": "noise",
      "inter": 2.39,
-     "dE": -0.001,
-     "dI": 0.013,
-     "need": 0.193,
-     "pred": 0.048
+     "dE": -0.01,
+     "dI": 0.019,
+     "need": 0.191,
+     "pred": 0.068
     },
     {
      "mode": "groove 96",
-     "inter": 2.64,
-     "dE": 0.082,
-     "dI": -0.021,
-     "need": 0.173,
-     "pred": 0.847
+     "inter": 2.81,
+     "dE": 0.079,
+     "dI": -0.041,
+     "need": 0.172,
+     "pred": 0.959
     },
     {
      "mode": "tone",
-     "inter": 2.39,
-     "dE": -0.003,
-     "dI": 0.008,
-     "need": 0.185,
-     "pred": 0.092
+     "inter": 2.57,
+     "dE": -0.01,
+     "dI": 0.011,
+     "need": 0.184,
+     "pred": 0.098
     },
     {
      "mode": "scatter",
-     "inter": 2.53,
-     "dE": 0.017,
-     "dI": -0.009,
-     "need": 0.172,
-     "pred": 0.762
+     "inter": 2.91,
+     "dE": 0.05,
+     "dI": -0.022,
+     "need": 0.171,
+     "pred": 0.882
     },
     {
      "mode": "build 128",
-     "inter": 2.71,
-     "dE": -0.024,
-     "dI": -0.024,
-     "need": 0.168,
-     "pred": 0.315
+     "inter": 2.95,
+     "dE": -0.039,
+     "dI": -0.052,
+     "need": 0.167,
+     "pred": 0.381
     },
     {
      "mode": "silence",
-     "inter": 2.21,
-     "dE": 0.024,
-     "dI": 0.038,
-     "need": 0.208,
-     "pred": 0.066
+     "inter": 2.32,
+     "dE": -0.006,
+     "dI": 0.071,
+     "need": 0.212,
+     "pred": 0.044
     },
     {
      "mode": "poly 110",
-     "inter": 2.94,
-     "dE": 0,
-     "dI": -0.007,
-     "need": 0.187,
-     "pred": 1.015
+     "inter": 3.23,
+     "dE": 0.044,
+     "dI": -0.02,
+     "need": 0.188,
+     "pred": 1.202
     },
     {
      "mode": "groove 140",
-     "inter": 2.64,
+     "inter": 2.81,
      "dE": 0,
-     "dI": -0.006,
+     "dI": -0.011,
      "need": 0.163,
-     "pred": 0.582
+     "pred": 0.69
     }
    ]
   },
   "balance": {
-   "gEgIcorr": 0.801171791966349,
-   "inhToExcCurrent": 0.24776852471185626,
-   "cvISI": 1.1928071961559503
+   "gEgIcorr": 0.8668833793172354,
+   "inhToExcCurrent": 0.2573742409116216,
+   "cvISI": 1.1869487277801416
   },
   "structure": {
-   "N": 516,
-   "synapses": 10026,
-   "perCell": 19.430232558139537,
-   "communities": 23,
-   "Q": 0.5784414457777933,
-   "motorDepth": 2.2222222222222223,
-   "motorReached": 0.6428571428571429,
+   "N": 519,
+   "synapses": 8388,
+   "perCell": 16.161849710982658,
+   "communities": 6,
+   "Q": 0.4854010033465419,
+   "motorDepth": 1.375,
+   "motorReached": 1,
    "depthHist": [
     94,
-    318,
-    75,
-    10,
-    2
+    365,
+    60
    ],
-   "reciprocity": 0.15140634350688212,
-   "reciprocityRandom": 0.030387658753906508,
-   "reciprocityRatio": 4.982494529540482,
-   "pruned": 0.14541425161950222,
-   "sprouted": 1070,
-   "inhibitoryShare": 0.10077519379844961
+   "reciprocity": 0.09012875536480687,
+   "reciprocityRandom": 0.03353997774598633,
+   "reciprocityRatio": 2.6872037914691944,
+   "pruned": 0.3196528510017033,
+   "sprouted": 1181,
+   "inhibitoryShare": 0.10982658959537572
   },
   "energy": {
    "start": 1,
    "groove": {
     "dE": 0,
-    "pred": 0.8273,
-    "inter": 2.61,
-    "dI": -0.0201,
-    "need": 0.157
+    "pred": 0.9187,
+    "inter": 2.86,
+    "dI": -0.0358,
+    "need": 0.156
    },
    "noise": {
-    "dE": -0.0204,
-    "pred": 0.0492,
-    "inter": 2.48,
-    "dI": 0.0424,
-    "need": 0.203
+    "dE": -0.0612,
+    "pred": 0.058,
+    "inter": 2.59,
+    "dI": 0.0735,
+    "need": 0.202
    },
    "scatter": {
     "dE": 0,
-    "pred": 0.78,
-    "inter": 2.5,
-    "dI": -0.0198,
-    "need": 0.161
+    "pred": 0.8677,
+    "inter": 2.69,
+    "dI": -0.0366,
+    "need": 0.16
    },
    "silence180": {
     "dE": 0,
-    "pred": 0.016,
-    "inter": 2.49,
-    "dI": 0.0827,
-    "need": 0.225,
-    "needStart": 0.16276762352518429
+    "pred": 0.0362,
+    "inter": 2.66,
+    "dI": 0.1434,
+    "need": 0.222,
+    "needStart": 0.16288936380361224
    }
   },
   "phaseLock": {
    "experienced": {
-    "vs": 0.20997004344798192,
-    "phase": 0.18029187534205782,
-    "n": 594
+    "vs": 0.5899006623226423,
+    "phase": 0.20946969385336106,
+    "n": 1361
    },
    "newbornFrozen": {
-    "vs": 0.4802603447556015,
-    "phase": 0.1495025997664728,
-    "n": 797
+    "vs": 0.7214324142672165,
+    "phase": 0.17706483659013486,
+    "n": 3808
    },
    "scatterControl": {
-    "vs": 0.059139125707533165,
-    "phase": 0.2931064081903374,
-    "n": 557
+    "vs": 0.04657515423111771,
+    "phase": -0.4784180366088522,
+    "n": 1322
    },
    "beatOnsets": {
     "vs": 0.8958486880386626,
@@ -240,6 +288,6 @@
     "n": 1656
    }
   },
-  "earMsPerSimS": 9.016600000012355
+  "earMsPerSimS": 18.411966666656856
  }
 }
