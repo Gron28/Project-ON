@@ -5,10 +5,11 @@
 //      no structure), and 180 s of silence: energy change, prediction credit, stimulation need
 //   4. phase locking of motor spikes to the 120 bpm beat (vector strength at 0.5 s), last 30 s of the groove, for the
 //      experienced organism and for a newborn with plasticity frozen; scattered drums as the chance control
+//   (the headline timing bench - newborn vs adult vs shuffled, held-out worlds, several seeds - is bench.mjs)
 //   5. cost: ms of CPU per simulated second for the organism (ear frames precomputed) and for the ear alone
 
 import { createOrganism, restoreOrganism } from './organism.mjs';
-import { develop } from './develop.mjs';
+import { frozenDev } from './bench.mjs';
 import { earFrames, live, LIFE } from './environment.mjs';
 import { summarize, vectorStrength, cvISI } from './analysis.mjs';
 import { createEar, SR } from '../../being/ear.mjs';
@@ -50,7 +51,7 @@ export function measure(genome, seed, { life = LIFE, log = () => {} } = {}) {
   const vs = (rec, from) => { const t = rec.motorSpikes.filter((x) => x >= from); return vectorStrength(t, 0.5); };
   // the beat's own phase: where the kicks fall on the 0.5 s grid
   const onsetPhase = groove.rec ? vectorStrength(groove.rec.onsets.filter((x) => x >= 30), 0.5) : null;
-  const dev = develop(genome, seed); dev.G = { ...dev.G, etaH: 0, etaI: 0, etaS: 0, pruneThr: 0 };
+  const dev = frozenDev(genome, seed);       // every eta* rate and pruning at 0, including rates added later
   const frozen = createOrganism({ dev, seed }); const Fg = earFrames([{ mode: 'groove', dur: 60, bpm: 120 }], 7);
   live(frozen, Fg, { each: (o, f) => { if (f === 30 * 250) o.record(true); } });
   out.phaseLock = { experienced: vs(groove.rec, 30), newbornFrozen: vs(frozen.rec, 30), scatterControl: vs(scatter.rec, 30), beatOnsets: onsetPhase };

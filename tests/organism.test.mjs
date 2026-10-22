@@ -2,8 +2,10 @@
 // a balanced regime by its own rules, the milieu responds to the world as its laws say, and it is cheap enough to run.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomGenome, GENES, NG, NG_LEGACY, mutate, crossover, lcg, decode } from '../lab/organism/genome.mjs';
+import fs from 'node:fs';
+import { randomGenome, GENES, NG, NG_LEGACY, NG_TROPHIC, mutate, crossover, lcg, decode } from '../lab/organism/genome.mjs';
 import { develop, fingerprint, isReceptor, T } from '../lab/organism/develop.mjs';
+import { frozenDev } from '../lab/organism/bench.mjs';
 import { createOrganism, restoreOrganism } from '../lab/organism/organism.mjs';
 import { earFrames, live } from '../lab/organism/environment.mjs';
 import { louvain, graphOf, reciprocity, vectorStrength, cvISI, omissionBump } from '../lab/organism/analysis.mjs';
@@ -172,10 +174,10 @@ test('a brace in time costs less than a late or an early one (muscle delay, hold
 });
 
 // a genome whose development gives resonators sensory input (random genome 3, development seed 3) with its lead gene set
-const RES = randomGenome(3);
+const RES = setGenes(randomGenome(3), { tropM: 0 });
 
 test('omission response: after entraining to a steady pulse, sensory-driven resonators fire at the time of a missing beat', () => {
-  const F = earFrames([{ mode: 'rhythm', pattern: 'pulse', bpm: 96, omit: 0.3, dur: 100 }], 3);
+  const F = earFrames([{ mode: 'rhythm', pattern: 'pulse', bpm: 96, omit: 0.3, dur: 140 }], 3);
   const run = (g) => {
     const org = createOrganism({ genome: g, seed: 3 }), net = org.net, qs = Array.from(net.OSC).filter((i) => net.fanS[i] > 0.05), c = new Float32Array(F.n);
     live(org, F, { each: (o, f) => { for (const i of qs) c[f] += net.spk[i]; } });
@@ -192,9 +194,11 @@ test('anticipation credit pays only for inhibition in place before an impact: a 
   // the law, tested with a controlled predictor: inhibitory interneurons that synapse onto cells receiving the senses are
   // driven (input current) either 50-15 ms before every beat of the nominal grid (a clock), or 4-40 ms after every impact
   // (a reaction); the drums are a steady rock pattern or the same hits with shuffled intervals
+  // (on the network as development leaves it, before gestation: a gestated network can already anticipate a steady
+  // groove on its own, which would blur the controlled baseline)
   const g = setGenes(RES, { nOsc: 0 });
   const run = (shuffle, mode) => {
-    const F = earFrames([{ mode: 'rhythm', pattern: 'rock', bpm: 100, shuffle, dur: 40 }], 5), org = createOrganism({ genome: g, seed: 3 }), net = org.net;
+    const F = earFrames([{ mode: 'rhythm', pattern: 'rock', bpm: 100, shuffle, dur: 40 }], 5), org = createOrganism({ genome: g, seed: 3, gestation: 0 }), net = org.net;
     const e = net.edges(), targets = new Set(); for (let i = 0; i < org.dev.N; i++) if (net.fanS[i] > 0.05) targets.add(i);
     const oracle = [...new Set(Array.from(e.pre).filter((p, k) => org.dev.type[p] === T.INTER && org.dev.isI[p] && targets.has(e.post[k])))].slice(0, 40);
     const due = new Uint8Array(F.n + 20);
@@ -226,6 +230,61 @@ test('emergent anticipation in a genome with resonators (measured, reported, not
   }
   console.log(`  random genome 3 with resonators (lead 0.18 s): anticipation at impacts steady ${out[0].toFixed(3)}, shuffled ${out[1].toFixed(3)}`);
   for (const x of out) assert.ok(Number.isFinite(x));
+});
+
+test('a 38-gene genome (evolved before the motor trophic field) develops exactly as with tropM = 0', () => {
+  for (const k of [1, 2]) {
+    const g = randomGenome(k), short = g.slice(0, NG_TROPHIC), zero = setGenes(g, { tropM: 0 });
+    assert.equal(fingerprint(develop(short, k)), fingerprint(develop(zero, k)));
+  }
+});
+
+test('the motor trophic field (tropM) draws resonator axons to the motor cells', () => {
+  // per genome (with resonators) and development seed: synapses from resonators onto motor cells, and the share of motor
+  // cells reachable from a resonator within two synapses
+  const wiring = (d) => {
+    const out = Array.from({ length: d.N }, () => []); for (let k = 0; k < d.syn.pre.length; k++) out[d.syn.pre[k]].push(d.syn.post[k]);
+    const isM = (i) => d.type[i] === T.MOTOR, reach = new Set(); let direct = 0, nM = 0;
+    for (let i = 0; i < d.N; i++) { nM += isM(i); if (!(d.osc[2 * i] > 0)) continue; for (const j of out[i]) { if (isM(j)) { direct++; reach.add(j); } for (const k of out[j]) if (isM(k)) reach.add(k); } }
+    return { direct, share: reach.size / nM };
+  };
+  const sum = (t) => { const a = { direct: 0, share: 0 }; for (const k of [1, 2, 3, 4]) { const w = wiring(develop(setGenes(randomGenome(k), { nOsc: 32, tropM: t }), k)); a.direct += w.direct / 4; a.share += w.share / 4; } return a; };
+  const off = sum(0), on = sum(1.5);
+  console.log(`  resonator -> motor synapses ${off.direct.toFixed(1)} -> ${on.direct.toFixed(1)}; motors within 2 synapses of a resonator ${(100 * off.share).toFixed(0)}% -> ${(100 * on.share).toFixed(0)}%`);
+  assert.ok(on.direct > 2 * off.direct, 'more resonator -> motor synapses');
+  assert.ok(on.share > off.share + 0.15, 'more motors within two synapses');
+});
+
+test('hearing is not a metabolic drain: with the network silenced, loud white noise costs what silence costs', () => {
+  // receptor firing is powered by the sense organ (milieu.mjs); under the earlier law the ear's own spikes alone made a
+  // groove cost more than the organism's basal income. (White noise: no onsets, so no impacts; impacts cost by brace.mjs)
+  const g = randomGenome(2), energyAfter = (sched) => {
+    const org = createOrganism({ genome: g, seed: 2, gestation: 0 });
+    org.net.lesion(Array.from({ length: org.dev.N }, (_, i) => i).filter((i) => !isReceptor(org.dev.type[i])));
+    live(org, earFrames(sched, 4)); return org.state().energy;
+  };
+  const loud = energyAfter([{ mode: 'noise', dur: 20 }]), quiet = energyAfter([{ mode: 'silence', dur: 20 }]);
+  console.log(`  energy after 20 s, network silenced: white noise ${loud.toFixed(4)}, silence ${quiet.toFixed(4)}`);
+  assert.ok(Math.abs(loud - quiet) < 0.002, `${loud} vs ${quiet}`);
+});
+
+test('a life on a steady groove does not wear the organism down: rate and viability hold against the newborn', () => {
+  // the newborn (gestated, plasticity frozen) and the same organism with its laws on each live 120 s of the groove; their
+  // last 60 s are compared. And the committed best genome ends its life as viable as it was born. Under the earlier laws
+  // the bench's adults fell to a fifth of the newborn's rate and lost a third of its viability (commit fd8f73b)
+  const Fg = earFrames([{ mode: 'rhythm', pattern: 'rock', bpm: 120, dur: 120 }], 9), n60 = 60 / DT;
+  const best = JSON.parse(fs.readFileSync(new URL('../lab/results/organism-best.json', import.meta.url), 'utf8'));
+  for (const [name, g, k] of [['random 2', randomGenome(2), 2], ['random 5', randomGenome(5), 5], ['best', Float64Array.from(best.genome), best.seed]]) {
+    const nb = createOrganism({ dev: frozenDev(g, k), seed: k }), ad = createOrganism({ genome: g, seed: k }), v0 = ad.state().viability;
+    live(nb, Fg, { to: n60 }); live(ad, Fg, { to: n60 });
+    const N = live(nb, Fg, { from: n60 }), A = live(ad, Fg, { from: n60 });
+    console.log(`  ${name}: interneurons newborn ${N.interHz.toFixed(2)} Hz, adult ${A.interHz.toFixed(2)} Hz (set point ${ad.G.rTarget.toFixed(2)}); viability at birth ${v0.toFixed(3)}, newborn ${N.viability.toFixed(3)}, adult ${A.viability.toFixed(3)} (end ${ad.state().viability.toFixed(3)})`);
+    assert.ok(A.died < 0, 'alive');
+    assert.ok(A.interHz > 0.75 * Math.min(N.interHz, ad.G.rTarget), 'the rate holds near the newborn or the set point');
+    // an unevolved genome may pay for its learning (a Hebbian transient after birth costs energy); the evolved one may not
+    assert.ok(A.viability > N.viability - (name === 'best' ? 0.03 : 0.08), 'viability holds against the newborn');
+    if (name === 'best') assert.ok(ad.state().viability > v0 - 0.05, 'the best genome ends its life as viable as it was born');
+  }
 });
 void T;
 

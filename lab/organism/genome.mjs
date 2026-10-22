@@ -5,7 +5,8 @@
 // how many interneurons are born and how deep they migrate, which way axons are drawn (radial and morphogen tropism),
 // how readily a passing axon makes a synapse, the E/I fate bias, plasticity rates, the neuromodulator's gain, effector
 // counts, the homeostatic set point and a narrow metabolic efficiency; how far hearing spreads over the skin; how many
-// interneurons become resonators and how they entrain; the eligibility span and the modulator's feel for outcomes.
+// interneurons become resonators and how they entrain; the eligibility span and the modulator's feel for outcomes; how
+// strongly axons follow the trophic factor the motor cells release.
 // Development (develop.mjs) turns them into a body.
 
 /** seedable LCG (the repo's constants: Numerical Recipes, as in being/ear.mjs) */
@@ -45,12 +46,15 @@ export const GENES = [
   ['oscLead', 0, 0.2], ['oscRad', -1, 1],                                // firing lead before the expected input (s); fate bias deep (+) / shallow (-)
   ['tauElig', 0.3, 2],                                                   // eligibility trace of the three-factor rule (s)
   ['modFeel', 0, 3],                                                     // modulatory cells' drive by the impact outcome (reward prediction error)
+  ['tropM', 0, 1.5],                                                     // axon tropism up the motor cells' trophic field (develop.mjs)
 ];
 export const NG = GENES.length;
 export const NG_LEGACY = 28;                     // genomes evolved before the hearing-field and resonator genes
+export const NG_TROPHIC = 38;                    // genomes evolved before the effector-derived trophic field
 /** values (0..1) for the appended genes that reproduce the 28-gene organism: one ear placode (the original strip
- *  layout, see develop.mjs), no resonators, a 1 s eligibility trace, a modulator blind to impact outcomes */
-export const LEGACY_PAD = { earSpread: 0, nOsc: 0, oscHz: 0.5, oscSpread: 0, oscK: 0, oscEta: 0, oscLead: 0, oscRad: 0.5, tauElig: (1 - 0.3) / 1.7, modFeel: 0 };
+ *  layout, see develop.mjs), no resonators, a 1 s eligibility trace, a modulator blind to impact outcomes; and (for 28-
+ *  and 38-gene genomes) axons blind to the motor cells' trophic field */
+export const LEGACY_PAD = { earSpread: 0, nOsc: 0, oscHz: 0.5, oscSpread: 0, oscK: 0, oscEta: 0, oscLead: 0, oscRad: 0.5, tauElig: (1 - 0.3) / 1.7, modFeel: 0, tropM: 0 };
 /** a full-length genome: a shorter (legacy) one is padded with LEGACY_PAD */
 export function padGenome(g) { return g.length >= NG ? g : Float64Array.from({ length: NG }, (_, i) => (i < g.length ? g[i] : LEGACY_PAD[GENES[i][0]])); }
 
@@ -60,10 +64,11 @@ export function defaultGenome() { return new Float64Array(NG).fill(0.5); }
 
 export function decode(g0) {
   const o = {}, g = padGenome(g0);
-  o.legacy = g0.length < NG;                     // develop.mjs keeps the original ear placode and random sequence
+  o.legacy = g0.length <= NG_LEGACY;             // develop.mjs keeps the original ear placode and random sequence
   GENES.forEach(([name, lo, hi, int], i) => { const u = Math.min(1, Math.max(0, g[i])); const v = lo + (hi - lo) * u; o[name] = int ? Math.round(v) : v; });
   const dir = (c, phi) => { const s = Math.sqrt(Math.max(0, 1 - c * c)); return [s * Math.cos(phi), s * Math.sin(phi), c]; };
   o.dP = dir(o.pCos, o.pPhi); o.dQ = dir(o.qCos, o.qPhi);
+  o.etaIP = 0.01;                                // intrinsic plasticity rate (network.mjs): a law, not a gene; 0 when frozen
   return o;
 }
 

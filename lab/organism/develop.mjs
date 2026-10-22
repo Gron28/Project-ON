@@ -18,7 +18,10 @@
 //      level (qFateI). Dale's law: a cell's sign is fixed. Interoceptors pick the milieu variable whose morphogen
 //      (C: energy, P: integrity, Q: stimulation) is strongest where they sit, and code deficit or sufficiency by Q.
 //   5. Axon growth. Every cell but the effectors sends out two branches that step through the body, steered by radial
-//      and P tropism (genome, with a birth-order term) plus noise, kept between the nucleus and the skin. Wherever a
+//      and P tropism (genome, with a birth-order term), up the trophic field the motor cells release (tropM; target-
+//      derived neurotrophic factor, Levi-Montalcini 1987: M(x) = sum over motor cells of exp(-|x - m|^2 / LAM_M^2), sensed
+//      as a relative gradient, grad M / (M + M_FLOOR), at most unit length) plus noise, kept between the nucleus and the
+//      skin. Wherever a
 //      branch passes within the capture radius of a cell's dendrites it makes a synapse with probability
 //      synDensity * exp(-d^2 / capture^2). Delays follow path length. Receptors receive no synapses.
 // Everything is recorded with a developmental time (0..1) so it can be replayed as a time-lapse.
@@ -31,6 +34,7 @@ export const TYPE_NAMES = ['ear', 'onset', 'rough', 'sub-bass', 'proprio', 'inte
 export const isReceptor = (t) => t <= T.PROPRIO;
 export const MILIEU_VARS = ['energy', 'integrity', 'stimulation'];
 export const KMAX = 64;                       // axon capacity: at most this many synapses per cell
+const LAM_M = 0.45, M_FLOOR = 0.05;           // motor trophic field: reach, and the growth cone's sensing floor
 const STEP = 0.04, R_SKIN = 0.97, R_NUC = 0.12, EAR_PER_UNIT = 2, N_ONSET = 4, N_ROUGH = 4, N_SUB = 6, N_PROPRIO = 24;
 
 const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
@@ -132,11 +136,23 @@ export function develop(genome, seed = 1) {
   const syn = { pre: [], post: [], delay: [], t: [] }, axons = [];   // axons: { cell, pts: [x,y,z,...], t0, t1 }
   const outN = new Int32Array(N), has = new Set(), cand = [];
   const rho2 = G.capture * G.capture, nSteps = Math.max(2, Math.round(G.axonLen / STEP));
+  // the motor cells' trophic field and the pull it exerts on a growth cone: its relative gradient, at most unit length
+  const tropM = G.tropM || 0, motorPos = cells.filter((c) => c.type === T.MOTOR).map((c) => c.pos), il2 = 1 / (LAM_M * LAM_M);
+  const motorPull = (p) => {
+    let m = 0, gx = 0, gy = 0, gz = 0;
+    for (const q of motorPos) { const dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2], e = Math.exp(-(dx * dx + dy * dy + dz * dz) * il2); m += e; gx += 2 * il2 * e * dx; gy += 2 * il2 * e * dy; gz += 2 * il2 * e * dz; }
+    const k = 1 / (m + M_FLOOR), l = Math.hypot(gx, gy, gz) * k, c = l > 1 ? k / l : k;
+    return [gx * c, gy * c, gz * c];
+  };
   for (const c of cells) {
     if (c.type === T.MOTOR || c.type === T.CHROM) continue;           // effector axons leave the network for the muscles
     const sensory = isReceptor(c.type);
     const radial = sensory ? G.tropRs : G.tropRi + G.tropRb * ((c.rank ?? 0.5) - 0.5) * 2;
-    const tropism = (p) => { const u = norm(p), gp = gradDir(P, p); return [-radial * u[0] + G.tropPi * gp[0], -radial * u[1] + G.tropPi * gp[1], -radial * u[2] + G.tropPi * gp[2]]; };
+    const tropism = (p) => {
+      const u = norm(p), gp = gradDir(P, p), t = [-radial * u[0] + G.tropPi * gp[0], -radial * u[1] + G.tropPi * gp[1], -radial * u[2] + G.tropPi * gp[2]];
+      if (tropM > 0) { const g = motorPull(p); t[0] += tropM * g[0]; t[1] += tropM * g[1]; t[2] += tropM * g[2]; }
+      return t;
+    };
     const t0 = Math.max(c.born + 0.08, sensory ? 0.55 : 0.6);
     for (let b = 0; b < 2; b++) {
       let p = c.pos.slice(), d = norm(tropism(p).map((v, a) => v + 0.6 * randUnit(r)[a]));
