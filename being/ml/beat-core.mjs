@@ -10,6 +10,7 @@
 // extrapolates the phase from them. Times are in seconds of audio pushed so far (the page keeps the same clock).
 
 import { Resampler } from './mel.mjs';
+import { realFFT } from '../fft.mjs';
 
 export const SR = 22050, NFFT = 1024, HOP = 441, FPS = 50, BINS = 128;
 export const EVERY_S = 1.5, WINDOW_S = 10, RING_S = 16, EDGE_S = 0.3, SILENCE_RMS = 0.003;
@@ -18,20 +19,15 @@ const MODEL = 'beat-this-small0', FILTERBANK = 'beat-this-mel';
 const HANN = Float32Array.from({ length: NFFT }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / NFFT));   // periodic
 const sig = (x) => 1 / (1 + Math.exp(-x));
 
-function fft(re, im) {   // in place, radix 2
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) { let b = n >> 1; for (; j & b; b >>= 1) j ^= b; j ^= b; if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
-  for (let len = 2; len <= n; len <<= 1) {
-    const a = (-2 * Math.PI) / len, wr = Math.cos(a), wi = Math.sin(a), h = len >> 1;
-    for (let i = 0; i < n; i += len) {
-      let cr = 1, ci = 0;
-      for (let k = 0; k < h; k++) {
-        const p = i + k, q = p + h, vr = re[q] * cr - im[q] * ci, vi = re[q] * ci + im[q] * cr;
-        re[q] = re[p] - vr; im[q] = im[p] - vi; re[p] += vr; im[p] += vi;
-        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
-      }
-    }
+/** the filterbank (bins x bands, row-major) as per-band lists of its non-zero weights, in bin order */
+function sparseBands(fb) {
+  const nb = NFFT / 2 + 1, start = new Int32Array(BINS + 1), idx = [], w = [];
+  for (let b = 0; b < BINS; b++) {
+    start[b] = idx.length;
+    for (let k = 0; k < nb; k++) { const v = fb[k * BINS + b]; if (v) { idx.push(k); w.push(v); } }
   }
+  start[BINS] = idx.length;
+  return { fb, start, idx: Int32Array.from(idx), w: Float32Array.from(w) };
 }
 
 /** local maxima above 0 logit within +-3 frames (the reference 'minimal' peak picking, kernel 7) */
@@ -92,7 +88,7 @@ export class BeatCore {
     this.ring = new Float32Array(RING_S * SR); this.end = 0; this.since = 0;
     this.inputRate = inputRate; this.pushed = 0;   // input samples ever pushed (the clock)
     this._rs = new Float32Array(8192);
-    this.re = new Float32Array(NFFT); this.im = new Float32Array(NFFT); this.mag = new Float32Array(NFFT / 2 + 1);
+    this.fft = realFFT(NFFT); this.xw = new Float32Array(NFFT); this.re = new Float64Array(NFFT / 2 + 1); this.im = new Float64Array(NFFT / 2 + 1); this.mag = new Float32Array(NFFT / 2 + 1);
     this.ready = false;
   }
 
@@ -122,13 +118,15 @@ export class BeatCore {
   /** log-mel frames of the latest `sec` seconds (frames fully inside the span), row-major [frames, 128] */
   mel(sec) {
     const R = this.ring.length, len = Math.min(this.end, Math.round(sec * SR), R), start = this.end - len;
-    const frames = Math.floor((len - NFFT) / HOP) + 1, out = new Float32Array(frames * BINS), { re, im, mag, fb } = this, sq = Math.sqrt(NFFT);
+    const frames = Math.floor((len - NFFT) / HOP) + 1, out = new Float32Array(frames * BINS), { xw, re, im, mag } = this, sq = Math.sqrt(NFFT);
+    if (!this.bands || this.bands.fb !== this.fb) this.bands = sparseBands(this.fb);
+    const { start: bs, idx, w } = this.bands;
     let e = 0;
     for (let f = 0; f < frames; f++) {
-      for (let i = 0; i < NFFT; i++) { const x = this.ring[(start + f * HOP + i) % R]; re[i] = x * HANN[i]; im[i] = 0; if (i < HOP) e += x * x; }
-      fft(re, im);
-      for (let k = 0; k <= NFFT / 2; k++) mag[k] = Math.hypot(re[k], im[k]) / sq;
-      for (let b = 0; b < BINS; b++) { let s = 0; for (let k = 0; k <= NFFT / 2; k++) { const w = fb[k * BINS + b]; if (w) s += mag[k] * w; } out[f * BINS + b] = Math.log1p(1000 * s); }
+      for (let i = 0; i < NFFT; i++) { const x = this.ring[(start + f * HOP + i) % R]; xw[i] = x * HANN[i]; if (i < HOP) e += x * x; }
+      this.fft(xw, re, im);
+      for (let k = 0; k <= NFFT / 2; k++) mag[k] = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / sq;
+      for (let b = 0; b < BINS; b++) { let s = 0; for (let j = bs[b]; j < bs[b + 1]; j++) s += mag[idx[j]] * w[j]; out[f * BINS + b] = Math.log1p(1000 * s); }
     }
     return { data: out, frames, rms: Math.sqrt(e / Math.max(1, frames * HOP)), endTime: this.pushed / this.inputRate, spanS: (frames - 1) * HOP / SR + NFFT / SR };
   }

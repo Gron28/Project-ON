@@ -11,7 +11,9 @@ import { Worker } from 'node:worker_threads';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
 import { createMonitor, trialsFromBytes } from './rng.mjs';
+const { writeFileAtomic } = createRequire(import.meta.url)('../atomic.cjs');
 
 const SWPC = 'https://services.swpc.noaa.gov/';
 const get = async (url, timeout = 15000) => {
@@ -88,7 +90,7 @@ export function createCosmos(o) {
     try { rng.add(await fetchQuantum(), 'quantum'); }
     catch (e) { source = 'local'; rng.add(trialsFromBytes(crypto.randomBytes(25 * 60)), 'local'); feed('rng', { quantumError: String(e.message || e) }); }
     state.rng = { ...rng.read(), source };
-    try { fs.writeFileSync(rngFile, JSON.stringify(rng.save())); } catch {}
+    try { writeFileAtomic(rngFile, JSON.stringify(rng.save())); } catch {}
   });
   sky(); const skyTimer = setInterval(sky, 20000);
 

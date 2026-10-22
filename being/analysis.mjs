@@ -20,6 +20,8 @@
 //
 // All buffers are preallocated; the only per-hop allocations are event objects when one fires.
 
+import { realFFT } from './fft.mjs';
+
 const HOP = 512;
 const WIN = 1024;
 const CWIN = 4096; // long window for pitch resolution (notes, voice)
@@ -37,49 +39,6 @@ const OCTAVES = [2, 0.5, 1.5, 2 / 3];
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-// ---------------------------------------------------------------------------------------------
-// FFT: iterative radix-2 on separate re/im arrays, tables precomputed per size.
-function makeFFT(n) {
-  const bits = Math.round(Math.log2(n));
-  const rev = new Uint16Array(n);
-  for (let i = 0; i < n; i++) {
-    let r = 0;
-    for (let b = 0; b < bits; b++) if ((i >> b) & 1) r |= 1 << (bits - 1 - b);
-    rev[i] = r;
-  }
-  const cos = new Float64Array(n / 2);
-  const sin = new Float64Array(n / 2);
-  for (let i = 0; i < n / 2; i++) {
-    cos[i] = Math.cos((2 * Math.PI * i) / n);
-    sin[i] = -Math.sin((2 * Math.PI * i) / n);
-  }
-  return function fft(re, im) {
-    for (let i = 0; i < n; i++) {
-      const j = rev[i];
-      if (j > i) {
-        let t = re[i]; re[i] = re[j]; re[j] = t;
-        t = im[i]; im[i] = im[j]; im[j] = t;
-      }
-    }
-    for (let size = 2; size <= n; size <<= 1) {
-      const half = size >> 1;
-      const step = n / size;
-      for (let i = 0; i < n; i += size) {
-        for (let j = 0, k = 0; j < half; j++, k += step) {
-          const a = i + j;
-          const b = a + half;
-          const tr = re[b] * cos[k] - im[b] * sin[k];
-          const ti = re[b] * sin[k] + im[b] * cos[k];
-          re[b] = re[a] - tr;
-          im[b] = im[a] - ti;
-          re[a] += tr;
-          im[a] += ti;
-        }
-      }
-    }
-  };
-}
-
 // In-place insertion sort of the first n entries (n <= 17); returns the median.
 // Cheaper than a general sort for these tiny windows and allocation-free.
 function median(scr, n) {
@@ -90,6 +49,19 @@ function median(scr, n) {
     scr[j + 1] = v;
   }
   return scr[n >> 1];
+}
+
+// Sorted window w[o .. o+n): replaces one entry equal to `out` with `v` and keeps it sorted, so a running median costs
+// one shift instead of a sort. Returns false when `out` is not there (a NaN went through): the caller rebuilds.
+function slide(w, o, n, out, v) {
+  const e = o + n;
+  let i = o;
+  while (i < e && w[i] !== out) i++;
+  if (i === e) return false;
+  while (i > o && w[i - 1] > v) { w[i] = w[i - 1]; i--; }
+  while (i < e - 1 && w[i + 1] < v) { w[i] = w[i + 1]; i++; }
+  w[i] = v;
+  return true;
 }
 
 export function createAnalyzer({ sampleRate = 48000 } = {}) {
@@ -151,16 +123,20 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
   };
 
   // ---- spectral analysis buffers ------------------------------------------------------------
-  const fft = makeFFT(WIN);
+  const fft = realFFT(WIN);
   const hann = new Float64Array(WIN);
   for (let i = 0; i < WIN; i++) hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / WIN);
-  const re = new Float64Array(WIN);
-  const im = new Float64Array(WIN);
+  const xw = new Float64Array(WIN); // windowed frame
+  const re = new Float64Array(NB);
+  const im = new Float64Array(NB);
   const MAGS = 4 / WIN; // makes a sine of amplitude A read ~A in its peak bin
   const mag = new Float32Array(NB);
   const HN = 17; // median length over time, and over frequency (+-8 bins)
   const hist = new Float32Array(HN * NB);
-  const scr = new Float32Array(HN);
+  const hSort = new Float32Array(NB * HN); // per bin, its HN history values sorted (the running time median)
+  const scr = new Float32Array(HN); // the frequency window, sorted as it slides over the bins
+  const tScr = new Float32Array(HN); // a time window being rebuilt
+  const fq = (q) => mag[q < 0 ? 0 : q > NBU - 1 ? NBU - 1 : q]; // magnitude with the bin clamped to the analysed range
   const lp = new Float32Array(NB); // log percussive magnitudes (current)
   const lpPrev = new Float32Array(NB);
   const lr = new Float32Array(NB); // log raw magnitudes (current), for the beat envelope
@@ -251,11 +227,12 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
   const refV = new Float64Array(REF_N);
 
   // ---- notes / voice ------------------------------------------------------------------------
-  const cfft = makeFFT(CWIN);
+  const cfft = realFFT(CWIN);
   const chann = new Float64Array(CWIN);
   for (let i = 0; i < CWIN; i++) chann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / CWIN);
-  const cre = new Float64Array(CWIN);
-  const cim = new Float64Array(CWIN);
+  const cxw = new Float64Array(CWIN);
+  const cre = new Float64Array(CWIN / 2 + 1);
+  const cim = new Float64Array(CWIN / 2 + 1);
   const CS = 4 / CWIN;
   const CB = Math.min(CWIN / 2 + 1, Math.ceil(4200 / cBinHz) + 10);
   const cLoBin = Math.max(2, Math.round(110 / cBinHz));
@@ -447,16 +424,14 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
     for (let i = 0; i < WIN; i++) {
       const x = ring[(base + i) & ringMask];
       sq += x * x;
-      re[i] = x * hann[i];
-      im[i] = 0;
+      xw[i] = x * hann[i];
     }
-    fft(re, im);
+    fft(xw, re, im);
     const rms = Math.sqrt(sq / WIN);
     for (let k = 0; k < NBU; k++) mag[k] = Math.sqrt(re[k] * re[k] + im[k] * im[k]) * MAGS;
 
     // --- HPSS ---
     const slot = (hopIdx % HN) * NB;
-    for (let k = 0; k < NBU; k++) hist[slot + k] = mag[k];
 
     let totE = 0;
     let percE = 0;
@@ -480,15 +455,21 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
 
     for (let k = 1; k < NBU; k++) {
       // harmonic estimate: median of this bin over the last HN hops (includes the current one)
-      for (let j = 0; j < HN; j++) scr[j] = hist[j * NB + k];
-      const Hm = median(scr, HN);
-      // percussive estimate: median of the current frame over +-8 bins
-      for (let j = -8; j <= 8; j++) {
-        let q = k + j;
-        if (q < 0) q = 0; else if (q > NBU - 1) q = NBU - 1;
-        scr[j + 8] = mag[q];
+      const hs = k * HN;
+      const old = hist[slot + k];
+      hist[slot + k] = mag[k];
+      if (!slide(hSort, hs, HN, old, mag[k])) {
+        for (let j = 0; j < HN; j++) tScr[j] = hist[j * NB + k];
+        median(tScr, HN);
+        hSort.set(tScr, hs);
       }
-      const Pf = median(scr, HN);
+      const Hm = hSort[hs + (HN >> 1)];
+      // percussive estimate: median of the current frame over +-8 bins (the window slides one bin per step)
+      if (k === 1 || !slide(scr, 0, HN, fq(k - 9), fq(k + 8))) {
+        for (let j = -8; j <= 8; j++) scr[j + 8] = fq(k + j);
+        median(scr, HN);
+      }
+      const Pf = scr[HN >> 1];
 
       const m = mag[k];
       const h2 = Hm * Hm;
@@ -1098,10 +1079,9 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
   function chromaFrame() {
     const base = pos - CWIN;
     for (let i = 0; i < CWIN; i++) {
-      cre[i] = ring[(base + i) & ringMask] * chann[i];
-      cim[i] = 0;
+      cxw[i] = ring[(base + i) & ringMask] * chann[i];
     }
-    cfft(cre, cim);
+    cfft(cxw, cre, cim);
     const off = (cFrame % CH) * CB;
     for (let k = 0; k < CB; k++) cHist[off + k] = Math.sqrt(cre[k] * cre[k] + cim[k] * cim[k]) * CS;
     cFrame++;

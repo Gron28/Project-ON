@@ -1,7 +1,6 @@
 // The bridge the original entity page expects (window.pet), for the being sketch. Only what the being uses is real;
 // the rest of the original desktop-pet API (history, tray, mind LLM, dev window) is inert here.
 const { contextBridge, ipcRenderer } = require('electron');
-const { TUNE } = require('./tune.cjs');
 const on = (ch, fn) => ipcRenderer.on(ch, (e, v) => fn(v));
 // state channels: main may send them before the page has registered its listener (its module is still loading), so the latest
 // value is kept from the start and handed to the listener when it arrives
@@ -24,7 +23,9 @@ contextBridge.exposeInMainWorld('pet', {
   onQuality: (fn) => onState('quality', fn),           // { res: 0.4..1, auto }: render resolution scale, and whether it lowers itself when frames run long
   // the local folder's own channels (being/local/page.mjs <-> being/local/main.cjs), each prefixed 'ext:'
   ext: { on: (ch, fn) => on('ext:' + String(ch), fn), send: (ch, v) => ipcRenderer.send('ext:' + String(ch), v) },
-  hasLocal: (() => { try { return require('node:fs').existsSync(require('node:path').join(__dirname, 'local', 'page.mjs')); } catch { return false; } })(),   // whether the page should look for being/local/page.mjs
+  // whether the page should look for being/local/page.mjs: asked of main when sandboxed (no fs here); unsandboxed lab harnesses
+  // (scratch/) look on disk, since a sendSync nobody in main answers blocks the page for good
+  hasLocal: (() => { try { return require('node:fs').existsSync(require('node:path').join(__dirname, 'local', 'page.mjs')); } catch { try { return !!ipcRenderer.sendSync('has-local'); } catch { return false; } } })(),
   onLexicon: (fn) => onState('lexicon', fn),           // 'plain' | 'local': the words it shows (being/lexicon.mjs)
   onNewSeed: (fn) => on('new-seed', fn),
   onFeedback: (fn) => on('feedback', fn),
@@ -40,7 +41,7 @@ contextBridge.exposeInMainWorld('pet', {
   immersive: (v) => ipcRenderer.send('immersive', !!v),
   settings: () => ipcRenderer.send('menu'),
   captureStopped: () => ipcRenderer.send('capture-stopped'),
-  tuneSchema: () => Promise.resolve(TUNE),
+  tuneSchema: () => ipcRenderer.invoke('page-schema').then((t) => t || []).catch(() => []),   // being/tune.cjs TUNE (an array of groups); never rejects
   mlLoad: () => Promise.resolve({}),
   // the pet window: cursor position (look and hit-testing), click-through while not over the creature, dragging
   onCursor: (fn) => on('cursor', fn),

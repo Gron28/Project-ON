@@ -260,8 +260,6 @@ export function cellFabric(P, { layout = 0, comps = 6, sectors = 7, axis = [0, 1
   return P.map((_, i) => comp[i] + 0.5 * rimC[i] + 0.49 * ((i * 0.618034) % 1));
 }
 
-const dotv = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-
 /** a seeded random rotation of 3-space as three row vectors (the view a flow attractor is drawn from) */
 function rotation3(r) {
   const a = r() * 6.2832, b = Math.acos(2 * r() - 1), c = r() * 6.2832, ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b), cc = Math.cos(c), sc = Math.sin(c);
@@ -281,7 +279,7 @@ export function attractorDensity(spec, size = 256, points = 400000) {
   const mapStep = (k, p, x, y, out) => {
     if (k === 0) { out[0] = Math.sin(p[0] * y) - Math.cos(p[1] * x); out[1] = Math.sin(p[2] * x) - Math.cos(p[3] * y); }
     else if (k === 1) { out[0] = Math.sin(p[0] * y) + p[2] * Math.cos(p[0] * x); out[1] = Math.sin(p[1] * x) + p[3] * Math.cos(p[1] * y); }
-    else if (k === 2) { const F = (v) => p[0] * v + (2 * (1 - p[0]) * v * v) / (1 + v * v); const nx = p[1] * y + F(x); out[0] = nx; out[1] = -x + F(nx); }
+    else if (k === 2) { const a = p[0], nx = p[1] * y + (a * x + (2 * (1 - a) * x * x) / (1 + x * x)); out[0] = nx; out[1] = -x + (a * nx + (2 * (1 - a) * nx * nx) / (1 + nx * nx)); }
     else { const t = p[2] - p[3] / (1 + x * x + y * y), c = Math.cos(t), s = Math.sin(t); out[0] = 1 + p[0] * (x * c - y * s); out[1] = p[0] * (x * s + y * c); }
   };
   const deriv = (k, p, s, o) => {
@@ -332,17 +330,20 @@ export function attractorDensity(spec, size = 256, points = 400000) {
   } else {
     // a flow: the chosen parameter, a seeded view (rotation), Lyapunov exponent per unit time from two shadowing trajectories
     const p = draw(), R = rotation3(r), c0 = kind === 4 ? [0, 0, 25] : [0, 0, 0];
-    let s = kind === 4 ? [1 + r(), 1, 20] : [1 + r() * 0.5, -1, 0.5], se = [s[0] + 1e-7, s[1], s[2]], lsum = 0, n = 0;
-    const out = [0, 0, 0], oute = [0, 0, 0];
-    const proj = (q) => { const v = [q[0] - c0[0], q[1] - c0[1], q[2] - c0[2]]; return [dotv(R[0], v), dotv(R[1], v)]; };
-    let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
-    for (let i = 0; i < 9000; i++) {
-      rk4(p, s, out); const sn = out.slice(); rk4(p, se, oute);
-      s = sn;
+    const s = kind === 4 ? [1 + r(), 1, 20] : [1 + r() * 0.5, -1, 0.5], se = [s[0] + 1e-7, s[1], s[2]], out = [0, 0, 0], oute = [0, 0, 0];
+    const [R0, R1] = R;
+    let lsum = 0, n = 0, mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9;
+    for (let i = 0; i < 9000; i++) {   // scratch arrays and scalars only: this loop and the drawing one run ~10^5 steps
+      rk4(p, s, out); rk4(p, se, oute);
+      s[0] = out[0]; s[1] = out[1]; s[2] = out[2];
       const dx = oute[0] - s[0], dy = oute[1] - s[1], dz = oute[2] - s[2], d = Math.hypot(dx, dy, dz) || 1e-12;
-      if (!s.every(Number.isFinite) || Math.abs(s[0]) + Math.abs(s[1]) + Math.abs(s[2]) > 1e4) break;
-      if (i > 1500) { lsum += Math.log(d / 1e-7); n++; const q = proj(s); if (q[0] < mnx) mnx = q[0]; if (q[0] > mxx) mxx = q[0]; if (q[1] < mny) mny = q[1]; if (q[1] > mxy) mxy = q[1]; }
-      se = [s[0] + (dx / d) * 1e-7, s[1] + (dy / d) * 1e-7, s[2] + (dz / d) * 1e-7];
+      if (!(Number.isFinite(s[0]) && Number.isFinite(s[1]) && Number.isFinite(s[2])) || Math.abs(s[0]) + Math.abs(s[1]) + Math.abs(s[2]) > 1e4) break;
+      if (i > 1500) {
+        lsum += Math.log(d / 1e-7); n++;
+        const v0 = s[0] - c0[0], v1 = s[1] - c0[1], v2 = s[2] - c0[2], qx = R0[0] * v0 + R0[1] * v1 + R0[2] * v2, qy = R1[0] * v0 + R1[1] * v1 + R1[2] * v2;
+        if (qx < mnx) mnx = qx; if (qx > mxx) mxx = qx; if (qy < mny) mny = qy; if (qy > mxy) mxy = qy;
+      }
+      se[0] = s[0] + (dx / d) * 1e-7; se[1] = s[1] + (dy / d) * 1e-7; se[2] = s[2] + (dz / d) * 1e-7;
     }
     if (n > 1000 && mxx - mnx > 1e-3) best = { p, bounds: [mnx, mxx, mny, mxy], lyap: lsum / (n * H), cov: 0.35, flow: { R, c0, s0: s.slice() } };
   }
@@ -352,6 +353,11 @@ export function attractorDensity(spec, size = 256, points = 400000) {
   const splat = (u, v, w) => {   // bilinear: sub-pixel positions keep thin curves thin and smooth
     const iu = Math.floor(u - 0.5), iv = Math.floor(v - 0.5), fu = u - 0.5 - iu, fv = v - 0.5 - iv;
     if (iu < -1 || iv < -1 || iu >= size || iv >= size) return;
+    if (iu >= 0 && iv >= 0 && iu < size - 1 && iv < size - 1) {   // all four texels inside (nearly always)
+      const o = iv * size + iu;
+      acc[o] += w * (1 - fu) * (1 - fv); acc[o + 1] += w * fu * (1 - fv); acc[o + size] += w * (1 - fu) * fv; acc[o + size + 1] += w * fu * fv;
+      return;
+    }
     for (let dv = 0; dv < 2; dv++) for (let du = 0; du < 2; du++) {
       const x = iu + du, y = iv + dv; if (x < 0 || y < 0 || x >= size || y >= size) continue;
       acc[y * size + x] += w * (du ? fu : 1 - fu) * (dv ? fv : 1 - fv);
@@ -366,12 +372,12 @@ export function attractorDensity(spec, size = 256, points = 400000) {
     }
   } else {
     const { R, c0 } = best.flow, p = best.p, cur = best.flow.s0.slice(), out = [0, 0, 0];
-    const px0 = (q) => ((dotv(R[0], [q[0] - c0[0], q[1] - c0[1], q[2] - c0[2]]) - cx) / span + 0.5) * size, py0 = (q) => ((dotv(R[1], [q[0] - c0[0], q[1] - c0[1], q[2] - c0[2]]) - cy) / span + 0.5) * size;
-    let ax = px0(cur), ay = py0(cur);
+    const pix = (Rr, cc) => ((Rr[0] * (cur[0] - c0[0]) + Rr[1] * (cur[1] - c0[1]) + Rr[2] * (cur[2] - c0[2]) - cc) / span + 0.5) * size;   // cur projected, in pixels
+    let ax = pix(R[0], cx), ay = pix(R[1], cy);
     const steps = Math.round((kind === 4 ? 26000 : Math.max(2000, points / 5) * 2) * (size / 512));   // a Lorenz orbit wraps many times: fewer steps keep the lines apart
     for (let i = 0; i < steps; i++) {
       rk4(p, cur, out); cur[0] = out[0]; cur[1] = out[1]; cur[2] = out[2];
-      const bx = px0(cur), by = py0(cur), len = Math.hypot(bx - ax, by - ay), m = Math.max(1, Math.ceil(len / 0.5));
+      const bx = pix(R[0], cx), by = pix(R[1], cy), len = Math.hypot(bx - ax, by - ay), m = Math.max(1, Math.ceil(len / 0.5));
       for (let k = 1; k <= m; k++) { const t = k / m; splat(ax + (bx - ax) * t, ay + (by - ay) * t, 1); }
       ax = bx; ay = by;
     }
@@ -383,21 +389,33 @@ export function attractorDensity(spec, size = 256, points = 400000) {
 function shade(acc, size, flow) {
   const N = size * size, T = new Float32Array(N);
   // a robust reference level: the 99.7th percentile of the lit texels
-  const sample = []; for (let i = 0; i < N; i += 11) if (acc[i] > 0) sample.push(acc[i]);
-  sample.sort((a, b) => a - b);
+  let nS = 0; for (let i = 0; i < N; i += 11) if (acc[i] > 0) nS++;
+  const sample = new Float32Array(nS); nS = 0; for (let i = 0; i < N; i += 11) if (acc[i] > 0) sample[nS++] = acc[i];
+  sample.sort();   // a typed array sorts numerically
   const ref = sample.length ? Math.max(1, sample[Math.min(sample.length - 1, Math.floor(sample.length * 0.997))]) : 1, lr = Math.log1p(ref);
   for (let i = 0; i < N; i++) T[i] = flow ? 1 - Math.exp(-acc[i] * 0.9) : clamp01(Math.log1p(acc[i]) / lr);
-  const tmp = new Float32Array(N), tmp2 = new Float32Array(N), blur = (src, rad) => {   // two box passes per axis: close to a Gaussian
-    const out = new Float32Array(N), inv = 1 / (2 * rad + 1);
-    const pass = (a, b, horizontal) => {
-      const st = horizontal ? 1 : size, ls = horizontal ? size : 1;   // stride along the line, stride between lines
-      for (let l = 0; l < size; l++) {
-        const o = l * ls; let sum = 0;
-        for (let k = -rad; k <= rad; k++) sum += a[o + Math.min(size - 1, Math.max(0, k)) * st];
-        for (let k = 0; k < size; k++) { b[o + k * st] = sum * inv; sum += a[o + Math.min(size - 1, k + rad + 1) * st] - a[o + Math.max(0, k - rad) * st]; }
+  const tmp = new Float32Array(N), tmp2 = new Float32Array(N), col = new Float64Array(size), blur = (src, rad) => {   // two box passes per axis: close to a Gaussian
+    const out = new Float32Array(N), inv = 1 / (2 * rad + 1), edge = (k) => Math.min(size - 1, Math.max(0, k));
+    const rows = (a, b) => {   // running sum along each row; the edge clamp only where the window leaves the row
+      const k0 = Math.min(rad, size), k1 = Math.max(k0, size - rad - 1);
+      for (let o = 0; o < N; o += size) {
+        let sum = 0;
+        for (let k = -rad; k <= rad; k++) sum += a[o + edge(k)];
+        let k = 0;
+        for (; k < k0; k++) { b[o + k] = sum * inv; sum += a[o + edge(k + rad + 1)] - a[o]; }
+        for (; k < k1; k++) { b[o + k] = sum * inv; sum += a[o + k + rad + 1] - a[o + k - rad]; }
+        for (; k < size; k++) { b[o + k] = sum * inv; sum += a[o + size - 1] - a[o + edge(k - rad)]; }
       }
     };
-    pass(src, tmp, true); pass(tmp, tmp2, false); pass(tmp2, tmp, true); pass(tmp, out, false);
+    const cols = (a, b) => {   // the same per column, swept row by row (one running sum per column) so memory is read in order
+      col.fill(0);
+      for (let k = -rad; k <= rad; k++) { const r = edge(k) * size; for (let x = 0; x < size; x++) col[x] += a[r + x]; }
+      for (let k = 0, o = 0; k < size; k++, o += size) {
+        const hi = edge(k + rad + 1) * size, lo = edge(k - rad) * size;
+        for (let x = 0; x < size; x++) { b[o + x] = col[x] * inv; col[x] += a[hi + x] - a[lo + x]; }
+      }
+    };
+    rows(src, tmp); cols(tmp, tmp2); rows(tmp2, tmp); cols(tmp, out);
     return out;
   };
   const wide = blur(T, Math.max(2, Math.round(size / 90))), soft = blur(T, Math.max(1, Math.round(size / 340)));

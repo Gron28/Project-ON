@@ -6,6 +6,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { writeFileAtomic } = require('./atomic.cjs');
 
 const hashOf = (key) => crypto.createHash('sha1').update(String(key)).digest('hex').slice(0, 16);
 
@@ -36,7 +37,7 @@ function createStore(root) {
     }
     return indexes.get(seed);
   };
-  const writeIndex = (seed) => fs.writeFileSync(path.join(dir(seed), '_index.json'), JSON.stringify(index(seed), null, 1));
+  const writeIndex = (seed) => writeFileAtomic(path.join(dir(seed), '_index.json'), JSON.stringify(index(seed), null, 1));
   const move = (from, to) => {
     for (const ext of ['.json', '.png']) {
       if (!fs.existsSync(from + ext)) continue;
@@ -87,8 +88,8 @@ function createStore(root) {
       f = path.join(dir(seed), rel);
       fs.mkdirSync(path.dirname(f), { recursive: true });
     }
-    fs.writeFileSync(f + '.json', JSON.stringify(data));
-    if (typeof png === 'string' && png.startsWith('data:image/png;base64,')) fs.writeFileSync(f + '.png', Buffer.from(png.slice(22), 'base64'));
+    writeFileAtomic(f + '.json', JSON.stringify(data));
+    if (typeof png === 'string' && png.startsWith('data:image/png;base64,')) writeFileAtomic(f + '.png', Buffer.from(png.slice(22), 'base64'));
     return true;
   }
   function list(seed) {

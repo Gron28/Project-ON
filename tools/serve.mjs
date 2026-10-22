@@ -1,12 +1,40 @@
-// tools/serve.mjs - simple HTTP server for viewing ON over Tailscale / local network
+// tools/serve.mjs - simple HTTP server for viewing ON in a browser over Tailscale / local network.
+//   HOST=<tailscale ip> node tools/serve.mjs      (PORT defaults to 4242, HOST to 127.0.0.1: this machine only)
+// Serves only being/ (never being/local/), lab/prototypes/, lab/organism/ and lab/results/organism-*, and the three.js (build, examples/jsm) and onnxruntime-web builds the
+// pages import; anything else is 404.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PORT = parseInt(process.env.PORT || '4242', 10);
+const HOST = process.env.HOST || '127.0.0.1';
+// what may be served: prefixes of the path relative to the root ('/' separated); DENY wins over ALLOW
+const ALLOW = ['being/', 'lab/prototypes/', 'lab/organism/', 'lab/results/organism-', 'node_modules/three/build/', 'node_modules/three/examples/jsm/', 'node_modules/onnxruntime-web/dist/'];
+const DENY = ['being/local/'];
+
+// the absolute file for a URL path under root, or null when it is refused (bad encoding, NUL, outside root, not allowed)
+export function resolveSafe(root, urlPath) {
+  let p; try { p = decodeURIComponent(String(urlPath)); } catch { return null; }
+  if (p.includes('\0')) return null;
+  const abs = path.resolve(root, p.replace(/^[\\/]+/, ''));
+  const rel = path.relative(root, abs);
+  if (!rel || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return null;
+  const r = rel.split(path.sep).join('/');
+  // Windows reaches the same file by other names: NTFS streams ('local::$INDEX_ALLOCATION'), trailing dots and spaces
+  // ('local.'), short names ('LOCAL~1'); none is needed here, so refuse them all
+  if (/[:~]/.test(r) || r.split('/').some((s) => /[. ]$/.test(s))) return null;
+  if (!allowed(process.platform === 'win32' ? r.toLowerCase() : r)) return null;   // Windows paths ignore case
+  // and a link or junction may lead elsewhere: check where the file really is
+  let real; try { real = fs.realpathSync.native(abs); } catch { return abs; }   // not there: a 404 anyway
+  const rr = path.relative(fs.realpathSync.native(root), real);
+  if (!rr || rr === '..' || rr.startsWith('..' + path.sep) || path.isAbsolute(rr)) return null;
+  const rs = rr.split(path.sep).join('/');
+  return allowed(process.platform === 'win32' ? rs.toLowerCase() : rs) ? abs : null;
+}
+const allowed = (r) => !DENY.some((d) => r.startsWith(d)) && ALLOW.some((a) => r.startsWith(a));
 
 const MIMES = {
   '.html': 'text/html; charset=utf-8',
@@ -136,17 +164,8 @@ const LANDING_PAGE = `<!doctype html>
 
 const server = http.createServer((req, res) => {
   console.log(new Date().toLocaleTimeString(), req.method, req.url);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
   const reqUrl = new URL(req.url, 'http://localhost');
-  let pathname = decodeURIComponent(reqUrl.pathname);
+  const pathname = reqUrl.pathname;
 
   if (pathname === '/' || pathname === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -154,10 +173,10 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const filePath = path.join(ROOT, pathname.replace(/^\//, ''));
-  if (!filePath.startsWith(ROOT)) {
-    res.writeHead(403);
-    res.end('Forbidden');
+  const filePath = resolveSafe(ROOT, pathname);
+  if (!filePath) {   // refused paths look like missing ones
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not found');
     return;
   }
 
@@ -179,6 +198,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on http://0.0.0.0:${PORT}`);
+// listen only when run directly, so tests can import resolveSafe
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) server.listen(PORT, HOST, () => {
+  console.log(`Server listening on http://${HOST}:${PORT}`);
 });

@@ -8,6 +8,7 @@
 const { app, BrowserWindow, session, desktopCapturer, ipcMain, dialog, globalShortcut, Menu, Tray, nativeImage, screen, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { writeFileAtomic } = require('./being/atomic.cjs');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 // Windows: ANGLE's default D3D11 backend spends minutes compiling the ray-marched body shader (and can crash the renderer);
@@ -49,7 +50,7 @@ const experimental = (k) => !!settings.experimental[k];
 const knownModes = () => { settings.cosmos.modes = Object.fromEntries(COSMOS_MODES.map((k) => [k, !!(settings.cosmos.modes || {})[k]])); };   // known modes only, once the lexicon has renamed old keys
 if (process.env.ENTITY_WINDOW === '1' || SHOWCASE) settings.pet = false;
 if (SHOWCASE) settings.onboarded = true;
-const save = () => { try { fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 1)); } catch {} };
+const save = () => { try { writeFileAtomic(SETTINGS, JSON.stringify(settings, null, 1)); } catch {} };
 // ---- the words it shows (being/lexicon.mjs): plain, or the local set when present (settings.lexicon) ------------------
 let LEXM = null;
 const lexMode = () => (LEXM && LEXM.hasLocal ? settings.lexicon || 'local' : 'plain');
@@ -132,11 +133,11 @@ function createWindow() {
     width: s, height: s, x: onScreen ? settings.x : wa.x + wa.width - s - 40, y: onScreen ? settings.y : wa.y + wa.height - s - 20,
     transparent: true, frame: false, resizable: false, maximizable: false, hasShadow: false, skipTaskbar: true,
     alwaysOnTop: settings.top, backgroundColor: '#00000000', title: 'ON', icon: iconImage() || undefined,
-    webPreferences: { preload: path.join(__dirname, 'being/preload.cjs'), contextIsolation: true, sandbox: false, backgroundThrottling: false },
+    webPreferences: { preload: path.join(__dirname, 'being/preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   } : {
     width: PAGE === 'being' ? 900 : 1280, height: PAGE === 'being' ? 900 : 800, minWidth: 400, minHeight: 400, backgroundColor: '#000000',
     title: SHOWCASE ? 'ON · showcase' : PAGE === 'being' ? 'ON' : 'Entity Alive', autoHideMenuBar: true, icon: iconImage() || undefined,
-    webPreferences: { preload: path.join(__dirname, PAGE === 'being' ? 'being/preload.cjs' : 'preload.cjs'), contextIsolation: true, sandbox: false, backgroundThrottling: false },
+    webPreferences: { preload: path.join(__dirname, PAGE === 'being' ? 'being/preload.cjs' : 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
   if (pet) {
     win.setIgnoreMouseEvents(true, { forward: true });   // clicks pass through until the cursor is over the creature
@@ -171,6 +172,7 @@ function createWindow() {
     win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   }
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e) => e.preventDefault());   // nothing in the page may replace it
   win.on('closed', () => { stopApp(); win = null; });
   if (process.env.ENTITY_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' });
   if (process.env.ENTITY_LOG) win.webContents.on('console-message', (e) => console.log('[page]', e.level, e.message, e.sourceId ? path.basename(e.sourceId) + ':' + e.lineNumber : ''));
@@ -359,6 +361,7 @@ function setRetro(key, value) {   // the pixelated / PS1 look (dashboard, Look)
   save(); send('retro', { pix: settings.pix, lev: settings.lev, dith: settings.dith }); return true;
 }
 ipcMain.on('ml-get', (e) => { e.returnValue = settings.ml; });
+ipcMain.on('has-local', (e) => { e.returnValue = fs.existsSync(path.join(__dirname, 'being', 'local', 'page.mjs')); });   // the sandboxed preload has no fs
 ipcMain.handle('settings-get', (e) => fromSettings(e) ? { settings, performance: performanceNow(), startup: fs.existsSync(STARTUP), startupLabel: STARTUP_LABEL, sources: [['system', 'All system audio'], ...apps().map((a) => [String(a.pid), a.name])], current: capturing !== null ? String(capturing) : systemOn ? 'system' : '' } : null);
 ipcMain.handle('settings-set', (e, key, value) => {
   if (!fromSettings(e)) return false;
@@ -408,6 +411,7 @@ const fromDash = (e) => dash && !dash.isDestroyed() && e.sender === dash.webCont
 ipcMain.on('dev-snap', (e, snap) => { if (dash && !dash.isDestroyed() && page() && e.sender === page()) dash.webContents.send('snap', { ...snap, app: { source: sourceName(), track: trackInfo, settings } }); });
 ipcMain.on('dev-cmd', (e, cmd) => { if (fromDash(e)) send('dev-cmd', cmd); });
 ipcMain.handle('dash-schema', (e) => (fromDash(e) ? require('./being/tune.cjs').TUNE : null));
+ipcMain.handle('page-schema', (e) => (e.sender === page() ? require('./being/tune.cjs').TUNE : null));
 ipcMain.handle('dash-app', (e, key, value) => {
   if (!fromDash(e)) return null;
   if (key === 'bounce') { if (typeof value === 'boolean') { settings.bounce = value; save(); sendMotion(); } return settings.bounce !== false; }
