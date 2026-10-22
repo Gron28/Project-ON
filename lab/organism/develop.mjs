@@ -4,13 +4,16 @@
 // area or connection is placed by hand:
 //   1. Morphogens. Two signalling centres on the surface (P, Q; direction and reach from the genome) and the nucleus (C)
 //      release diffusible signals that decay with distance: P(x) = exp(-|x - dP| / lamP), likewise Q and C.
-//   2. Sensory fields. The ear placode is induced where P peaks; its tonotopic axis follows the Q gradient across it (the
+//   2. Sensory fields. Hair cells are induced in a cap of skin centred where P peaks, its size a gene (earSpread: one
+//      placode .. the whole skin); each one's frequency is set by the local Q level (tonotopy as a gradient read-out, the
 //      cochlea's physics, not wiring). Proprioceptors and sub-bass touch receptors are scattered through the body wall.
 //      Effectors sit in the skin: motor cells (contractile, each pushing along its own normal and the P gradient: planar
 //      polarity) and chromatophores (their pigment set by the local Q level).
 //   3. Neurogenesis and migration. Interneurons are born one by one in the surface germinal zone and migrate inward;
 //      the first-born travel deepest, later ones stop shallower (inside-out, as in cortex). Cells then repel softly.
 //      Interoceptive and modulatory cells arise where the nucleus signal C is high (modulatory: where C and Q overlap).
+//      A share of interneurons (nOsc, biased deep or shallow by oscRad) become resonators: cells with an intrinsic
+//      oscillation that entrains to its input (network.mjs).
 //   4. Fate. Each interneuron or interoceptive cell becomes inhibitory with probability fracI, biased by the local Q
 //      level (qFateI). Dale's law: a cell's sign is fixed. Interoceptors pick the milieu variable whose morphogen
 //      (C: energy, P: integrity, Q: stimulation) is strongest where they sit, and code deficit or sufficiency by Q.
@@ -20,7 +23,7 @@
 //      synDensity * exp(-d^2 / capture^2). Delays follow path length. Receptors receive no synapses.
 // Everything is recorded with a developmental time (0..1) so it can be replayed as a time-lapse.
 
-import { decode, lcg, mix } from './genome.mjs';
+import { decode, lcg, mix, padGenome } from './genome.mjs';
 import { NE } from '../../being/ear.mjs';
 
 export const T = { EAR: 0, ONSET: 1, ROUGH: 2, SUB: 3, PROPRIO: 4, INTER: 5, INTERO: 6, MOD: 7, MOTOR: 8, CHROM: 9 };
@@ -50,17 +53,29 @@ export function develop(genome, seed = 1) {
   const surf = (u, rad) => [u[0] * rad, u[1] * rad, u[2] * rad];
 
   // ---- 2. sensory fields and effectors (the periphery forms first) -----------------------------------------------------
-  // ear placode at the P source, its tonotopic axis along the Q gradient projected onto the surface there
-  const earC = dP, gq = gradDir(Q, surf(earC, 0.95));
-  let ax = norm(cross(cross(earC, gq), earC)); if (!Number.isFinite(ax[0]) || Math.abs(dot(ax, earC)) > 0.9) ax = norm(cross(earC, [0.3, 0.5, 0.8]));
-  const side = norm(cross(earC, ax)), spread = 0.55;
-  const onPatch = (s, w) => norm([earC[0] + s * ax[0] + w * side[0], earC[1] + s * ax[1] + w * side[1], earC[2] + s * ax[2] + w * side[2]]);
-  for (let k = 0; k < NE; k++) for (let j = 0; j < EAR_PER_UNIT; j++) {
-    const u = onPatch(spread * (k / (NE - 1) - 0.5), 0.07 * (j - 0.5) + 0.02 * r.gauss());
-    add({ type: T.EAR, pos: surf(u, 0.93), unit: k, born: 0.02 * r() });
+  // the hearing field: hair cells are induced in a cap of the skin centred on the P source; its angular radius is a gene
+  // (earSpread: one placode at P .. the whole skin, a hearing skin like a lateral line). Each hair cell's characteristic
+  // frequency is set by the local Q level (tonotopy as a gradient read-out, like the cochlea's stiffness gradient): the
+  // cells are ranked by Q and the 28 ear units assigned in that order, two cells per unit.
+  const earC = dP, capR = 0.3 + (Math.PI - 0.3) * G.earSpread, capCos = Math.cos(capR);
+  let e1 = norm(cross(earC, [0.3, 0.5, 0.8])); if (!Number.isFinite(e1[0])) e1 = norm(cross(earC, [1, 0, 0]));
+  const e2 = norm(cross(earC, e1));
+  const inCap = () => { const c = 1 - r() * (1 - capCos), s = Math.sqrt(Math.max(0, 1 - c * c)), a = 2 * Math.PI * r(), ca = s * Math.cos(a), sa = s * Math.sin(a); return norm([c * earC[0] + ca * e1[0] + sa * e2[0], c * earC[1] + ca * e1[1] + sa * e2[1], c * earC[2] + ca * e1[2] + sa * e2[2]]); };
+  if (G.legacy) {
+    // a 28-gene genome: the original placode, a strip along the Q gradient at P (same layout and random sequence)
+    const gq = gradDir(Q, surf(earC, 0.95));
+    let ax = norm(cross(cross(earC, gq), earC)); if (!Number.isFinite(ax[0]) || Math.abs(dot(ax, earC)) > 0.9) ax = norm(cross(earC, [0.3, 0.5, 0.8]));
+    const side = norm(cross(earC, ax)), spread = 0.55;
+    const onPatch = (s, w) => norm([earC[0] + s * ax[0] + w * side[0], earC[1] + s * ax[1] + w * side[1], earC[2] + s * ax[2] + w * side[2]]);
+    for (let k = 0; k < NE; k++) for (let j = 0; j < EAR_PER_UNIT; j++) add({ type: T.EAR, pos: surf(onPatch(spread * (k / (NE - 1) - 0.5), 0.07 * (j - 0.5) + 0.02 * r.gauss()), 0.93), unit: k, born: 0.02 * r() });
+    for (let i = 0; i < N_ONSET; i++) add({ type: T.ONSET, pos: surf(onPatch(spread * (r() - 0.5), 0.18 * (r() - 0.5)), 0.9), born: 0.02 * r() });
+    for (let i = 0; i < N_ROUGH; i++) add({ type: T.ROUGH, pos: surf(onPatch(spread * (r() - 0.5), 0.18 * (r() - 0.5)), 0.9), born: 0.02 * r() });
+  } else {
+    const hair = Array.from({ length: NE * EAR_PER_UNIT }, () => surf(inCap(), 0.93)).sort((a, b) => Q(a) - Q(b));
+    hair.forEach((p, i) => add({ type: T.EAR, pos: p, unit: Math.floor(i / EAR_PER_UNIT), born: 0.02 * r() }));
+    for (let i = 0; i < N_ONSET; i++) add({ type: T.ONSET, pos: surf(inCap(), 0.9), born: 0.02 * r() });
+    for (let i = 0; i < N_ROUGH; i++) add({ type: T.ROUGH, pos: surf(inCap(), 0.9), born: 0.02 * r() });
   }
-  for (let i = 0; i < N_ONSET; i++) add({ type: T.ONSET, pos: surf(onPatch(spread * (r() - 0.5), 0.18 * (r() - 0.5)), 0.9), born: 0.02 * r() });
-  for (let i = 0; i < N_ROUGH; i++) add({ type: T.ROUGH, pos: surf(onPatch(spread * (r() - 0.5), 0.18 * (r() - 0.5)), 0.9), born: 0.02 * r() });
   for (let i = 0; i < N_SUB; i++) add({ type: T.SUB, pos: surf(randUnit(r), 0.9), born: 0.05 * r() });
   for (let i = 0; i < N_PROPRIO; i++) { const p = surf(randUnit(r), 0.9); add({ type: T.PROPRIO, pos: p, polarity: r() < 0.5 ? 1 : -1, born: 0.05 * r() }); }
   for (let i = 0; i < G.nMotor; i++) {
@@ -76,7 +91,11 @@ export function develop(genome, seed = 1) {
     const u = randUnit(r), rank = k / Math.max(1, G.nInter - 1);
     const rad = G.migDepth + (R_OUT - G.migDepth) * rank + 0.03 * r.gauss();
     const p = surf(u, Math.min(0.9, Math.max(0.15, rad)));
-    add({ type: T.INTER, pos: p, birthPos: surf(u, 0.92), born: 0.1 + 0.45 * rank, rank, isI: fateI(p) });
+    // resonator fate (intrinsic oscillation: a pacemaker-like current; Llinas 1988): a share nOsc / nInter of
+    // interneurons, biased toward deep (oscRad > 0) or shallow (< 0) positions
+    const pOsc = Math.max(0, Math.min(0.9, (G.nOsc / G.nInter) * (1 + G.oscRad * (0.55 - Math.hypot(...p)) / 0.3)));
+    const osc = pOsc > 0 && r() < pOsc ? { hz: G.oscHz * Math.exp(G.oscSpread * r.gauss()), lead: G.oscLead * (0.5 + r()) } : null;
+    add({ type: T.INTER, pos: p, birthPos: surf(u, 0.92), born: 0.1 + 0.45 * rank, rank, isI: fateI(p), osc });
   }
   // cells near the nucleus signal: rejection sampling by the morphogen
   const sampleBy = (f, rMin, rMax) => { for (let t = 0; t < 2000; t++) { const u = randUnit(r), rr = rMin + (rMax - rMin) * Math.cbrt(r()), x = surf(u, rr); if (r() < f(x)) return x; } return surf(randUnit(r), rMin); };
@@ -151,15 +170,17 @@ export function develop(genome, seed = 1) {
   const birthPos = new Float32Array(3 * N); cells.forEach((c, i) => birthPos.set(c.birthPos || c.pos, 3 * i));
   const extra = new Float32Array(N * 4);   // per type: ear unit | proprio polarity | intero variable, deficit | chrom hue
   const vec = new Float32Array(N * 6);     // motor normal and tangent
+  const osc = new Float32Array(N * 2);     // resonators: natural rate (Hz, 0 = not a resonator), firing lead (s)
   cells.forEach((c, i) => {
     if (c.type === T.EAR) extra[4 * i] = c.unit;
     if (c.type === T.PROPRIO) extra[4 * i] = c.polarity;
     if (c.type === T.INTERO) { extra[4 * i] = c.variable; extra[4 * i + 1] = c.deficit ? 1 : 0; }
     if (c.type === T.CHROM) extra[4 * i] = c.hue;
     if (c.type === T.MOTOR) { vec.set(c.normal, 6 * i); vec.set(c.tangent, 6 * i + 3); }
+    if (c.osc) { osc[2 * i] = c.osc.hz; osc[2 * i + 1] = c.osc.lead; }
   });
   return {
-    N, genome: Float64Array.from(genome), seed, G, pos, birthPos, type, isI, extra, vec,
+    N, genome: Float64Array.from(padGenome(genome)), seed, G, pos, birthPos, type, isI, extra, vec, osc,
     born: Float32Array.from(cells, (c) => c.born),
     syn: { pre: Int32Array.from(syn.pre), post: Int32Array.from(syn.post), delay: Uint8Array.from(syn.delay), t: Float32Array.from(syn.t) },
     axons, morph: { dP, dQ, lamP: G.lamP, lamQ: G.lamQ, lamC },
