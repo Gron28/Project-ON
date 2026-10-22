@@ -2,6 +2,8 @@
 //   16 kHz mono · frames of 400 samples every 160 (25 ms / 10 ms) · symmetric Hann, zero-padded to 512 (zeroPhase off)
 //   · |FFT| (magnitude) · 64 mel bands 125-7500 Hz on the HTK mel scale, triangles drawn on the mel axis ('warping'),
 //   each peaking at 1 ('unit_max'), summing magnitudes ('magnitude') · log(x + 0.01) · patches of 96 frames, input [n, 96, 64]
+import { realFFT } from '../fft.mjs';
+
 export const SR = 16000, FRAME = 400, HOP = 160, NFFT = 512, BANDS = 64, PATCH = 96;
 
 const HANN = Float32Array.from({ length: FRAME }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (FRAME - 1)));
@@ -24,23 +26,14 @@ function melFilters() {
   return out;
 }
 
-function fft(re, im) {   // in place, radix 2
-  const n = re.length;
-  for (let i = 1, j = 0; i < n; i++) { let b = n >> 1; for (; j & b; b >>= 1) j ^= b; j ^= b; if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
-  for (let len = 2; len <= n; len <<= 1) {
-    const a = (-2 * Math.PI) / len, wr = Math.cos(a), wi = Math.sin(a), h = len >> 1;
-    for (let i = 0; i < n; i += len) { let cr = 1, ci = 0; for (let k = 0; k < h; k++) { const p = i + k, q = p + h, vr = re[q] * cr - im[q] * ci, vi = re[q] * ci + im[q] * cr; re[q] = re[p] - vr; im[q] = im[p] - vi; re[p] += vr; im[p] += vi; const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t; } }
-  }
-}
-
 export class VGGishMel {
-  constructor() { this.F = melFilters(); this.re = new Float32Array(NFFT); this.im = new Float32Array(NFFT); this.mag = new Float32Array(NFFT / 2 + 1); }
+  constructor() { this.F = melFilters(); this.fft = realFFT(NFFT); this.xw = new Float32Array(NFFT); this.re = new Float64Array(NFFT / 2 + 1); this.im = new Float64Array(NFFT / 2 + 1); this.mag = new Float32Array(NFFT / 2 + 1); }
   /** one log-mel frame of x[off .. off+400) into out[o .. o+64) */
   frame(x, off, out, o) {
-    const { re, im, mag } = this;
-    for (let i = 0; i < NFFT; i++) { re[i] = i < FRAME ? (x[off + i] || 0) * HANN[i] : 0; im[i] = 0; }
-    fft(re, im);
-    for (let k = 0; k <= NFFT / 2; k++) mag[k] = Math.hypot(re[k], im[k]);
+    const { xw, re, im, mag } = this;
+    for (let i = 0; i < FRAME; i++) xw[i] = (x[off + i] || 0) * HANN[i];   // xw[FRAME..NFFT) stays zero: the padding
+    this.fft(xw, re, im);
+    for (let k = 0; k <= NFFT / 2; k++) mag[k] = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
     for (let b = 0; b < BANDS; b++) { const [s, w] = this.F[b]; let acc = 0; for (let j = 0; j < w.length; j++) acc += mag[s + j] * w[j]; out[o + b] = Math.log(acc + 0.01); }
   }
   /** the last n patches of the span x[0 .. len), newest last, into out ([n, 96, 64]); returns how many were written */

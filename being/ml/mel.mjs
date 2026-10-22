@@ -17,6 +17,8 @@
 //
 // Also here: a streaming polyphase-style windowed-sinc resampler (48 kHz -> 16 kHz).
 
+import { realFFT } from '../fft.mjs';
+
 export const SR = 16000;
 export const FRAME = 512;
 export const HOP = 256;
@@ -61,67 +63,24 @@ export function buildMelFilters() {
   return { start, weights, edges };
 }
 
-// ---------------------------------------------------------------------------------------------
-// Radix-2 complex FFT of fixed size, in place, float64.
-class FFT {
-  constructor(n) {
-    this.n = n;
-    this.cos = new Float64Array(n / 2);
-    this.sin = new Float64Array(n / 2);
-    for (let i = 0; i < n / 2; i++) {
-      this.cos[i] = Math.cos((2 * Math.PI * i) / n);
-      this.sin[i] = -Math.sin((2 * Math.PI * i) / n);
-    }
-    this.rev = new Uint32Array(n);
-    const bits = Math.log2(n);
-    for (let i = 0; i < n; i++) {
-      let r = 0;
-      for (let b = 0; b < bits; b++) if (i & (1 << b)) r |= 1 << (bits - 1 - b);
-      this.rev[i] = r;
-    }
-  }
-  transform(re, im) {
-    const n = this.n, rev = this.rev;
-    for (let i = 0; i < n; i++) {
-      const j = rev[i];
-      if (j > i) {
-        let t = re[i]; re[i] = re[j]; re[j] = t;
-        t = im[i]; im[i] = im[j]; im[j] = t;
-      }
-    }
-    for (let size = 2; size <= n; size <<= 1) {
-      const half = size >> 1, tstep = n / size;
-      for (let i = 0; i < n; i += size) {
-        for (let j = 0, k = 0; j < half; j++, k += tstep) {
-          const a = i + j, b = a + half;
-          const wr = this.cos[k], wi = this.sin[k];
-          const xr = re[b] * wr - im[b] * wi;
-          const xi = re[b] * wi + im[b] * wr;
-          re[b] = re[a] - xr; im[b] = im[a] - xi;
-          re[a] += xr; im[a] += xi;
-        }
-      }
-    }
-  }
-}
-
 /** Frames -> log-mel. One instance owns its scratch buffers; create once and reuse. */
 export class MelExtractor {
   constructor() {
-    this.fft = new FFT(FRAME);
+    this.fft = realFFT(FRAME);
     this.win = new Float64Array(FRAME);
     for (let i = 0; i < FRAME; i++) this.win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (FRAME - 1));
-    this.re = new Float64Array(FRAME);
-    this.im = new Float64Array(FRAME);
+    this.xw = new Float64Array(FRAME);
+    this.re = new Float64Array(BINS);
+    this.im = new Float64Array(BINS);
     this.pow = new Float64Array(BINS);
     this.bank = buildMelFilters();
   }
 
   /** One frame: x[off .. off+512) -> out[outOff .. outOff+96) (log10(1 + 1e4 * mel power)). */
   frame(x, off, out, outOff) {
-    const { re, im, win, pow } = this;
-    for (let i = 0; i < FRAME; i++) { re[i] = x[off + i] * win[i]; im[i] = 0; }
-    this.fft.transform(re, im);
+    const { xw, re, im, win, pow } = this;
+    for (let i = 0; i < FRAME; i++) xw[i] = x[off + i] * win[i];
+    this.fft(xw, re, im);
     for (let k = 0; k < BINS; k++) pow[k] = re[k] * re[k] + im[k] * im[k];
     const { start, weights } = this.bank;
     for (let b = 0; b < BANDS; b++) {
