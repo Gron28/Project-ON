@@ -1,6 +1,6 @@
 // being/dash/organism-panel.mjs - the dashboard's Organism panel: watch the lab organism (lab/organism/) that ON runs
 // beside the being, hearing what ON hears, and (second switch, experimental, when the build offers it) let its muscles
-// and skin move ON (dash-app 'organism' { drive }). The three views (Anatomy, Live, Diagram: a left-to-right flow whose
+// and skin move ON (dash-app 'organism' { drive, strength }), with a meter of what reaches ON (snap.orgDrive). The three views (Anatomy, Live, Diagram: a left-to-right flow whose
 // blocks are named by their measured roles, lab/prototypes/organism/roles.mjs), the body and the radial profile are the
 // lab page's own (lab/prototypes/organism/), fed a remote organism built from the snapshots (organism-proxy.mjs). Renders
 // only while the switch is on, the panel is open and on screen, and the window is visible.
@@ -29,6 +29,14 @@ const CSS = `
   .org-what b { color: var(--ink); font-weight: 600; }
   .org-drive { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: -2px 0 8px; }
   .org-drive label.sw2 { display: inline-flex; gap: 6px; align-items: center; color: var(--ink); cursor: pointer; }
+  .org-lead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -2px 0 8px; } .org-lead label { color: var(--ink); white-space: nowrap; }
+  .org-lead input[type=range] { width: 220px; } .org-lead .ends { color: var(--muted); font-size: 10.5px; }
+  .org-meter { display: grid; grid-template-columns: minmax(0, 1fr) 150px 200px; gap: 12px; align-items: start; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--ring); border-radius: 8px; background: #ffffff04; }
+  @media (max-width: 900px) { .org-meter { grid-template-columns: minmax(0, 1fr); } }
+  .org-meter h3 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--muted); } .org-meter canvas { display: block; width: 100%; background: #090c10; border-radius: 4px; }
+  .org-meter .mk { color: var(--ink2); font-size: 10.5px; margin-top: 3px; } .org-meter .mk i { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin: 0 4px 0 8px; } .org-meter .mk i:first-child { margin-left: 0; }
+  .org-meter .sw { width: 100%; height: 34px; border-radius: 6px; border: 1px solid var(--ring); } .org-meter .nums { font-size: 11px; color: var(--ink2); line-height: 1.5; margin-top: 4px; } .org-meter .nums b { color: var(--ink); font-weight: 600; }
+  .org-meter .live { font-weight: 600; } .org-meter .live.ok { color: var(--c3); } .org-meter .live.no { color: var(--c2); }
   .org-bar { position: absolute; z-index: 3; top: 8px; left: 8px; right: 8px; display: flex; gap: 8px; align-items: center; pointer-events: none; }
   .org-bar > * { pointer-events: auto; } .org-bar select { width: auto; max-width: 190px; }
   .org-bar .sub2 { margin-left: auto; background: #06080bc0; border-radius: 4px; padding: 1px 6px; pointer-events: none; }
@@ -50,6 +58,7 @@ const CSS = `
 
 export function install(ORG, { h, panel, fmt }) {
   const remote = createRemoteOrganism(), org = remote.org;
+  let leadRow, leadIn, leadOut, meter, mPulse, mReg, mSwatch, mNums, mState, trace = [], lastDrive = 0, strength = 0.6;
   let body, sw, note, info, grid, waitEl, viewHost, bodyHost, legend, side, kvEl, braceC, braceTxt, clock, seg, colorSel, whatEl, driveRow, driveSw, VT = null;
   let watch = false, drive = false, canDrive = false, supported = true, view = null, bodyView = null, radial = null, traces = null, libs = null, onScreen = true, raf = 0, lastT = 0, lastKv = 0, lastAreas = 0, mode = 'anatomy', frames = 0, pendingStatic = false, lastSnap = 0;
 
@@ -61,7 +70,15 @@ export function install(ORG, { h, panel, fmt }) {
     note = h('span', { class: 'sub2' });
     driveSw = h('input', { type: 'checkbox', 'aria-label': 'Let it move ON (experimental)', on: { change: () => setDrive(driveSw.checked) } });
     driveRow = h('div', { class: 'org-drive', hidden: true }, h('label', { class: 'sw2' }, driveSw, 'Let it move ON (experimental)'),
-      h('span', { class: 'sub2' }, 'Its muscles move ON’s body and its skin colours ON’s light. It braces ~120 ms after the beat, so its motion lags the music for now.'));
+      h('span', { class: 'sub2' }, 'Its muscles move ON’s body and its skin colours ON’s metal and light. It braces ~120 ms after the beat, so its motion lags the music for now.'));
+    leadIn = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: strength, 'aria-label': 'How much it leads', on: { input: () => { leadOut.textContent = pct(+leadIn.value); }, change: () => setStrength(+leadIn.value) } });
+    leadOut = h('output', { class: 'num' }, pct(strength));
+    leadRow = h('div', { class: 'org-lead', hidden: true }, h('label', {}, 'How much it leads'), h('span', { class: 'ends' }, 'a nudge'), leadIn, h('span', { class: 'ends' }, 'takes over'), leadOut);
+    mPulse = h('canvas'); mPulse.style.height = '84px'; mReg = h('canvas'); mReg.style.height = '84px'; mSwatch = h('div', { class: 'sw' }); mNums = h('div', { class: 'nums' }); mState = h('span', { class: 'live' });
+    meter = h('div', { class: 'org-meter', hidden: true },
+      h('div', {}, h('h3', {}, 'What reaches ON · ', mState), mPulse, h('div', { class: 'mk' }, h('i', { style: 'background:var(--c1)' }), 'its motor pulse', h('i', { style: 'background:var(--c2)' }), 'its brace', h('i', { style: 'background:var(--muted)' }), 'ON’s beat')),
+      h('div', {}, h('h3', {}, 'Its 8 regions'), mReg),
+      h('div', {}, h('h3', {}, 'Its colour'), mSwatch, mNums));
     whatEl = h('p', { class: 'org-what' });
     info = h('span', { class: 'sub2', style: 'margin-left:auto' });
     waitEl = h('div', { class: 'org-wait' }, 'Switch it on to watch.');
@@ -77,19 +94,60 @@ export function install(ORG, { h, panel, fmt }) {
     side = h('div', { class: 'org-side' }, h('h3', {}, 'Vital signs'), kvEl, h('div', { id: 'orgTraces', style: 'margin-top:8px' }),
       h('h3', {}, 'Bracing against the beat'), braceC, braceTxt, h('div', { id: 'orgRadial', style: 'margin-top:10px' }));
     grid = h('div', { class: 'org-grid' }, h('div', {}, whatEl, viewHost, legend), side); grid.hidden = true;
-    body.append(h('div', { class: 'org-top' }, h('label', { class: 'sw2' }, sw, 'Run the organism'), note, info), driveRow, waitEl, grid);
+    body.append(h('div', { class: 'org-top' }, h('label', { class: 'sw2' }, sw, 'Run the organism'), note, info), driveRow, leadRow, meter, waitEl, grid);
     new IntersectionObserver((es) => { onScreen = es.some((e) => e.isIntersecting); wake(); }).observe(body);
     document.addEventListener('visibilitychange', wake);
     body.closest('.panel').querySelector('h2').addEventListener('click', () => setTimeout(wake));
     setMode('anatomy');
     window.dash.app('organism').then((r) => { take(r); status(); wake(); }).catch(() => { supported = false; status(); });
   }
-  /** the main process's answer: { watch, drive? } (older builds have no drive: its switch stays hidden) */
+  /** the main process's answer: { watch, drive?, strength? } (older builds have no drive: its switch stays hidden) */
   function take(r) {
     supported = !!r && typeof r === 'object';
     watch = supported && !!r.watch; canDrive = supported && 'drive' in r; drive = canDrive && !!r.drive;
+    if (supported && Number.isFinite(r.strength)) strength = r.strength;
     sw.checked = watch; driveSw.checked = drive; driveRow.hidden = !canDrive;
+    leadRow.hidden = meter.hidden = !(drive && supported && Number.isFinite(r.strength)); leadIn.value = strength; leadOut.textContent = pct(strength);
+    if (!drive) trace = [];
   }
+  async function setStrength(v) {
+    try { take(await window.dash.app('organism', { strength: v })); } catch { leadIn.value = strength; leadOut.textContent = pct(strength); }
+  }
+  /** the page's drive state (snap.orgDrive: { k, s, pulse, reg[8], chrom, colour, arousal, metalW, lightW, msgsPerSec, ageMs, trace: [[pulse, brace, beat], ...] }) */
+  function feedDrive(d, frozen) {
+    if (!body || meter.hidden || frozen) return;
+    const now = performance.now();
+    if (!d) { if (now - lastDrive > 1500) { mState.textContent = 'nothing from the page yet'; mState.className = 'live no'; } return; }
+    lastDrive = now;
+    for (const p of Array.isArray(d.trace) ? d.trace : []) trace.push(p);
+    if (trace.length > 360) trace.splice(0, trace.length - 360);
+    const fresh = d.ageMs != null && d.ageMs < 500 && d.msgsPerSec > 0;
+    mState.textContent = fresh ? `live · ${fmt(d.msgsPerSec, 0)} msgs/s · ${fmt(d.ageMs, 0)} ms old · leading ${pct(d.k * d.s)}` : d.ageMs == null ? 'waiting for the organism…' : `stale · last ${fmt(d.ageMs / 1000, 1)} s ago`;
+    mState.className = 'live ' + (fresh && d.k > 0.5 ? 'ok' : 'no');
+    drawPulse(); drawRegions(d.reg || []);
+    mSwatch.style.background = d.colour || '#000';
+    const c = d.chrom || [];
+    mNums.innerHTML = `fade in <b>${fmt(d.k, 2)}</b> · strength <b>${fmt(d.s, 2)}</b><br>skin ${fmt(c[0], 2)} · hue ${fmt(c[1], 2)} · patchy ${fmt(c[2], 2)}<br>arousal <b>${fmt(d.arousal, 2)}</b> · metal ${pct(d.metalW || 0)} · light ${pct(d.lightW || 0)}`;
+  }
+  function canvas2d(c, hh) {
+    const dpr = devicePixelRatio || 1, w = c.clientWidth || 280;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(hh * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(hh * dpr); }
+    const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hh); return [g, w];
+  }
+  /** the last ~6 s: its motor pulse as ON receives it (normalized), its brace, and ON's own beat curve */
+  function drawPulse() {
+    const hh = 84, [g, w] = canvas2d(mPulse, hh), cs = getComputedStyle(document.documentElement), n = trace.length, N = 360;
+    const line = (i, col, lw) => { g.strokeStyle = col; g.lineWidth = lw; g.beginPath(); for (let j = 0; j < n; j++) { const x = w - (n - 1 - j) * (w / N), y = hh - 3 - (hh - 6) * Math.min(1, Math.max(0, trace[j][i] || 0)); if (j) g.lineTo(x, y); else g.moveTo(x, y); } g.stroke(); };
+    g.strokeStyle = cs.getPropertyValue('--grid').trim(); g.lineWidth = 1; g.beginPath(); g.moveTo(0, hh / 2 + 0.5); g.lineTo(w, hh / 2 + 0.5); g.stroke();
+    line(2, cs.getPropertyValue('--muted').trim(), 1); line(1, cs.getPropertyValue('--c2').trim(), 1.2); line(0, cs.getPropertyValue('--c1').trim(), 1.8);
+  }
+  /** each body region's share of its motor cells' activity (REGION_DIRS order), as ON bulges it */
+  function drawRegions(reg) {
+    const hh = 84, [g, w] = canvas2d(mReg, hh), cs = getComputedStyle(document.documentElement), bw = w / 8;
+    g.fillStyle = cs.getPropertyValue('--grid').trim(); for (let i = 0; i < 8; i++) g.fillRect(i * bw + 2, 2, bw - 4, hh - 4);
+    g.fillStyle = cs.getPropertyValue('--c3').trim(); for (let i = 0; i < 8; i++) { const v = Math.min(1, Math.max(0, reg[i] || 0)); g.fillRect(i * bw + 2, hh - 2 - (hh - 4) * v, bw - 4, (hh - 4) * v); }
+  }
+  const pct = (v) => `${Math.round(v * 100)}%`;
   async function setWatch(on) {
     try { take(await window.dash.app('organism', { watch: !!on })); } catch { supported = false; watch = false; }
     status(); wake();
@@ -208,7 +266,7 @@ export function install(ORG, { h, panel, fmt }) {
     braceTxt.textContent = `Braced ahead of ${ahead} of ${imp.length} recent hits · median ${fmt(Math.abs(med), 0)} ms ${med >= 0 ? 'ahead' : 'late'} · ${near} on the beat`;
   }
 
-  ORG.build = build; ORG.feed = feed;
+  ORG.build = build; ORG.feed = feed; ORG.feedDrive = feedDrive;
   if (ORG.early) { remote.apply(ORG.early); ORG.early = null; }   // an anatomy that arrived before this module loaded
   ORG.debug = { remote, get view() { return view; }, get frames() { return frames; }, setMode };
 }

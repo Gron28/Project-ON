@@ -276,6 +276,7 @@ const ORG = { on: false, last: null, full: true, key: '' };
 pet.onOrganism?.((o) => {
   const on = !!(o && o.watch), drive = on && !!o.drive, key = on ? `${o.seed}|${o.label}|${o.genome ? o.genome.length : 0}` : '';
   ORGD.on = drive; if (!drive) ORGD.d = null;
+  ORGD.s = o && Number.isFinite(o.strength) ? Math.min(1, Math.max(0, o.strength)) : .6;
   if (on === ORG.on && key === ORG.key) { beingWorker.postMessage({ type: 'org-drive', on: drive }); return; }
   ORG.on = on; ORG.key = key; ORG.last = null; ORG.full = true; beingWorker.postMessage({ type: 'organism', on, drive, genome: o && o.genome, seed: o && o.seed, label: o && o.label });
 });
@@ -706,7 +707,7 @@ function ease(cur, to, dt, up, down) { return cur + (to - cur) * (1 - Math.exp(-
 function danceFrame(dt) {
   const D = BOUNCE.k * c01((mind.lock - .25) / .5) * (.35 + .65 * mind.groove) * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);   // listening to a voice, or led by something other than the music: no dance
   MOT.D = ease(MOT.D, D, dt, .6, 1.2);
-  const ph = SHOW.phase, beat = .5 + .5 * Math.cos(2 * Math.PI * ph), kM = 1 - ORGD.k;   // the organism's dance replaces this one by ORGD.k (0: unchanged)
+  const ph = SHOW.phase, beat = .5 + .5 * Math.cos(2 * Math.PI * ph), kM = 1 - ORGD.R;   // the organism's dance replaces this one by ORGD.R (0: unchanged)
   U.uShift.value.y += -.011 * MOT.D * beat * beat * kM;                               // a dip on the beat
   U.uShift.value.x += .016 * MOT.D * Math.sin(Math.PI * (SHOW.count + ph)) * kM;       // a sway every two beats
   U.uScale.value *= 1 + .022 * MOT.D * beat * beat * kM;                              // a swell with it
@@ -731,9 +732,9 @@ const REG = { p: new Float64Array(8), a: 0 };
 function regionFrame(dt) {
   const R = mind.regions; if (!R) return;
   let mean = 0;
-  const kO = ORGD.k;   // the organism's regions replace the mind's by ORGD.k (0: unchanged)
+  const kO = ORGD.A;   // the organism's regions replace the mind's by ORGD.A and swell up to twice as much (0: unchanged)
   for (let g = 0; g < 8; g++) { const ph = SHOW.phase + R.phase[g], fr = ph - Math.floor(ph); REG.p[g] = Math.pow(1 - fr, 3) * R.coh[g]; if (kO > 0) REG.p[g] += (ORGD.v.reg[g] - REG.p[g]) * kO; mean += REG.p[g] / 8; }
-  const want = (window.__regionsA ?? .06) * (1 + .35 * kO) * BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);
+  const want = (window.__regionsA ?? .06) * (1 + kO) * BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);
   REG.a = ease(REG.a, want, dt, .5, .8); U.uRegA.value = REG.a;
   for (let g = 0; g < 8; g++) U.uRegP.value[g] = REG.p[g] - mean;
 }
@@ -742,52 +743,89 @@ const BOUNCE = { on: true, k: 1 };   // bounce to the beat (pulse, kick jolt, ji
 pet.onBounce(v => { BOUNCE.on = v !== false; });
 /* ---------- the lab organism drives (experimental: settings.organism.drive; lab/organism/watch.mjs drive(), posted by
    the worker as 'org-drive' after each audio block, at most ~60/s). A deliberate, switchable exception to 'the body
-   reads the mind': while it is on and its data is fresh (< 200 ms), the organism, not the hand-written dance, moves the
-   body. ORGD.k fades in and out over ~1 s on the switch and when the data goes stale; at 0 every path below is skipped,
-   so ON is exactly as without it. Mapping (every input clamped and checked finite):
-   - regions: its motor cells' activation per REGION_DIRS region (reg, 0..1, over its own running peak) replaces the
-     mind's region pulses in regionFrame (uRegP minus their mean; uRegA up to x1.35);
-   - dance: its motor pulse (pulse, 0..1, squared) replaces danceFrame's beat curve for the dip and the swell; the sway
-     follows its left-right region balance and its body's sideways position, not every second beat;
-   - wobble: its body's l=2 surface modes and squash replace physics.mjs's in beingBody (orgMix); its position and spin
-     are added to the page's own body (orgAdd), so drags and pokes still move it;
-   - colour: its chromatophores (mean pigment hue, brightness, contrast) and its arousal, valence and energy make a
-     colour the light leans toward (at most 35%) and the metal (at most 10%); the mind and its feeling are untouched;
+   reads the mind': while it is on and its data is fresh (< 500 ms), the organism moves and colours the body. ORGD.k
+   fades in and out over ~1 s on the switch and when the data goes stale; settings.organism.strength (ORGD.s, 0..1, the
+   dashboard's "How much it leads") sets how far: ORGD.A = k (.15 + .85 s) is its amplitude (a nudge at 0, full at 1),
+   ORGD.R = k s how much of the hand-written beat pulse, dance and region pulses it replaces (all of it at 1). At k = 0
+   every path below is skipped, so ON is exactly as without it. Mapping (every input clamped and checked finite):
+   - pulse: its motor activity over a running 10th..95th percentile of the last ~8 s (so a weak but structured signal
+     uses the full range), lightly smoothed; the body swells and shrinks (-12%..+14% at strength 1, like the beat pulse it replaces), dips and flattens with it;
+   - regions: each region's motor activation minus their mean, over the running peak of that spread, replaces the
+     mind's region pulses in regionFrame by A; uRegA up to x2;
+   - sway: its left-right region balance and its body's sideways position;
+   - wobble: its body's l=2 surface modes and squash replace physics.mjs's in beingBody (orgMix, by A); its position
+     and spin add to the page's own body (orgAdd), so drags and pokes still move it;
+   - colour: its chromatophores (expansion-weighted pigment hue; expansion over its running range; patchiness) and its
+     arousal make a colour the metal itself leans toward (up to 75% at strength 1) and the light (up to 45%); its
+     arousal raises the glow (up to +60%); the mind and its feeling are untouched;
    - sleep: all of it scales by (1 - SLEEP.z) and the dance's gates (bounce, beads, a voice, EXT.lead); it never wakes
-     the being. Known limit: its brace peaks ~120 ms after the hit, so its motion lags the beat. ---------- */
-const ORGD = { on: false, d: null, at: -1e9, n: 0, k: 0, D: 0, col: new THREE.Color(), colW: 0,
+     the being. Known limit: its brace peaks ~120 ms after the hit, so its motion lags the beat.
+   snap.orgDrive (devFrame) reports it to the dashboard's meter (being/dash/organism-panel.mjs). ---------- */
+const ORGD = { on: false, s: .6, d: null, at: -1e9, n: 0, k: 0, A: 0, R: 0, D: 0, col: new THREE.Color(), colW: 0, metalW: 0, glow: 0,
+  mot: new Float32Array(480), motN: 0, motI: 0, lo: 0, hi: 1e-3, qT: 0, seen: 0, chLo: 1, chHi: 0, regPk: .02, brPk: 1e-3,
+  rate: 0, rateN: 0, rateT: 0, trace: [],
   v: { reg: new Float64Array(8), pulse: 0, sway: 0, modes: new Float64Array(5), squash: 0, pos: new Float64Array(3), omega: new Float64Array(3), feel: [0, 0, 0] } };
 const orgC = (x, a, b) => (Number.isFinite(x) ? (x < a ? a : x > b ? b : x) : 0);
-const orgMix = (own, org) => (ORGD.k > 0 ? own + (org - own) * ORGD.k : own);   // the organism replaces
-const orgAdd = (own, org) => (ORGD.k > 0 ? own + org * ORGD.k : own);           // the organism adds
+const orgMix = (own, org) => (ORGD.A > 0 ? own + (org - own) * ORGD.A : own);   // the organism replaces
+const orgAdd = (own, org) => (ORGD.A > 0 ? own + org * ORGD.A : own);           // the organism adds
 function orgDriveFrame(dt, now) {
-  const d = ORGD.d, want = ORGD.on && d && now - ORGD.at < 200 ? 1 : 0;
+  const d = ORGD.d, want = ORGD.on && d && now - ORGD.at < 500 ? 1 : 0;
+  if (now - ORGD.rateT > 1000) { ORGD.rate = (ORGD.n - ORGD.rateN) * 1000 / Math.max(1, now - ORGD.rateT); ORGD.rateN = ORGD.n; ORGD.rateT = now; }
   if (!want && ORGD.k === 0) return;
-  ORGD.k += (want - ORGD.k) * (1 - Math.exp(-dt / .3)); if (!want && ORGD.k < .002) { ORGD.k = 0; return; }
+  ORGD.k += (want - ORGD.k) * (1 - Math.exp(-dt / .3));
+  if (!want && ORGD.k < .002) { ORGD.k = ORGD.A = ORGD.R = ORGD.glow = 0; ORGD.trace.length = 0; return; }
+  ORGD.A = ORGD.k * (.15 + .85 * ORGD.s); ORGD.R = ORGD.k * ORGD.s;
+  const V = ORGD.v, awake = 1 - SLEEP.z;
+  ORGD.glow = ORGD.A * .6 * V.feel[0] * awake;
   if (!want) return;   // fading out: the last mapped values hold
-  const V = ORGD.v, awake = 1 - SLEEP.z, b = d.body || {};
-  let lr = 0;
-  for (let g = 0; g < 8; g++) { V.reg[g] = ease(V.reg[g], orgC(d.reg && d.reg[g], 0, 1), dt, .03, .12); lr += (g & 1 ? 1 : -1) * V.reg[g] / 4; }
-  V.pulse = ease(V.pulse, orgC(d.pulse, 0, 1), dt, .03, .15);
-  V.sway = ease(V.sway, orgC(.6 * lr + .4 * Math.tanh(8 * orgC(b.pos && b.pos[0], -1, 1)), -1, 1), dt, .08, .2);
+  const b = d.body || {};
+  // its motor activity, over a running percentile range (10th..95th of the last ~8 s of messages, refreshed twice a second)
+  if (ORGD.n !== ORGD.seen) {
+    ORGD.seen = ORGD.n; ORGD.mot[ORGD.motI] = orgC(d.motor, 0, 1e3); ORGD.motI = (ORGD.motI + 1) % ORGD.mot.length; ORGD.motN = Math.min(ORGD.mot.length, ORGD.motN + 1);
+    const t = d.chrom ? orgC(d.chrom[0], 0, 1) : 0; ORGD.chLo = Math.min(t, ORGD.chLo + (t - ORGD.chLo) * .004); ORGD.chHi = Math.max(t, ORGD.chHi + (t - ORGD.chHi) * .004);
+  }
+  if (now - ORGD.qT > 500 && ORGD.motN >= 8) { ORGD.qT = now; const q = ORGD.mot.slice(0, ORGD.motN).sort(); ORGD.lo = q[Math.floor(.1 * (q.length - 1))]; ORGD.hi = q[Math.floor(.95 * (q.length - 1))]; }
+  const span = Math.max(ORGD.hi - ORGD.lo, .15 * ORGD.hi, 1e-4), pn = orgC((orgC(d.motor, 0, 1e3) - ORGD.lo) / span, 0, 1);
+  V.pulse = ease(V.pulse, pn, dt, .04, .14);
+  // its regions: each one's departure from their mean, over the running peak of that departure (~3 s)
+  let mean = 0, top = 0, lr = 0;
+  for (let g = 0; g < 8; g++) mean += orgC(d.reg && d.reg[g], 0, 1) / 8;
+  for (let g = 0; g < 8; g++) top = Math.max(top, Math.abs(orgC(d.reg && d.reg[g], 0, 1) - mean));
+  ORGD.regPk = Math.max(top, .02, ORGD.regPk * Math.exp(-dt / 3));
+  for (let g = 0; g < 8; g++) { V.reg[g] = ease(V.reg[g], orgC(.5 + .5 * (orgC(d.reg && d.reg[g], 0, 1) - mean) / ORGD.regPk, 0, 1), dt, .04, .14); lr += (g & 1 ? 1 : -1) * V.reg[g] / 4; }
+  V.sway = ease(V.sway, orgC(.6 * (2 * lr) + .4 * Math.tanh(8 * orgC(b.pos && b.pos[0], -1, 1)), -1, 1), dt, .08, .2);
   for (let m = 0; m < 5; m++) V.modes[m] = orgC(b.modes && b.modes[m], -1, 1);
   V.squash = orgC(b.squash, -.45, .45);
   for (let i = 0; i < 3; i++) { V.pos[i] = orgC(b.pos && b.pos[i], -.25, .25) * awake; V.omega[i] = orgC(b.omega && b.omega[i], -2, 2) * awake; }
   const f = d.feel || [], c = d.chrom || [], A = orgC(f[0], 0, 1), Va = orgC(f[1], -1, 1), E = orgC(f[2], 0, 1);
   V.feel[0] = A; V.feel[1] = Va; V.feel[2] = E;
-  ORGD.col.setHSL(orgC(c[1], 0, 1), orgC(.3 + .4 * A + 1.5 * orgC(c[2], 0, 1), .2, .9), orgC(.42 + .25 * orgC(c[0], 0, 1) + .08 * Va, .3, .7));
-  ORGD.colW = .35 * (.5 + .5 * E) * awake;
+  const flush = orgC((orgC(c[0], 0, 1) - ORGD.chLo) / Math.max(.02, ORGD.chHi - ORGD.chLo), 0, 1);   // how expanded its chromatophores are, over their own range
+  ORGD.col.setHSL(orgC(c[1], 0, 1), orgC(.45 + .25 * A + .2 * flush + orgC(c[2], 0, 1), .35, .85), orgC(.4 + .22 * flush + .06 * Va, .3, .68));
+  ORGD.colW = (.1 + .35 * ORGD.s) * (.6 + .4 * E) * awake;
+  ORGD.metalW = (.1 + .65 * ORGD.s) * awake;
+  // the meter's trace (snap.orgDrive): its pulse as used, its brace over its running peak, ON's own beat curve
+  ORGD.brPk = Math.max(orgC(d.brace, 0, 10), 1e-3, ORGD.brPk * Math.exp(-dt / 5));
+  const bt = .5 + .5 * Math.cos(2 * Math.PI * SHOW.phase);
+  if (ORGD.trace.length >= 96) ORGD.trace.shift();
+  ORGD.trace.push([+V.pulse.toFixed(3), +(orgC(d.brace, 0, 10) / ORGD.brPk).toFixed(3), +(bt * bt).toFixed(3)]);
 }
-function orgDance(dt) {   // its dip, swell and sway, in place of the beat curve (danceFrame)
+function orgDance(dt) {   // its swell, dip, squash and sway, in place of the beat curve (danceFrame) by ORGD.R
   const D = BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);
   ORGD.D = ease(ORGD.D, D, dt, .6, 1.2);
-  const k = ORGD.k * ORGD.D, p = ORGD.v.pulse * ORGD.v.pulse;
-  U.uShift.value.y += -.014 * k * p;
-  U.uShift.value.x += .016 * k * ORGD.v.sway;
-  U.uScale.value *= 1 + .024 * k * p;
+  const k = ORGD.A * ORGD.D, p = ORGD.v.pulse;
+  U.uScale.value *= 1 + .26 * k * (p - .45);
+  U.uShift.value.y += -.04 * k * p;
+  U.uShift.value.x += .03 * k * ORGD.v.sway;
+  U.uWide.value = THREE.MathUtils.clamp(U.uWide.value + .14 * k * (p - .4), -.3, .6);
 }
-window.__orgDrive = () => ({ on: ORGD.on, k: +ORGD.k.toFixed(3), ageMs: ORGD.d ? Math.round(performance.now() - ORGD.at) : null, received: ORGD.n, last: ORGD.d,
-  mapped: { ...ORGD.v, reg: Array.from(ORGD.v.reg), modes: Array.from(ORGD.v.modes), pos: Array.from(ORGD.v.pos), omega: Array.from(ORGD.v.omega), D: ORGD.D, colour: '#' + ORGD.col.getHexString(), colW: ORGD.colW } });   // lab
+function orgSnap() {   // the dashboard's drive meter
+  const t = ORGD.trace.slice(); ORGD.trace.length = 0;
+  const n2 = (x, dd = 3) => (Number.isFinite(x) ? +x.toFixed(dd) : 0), c = ORGD.d && ORGD.d.chrom;
+  return { k: n2(ORGD.k), s: n2(ORGD.s, 2), pulse: n2(ORGD.v.pulse), reg: Array.from(ORGD.v.reg, (x) => n2(x)), chrom: c ? Array.from(c, (x) => n2(x)) : null, colour: '#' + ORGD.col.getHexString(),
+    arousal: n2(ORGD.v.feel[0]), metalW: n2(ORGD.metalW * ORGD.k), lightW: n2(ORGD.colW * ORGD.k), msgsPerSec: n2(ORGD.rate, 1), ageMs: ORGD.d ? Math.round(performance.now() - ORGD.at) : null, trace: t };
+}
+window.__orgDrive = () => ({ on: ORGD.on, s: ORGD.s, k: +ORGD.k.toFixed(3), A: ORGD.A, R: ORGD.R, ageMs: ORGD.d ? Math.round(performance.now() - ORGD.at) : null, received: ORGD.n, rate: ORGD.rate, last: ORGD.d, lo: ORGD.lo, hi: ORGD.hi,
+  mapped: { ...ORGD.v, reg: Array.from(ORGD.v.reg), modes: Array.from(ORGD.v.modes), pos: Array.from(ORGD.v.pos), omega: Array.from(ORGD.v.omega), D: ORGD.D, colour: '#' + ORGD.col.getHexString(), colW: ORGD.colW, metalW: ORGD.metalW, glow: ORGD.glow } });   // lab
 pet.onRetro?.(v => { RETRO.pix = Math.min(24, Math.max(1, +v?.pix || 1)); RETRO.lev = +v?.lev >= 2 ? Math.min(64, +v.lev) : 0; RETRO.dith = Math.min(1, Math.max(0, +v?.dith || 0)); retroApply(); });
 pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
 const HATCH = { t: -1, swapped: false, A: 1.4, B: 2.8 };
@@ -1374,7 +1412,7 @@ function devFrame(now) {
     proposals: PROP.on, fx: { ...FX }, glitch: { ...GLX }, rise: window.__rise(), journey: window.__journey(), ...EXT.snap?.(),
     look: { light: U.uLight.value.toArray().map((x) => num(x)), metal: U.uMetal.value.toArray().map((x) => num(x)), glow: num(U.uGlow.value), stainAmt: num(U.uStainA.value) },
     tune: { user: { ...ML.user }, live: Object.fromEntries(Object.entries(T).map(([k, v]) => [k, num(v)])) }, dials: { rhythm: DIALS.rhythm, sync: DIALS.sync },
-    dev: DEV, seed: SEED, log: blog.slice(0, 8), events: DEV_EV.slice(-30),
+    dev: DEV, seed: SEED, log: blog.slice(0, 8), events: DEV_EV.slice(-30), orgDrive: ORGD.on || ORGD.k > 0 ? orgSnap() : null,
   };
   if (now - (devFrame.picAt || 0) > 2500) { devFrame.picAt = now; try { snap.skinPng = songPng(); } catch {} snap.uniNames = Object.keys(U).filter((k) => typeof U[k].value === 'number'); }   // the grown skin, unrolled
   if (ORG.on) { if (ORG.last) { snap.organism = ORG.last; ORG.last = null; } beingWorker.postMessage({ type: 'org-pull', full: ORG.full }); ORG.full = false; }   // the worker answers before the next snapshot
@@ -2267,7 +2305,7 @@ renderer.setAnimationLoop(ts => {
       if (QUAL.slow > 2000 && QUAL.k > .5) { QUAL.k = Math.max(.5, QUAL.k - .1); QUAL.slow = 0; resize(); }
       else if (QUAL.fast > 8000 && QUAL.k < QUAL.res) { QUAL.k = Math.min(QUAL.res, QUAL.k + .05); QUAL.fast = 0; resize(); }
     } else if (!QUAL.auto && QUAL.k !== QUAL.res) { QUAL.k = QUAL.res; resize(); } }
-  const rawScale = ((.80 + .12 * loudF + .2 * loudF * X + BOUNCE.k * (S.grid * pulseBeat * (.05 + .06 * S.down) * lockF + (1 - S.grid * Math.min(1, lockF)) * kickV * .04) * S.awake * (.3 + 1.3 * X) * T.pulse + S.drop * .06 + (swell + contrast) * S.awake) * T.size);
+  const rawScale = ((.80 + .12 * loudF + .2 * loudF * X + BOUNCE.k * (1 - ORGD.R) * (S.grid * pulseBeat * (.05 + .06 * S.down) * lockF + (1 - S.grid * Math.min(1, lockF)) * kickV * .04) * S.awake * (.3 + 1.3 * X) * T.pulse + S.drop * .06 + (swell + contrast) * S.awake) * T.size);
   // a soft ceiling: above 1 the size compresses smoothly toward 1.18 (beats still show), so it never outgrows the window
   const quiet = c01(S.quiet / 4);
   // resting breath: slow (~12 per minute) and its own, never the musical pulse (that read as a phantom beat in silence)
@@ -2289,14 +2327,14 @@ renderer.setAnimationLoop(ts => {
   else { const l = LIGHT[look.light] || LIGHT.solar; lightTo.setRGB(l[0], l[1], l[2]); }
   { const ml = materialLight(MAT.m.shown); if (ml) lightTo.lerp(COS.c.setRGB(...ml.rgb), ml.w); }   // what it is made of colours its light
   if (COS.t && COS.t.light) lightTo.lerp(COS.c.setRGB(...COS.t.light.rgb), COS.t.light.w);   // the sky modes' light
-  if (ORGD.k > 0) lightTo.lerp(ORGD.col, ORGD.colW * ORGD.k);   // the organism's chromatophores and feeling tint the light (ORGD)
+  if (ORGD.k > 0) lightTo.lerp(ORGD.col, ORGD.colW * ORGD.k);   // the organism's chromatophores and feeling tint the light (ORGD, by strength)
   U.uLight.value.lerp(lightTo, 1 - Math.exp(-dt * 1.5));
   { const m = FINISH[look.finish] || FINISH.chrome; metalTo.setRGB(m[0], m[1], m[2]).lerp(lightTo, .1); if (COS.t && COS.t.metal) metalTo.lerp(COS.c.setRGB(...COS.t.metal.rgb), COS.t.metal.w); }
   metalTo.lerp(COS.c.setHSL(BUILD.tint[0], BUILD.tint[1], .6), .2);   // its own tint in the metal
-  if (ORGD.k > 0) metalTo.lerp(ORGD.col, .1 * ORGD.k * (1 - SLEEP.z));   // and a little of the organism's (ORGD)
+  if (ORGD.k > 0) metalTo.lerp(ORGD.col, ORGD.metalW * ORGD.k);   // and the metal itself takes its skin's colour (ORGD, by strength)
   U.uMetal.value.lerp(metalTo, 1 - Math.exp(-dt * 2));
   // glow follows level and dopamine, which can step in one frame: eased (rise ~80 ms, fall ~400 ms) so it swells, never cuts
-  { const g = (.28 + S.awake * (.22 + X * .55 + st.level * .25)) * (.6 + .75 * loudF + contrast) * T.glow * (1 + .35 * Math.max(0, mind.daPhasic) + .4 * B.chill) * COS.glow * (1 + EXT.glow);
+  { const g = (.28 + S.awake * (.22 + X * .55 + st.level * .25)) * (.6 + .75 * loudF + contrast) * T.glow * (1 + .35 * Math.max(0, mind.daPhasic) + .4 * B.chill) * COS.glow * (1 + EXT.glow) * (1 + ORGD.glow);
     U.uGlow.value += (g - U.uGlow.value) * (1 - Math.exp(-dt / (g > U.uGlow.value ? .08 : .4))); }
   cosmosFrame(dt);
   U.uFilm.value = Math.max(U.uFilm.value, B.chill * .9, COS.film);
