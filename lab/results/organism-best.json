@@ -1,0 +1,245 @@
+{
+ "genome": [
+  0.833472,
+  0.955129,
+  0.016572,
+  0.584011,
+  0.564613,
+  0.665988,
+  0.557772,
+  0.818553,
+  0.072892,
+  0.189299,
+  0.752481,
+  0.892713,
+  0.18684,
+  0.93796,
+  0.990663,
+  0.923284,
+  0.208366,
+  0.734518,
+  0.020578,
+  0.395355,
+  0.841088,
+  0.086312,
+  0.148831,
+  0.133717,
+  0.179822,
+  0.095945,
+  0.699701,
+  0.991491
+ ],
+ "seed": 201382,
+ "gen": 26,
+ "fitness": 0.8509220745895971,
+ "viability": 0.8509220745895971,
+ "genes": {
+  "pCos": 0.6669,
+  "pPhi": 6.0013,
+  "lamP": 0.2657,
+  "qCos": 0.168,
+  "qPhi": 3.5476,
+  "lamQ": 0.8827,
+  "nInter": 360,
+  "migDepth": 0.5274,
+  "fracI": 0.1331,
+  "qFateI": -0.6214,
+  "axonLen": 0.9772,
+  "capture": 0.1871,
+  "synDensity": 0.2714,
+  "tropRs": 0.8759,
+  "tropRi": 0.9813,
+  "tropPi": 0.8466,
+  "tropRb": -0.5833,
+  "gI": 3.2036,
+  "etaH": 0.0004,
+  "etaI": 0.0079,
+  "etaS": 0.1682,
+  "pruneThr": 0.0399,
+  "modGain": 0.2232,
+  "nMotor": 14,
+  "nChrom": 20,
+  "rTarget": 2.5757,
+  "tauAdapt": 0.3039,
+  "effic": 1.0983
+ },
+ "cost": {
+  "msPerSimSecond": 25.048,
+  "note": "wall ms per simulated second per organism in a worker: network, body and milieu (ear frames precomputed once per generation)"
+ },
+ "measures": {
+  "costMsPerSimS": 7.232051282051282,
+  "life": {
+   "viability": 0.8484069812445221,
+   "died": -1,
+   "interHz": 2.5577536378040215,
+   "rateHz": 3.8775799523065704,
+   "runaway": 0,
+   "maxInter1s": 8.159352657676717,
+   "segs": [
+    {
+     "mode": "silence",
+     "inter": 1.96,
+     "dE": 0.022,
+     "dI": 0.012,
+     "need": 0.278,
+     "pred": 0.376
+    },
+    {
+     "mode": "groove 120",
+     "inter": 2.83,
+     "dE": 0.083,
+     "dI": -0.003,
+     "need": 0.184,
+     "pred": 0.67
+    },
+    {
+     "mode": "noise",
+     "inter": 2.39,
+     "dE": -0.001,
+     "dI": 0.013,
+     "need": 0.193,
+     "pred": 0.048
+    },
+    {
+     "mode": "groove 96",
+     "inter": 2.64,
+     "dE": 0.082,
+     "dI": -0.021,
+     "need": 0.173,
+     "pred": 0.847
+    },
+    {
+     "mode": "tone",
+     "inter": 2.39,
+     "dE": -0.003,
+     "dI": 0.008,
+     "need": 0.185,
+     "pred": 0.092
+    },
+    {
+     "mode": "scatter",
+     "inter": 2.53,
+     "dE": 0.017,
+     "dI": -0.009,
+     "need": 0.172,
+     "pred": 0.762
+    },
+    {
+     "mode": "build 128",
+     "inter": 2.71,
+     "dE": -0.024,
+     "dI": -0.024,
+     "need": 0.168,
+     "pred": 0.315
+    },
+    {
+     "mode": "silence",
+     "inter": 2.21,
+     "dE": 0.024,
+     "dI": 0.038,
+     "need": 0.208,
+     "pred": 0.066
+    },
+    {
+     "mode": "poly 110",
+     "inter": 2.94,
+     "dE": 0,
+     "dI": -0.007,
+     "need": 0.187,
+     "pred": 1.015
+    },
+    {
+     "mode": "groove 140",
+     "inter": 2.64,
+     "dE": 0,
+     "dI": -0.006,
+     "need": 0.163,
+     "pred": 0.582
+    }
+   ]
+  },
+  "balance": {
+   "gEgIcorr": 0.801171791966349,
+   "inhToExcCurrent": 0.24776852471185626,
+   "cvISI": 1.1928071961559503
+  },
+  "structure": {
+   "N": 516,
+   "synapses": 10026,
+   "perCell": 19.430232558139537,
+   "communities": 23,
+   "Q": 0.5784414457777933,
+   "motorDepth": 2.2222222222222223,
+   "motorReached": 0.6428571428571429,
+   "depthHist": [
+    94,
+    318,
+    75,
+    10,
+    2
+   ],
+   "reciprocity": 0.15140634350688212,
+   "reciprocityRandom": 0.030387658753906508,
+   "reciprocityRatio": 4.982494529540482,
+   "pruned": 0.14541425161950222,
+   "sprouted": 1070,
+   "inhibitoryShare": 0.10077519379844961
+  },
+  "energy": {
+   "start": 1,
+   "groove": {
+    "dE": 0,
+    "pred": 0.8273,
+    "inter": 2.61,
+    "dI": -0.0201,
+    "need": 0.157
+   },
+   "noise": {
+    "dE": -0.0204,
+    "pred": 0.0492,
+    "inter": 2.48,
+    "dI": 0.0424,
+    "need": 0.203
+   },
+   "scatter": {
+    "dE": 0,
+    "pred": 0.78,
+    "inter": 2.5,
+    "dI": -0.0198,
+    "need": 0.161
+   },
+   "silence180": {
+    "dE": 0,
+    "pred": 0.016,
+    "inter": 2.49,
+    "dI": 0.0827,
+    "need": 0.225,
+    "needStart": 0.16276762352518429
+   }
+  },
+  "phaseLock": {
+   "experienced": {
+    "vs": 0.20997004344798192,
+    "phase": 0.18029187534205782,
+    "n": 594
+   },
+   "newbornFrozen": {
+    "vs": 0.4802603447556015,
+    "phase": 0.1495025997664728,
+    "n": 797
+   },
+   "scatterControl": {
+    "vs": 0.059139125707533165,
+    "phase": 0.2931064081903374,
+    "n": 557
+   },
+   "beatOnsets": {
+    "vs": 0.8958486880386626,
+    "phase": 0.11207239745946734,
+    "n": 1656
+   }
+  },
+  "earMsPerSimS": 9.016600000012355
+ }
+}
