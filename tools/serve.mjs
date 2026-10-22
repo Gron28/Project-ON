@@ -1,12 +1,30 @@
-// tools/serve.mjs - simple HTTP server for viewing ON over Tailscale / local network
+// tools/serve.mjs - simple HTTP server for viewing ON in a browser over Tailscale / local network.
+//   HOST=<tailscale ip> node tools/serve.mjs      (PORT defaults to 4242, HOST to 127.0.0.1: this machine only)
+// Serves only being/ (never being/local/) and the three.js and onnxruntime-web builds the page imports; anything else is 404.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PORT = parseInt(process.env.PORT || '4242', 10);
+const HOST = process.env.HOST || '127.0.0.1';
+// what may be served: prefixes of the path relative to the root ('/' separated); DENY wins over ALLOW
+const ALLOW = ['being/', 'node_modules/three/build/', 'node_modules/onnxruntime-web/dist/'];
+const DENY = ['being/local/'];
+
+// the absolute file for a URL path under root, or null when it is refused (bad encoding, NUL, outside root, not allowed)
+export function resolveSafe(root, urlPath) {
+  let p; try { p = decodeURIComponent(String(urlPath)); } catch { return null; }
+  if (p.includes('\0')) return null;
+  const abs = path.resolve(root, p.replace(/^[\\/]+/, ''));
+  const rel = path.relative(root, abs);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const r = rel.split(path.sep).join('/'), ci = process.platform === 'win32' ? r.toLowerCase() : r;   // Windows paths ignore case
+  if (DENY.some((d) => ci.startsWith(d))) return null;
+  return ALLOW.some((a) => ci.startsWith(a)) ? abs : null;
+}
 
 const MIMES = {
   '.html': 'text/html; charset=utf-8',
@@ -136,17 +154,8 @@ const LANDING_PAGE = `<!doctype html>
 
 const server = http.createServer((req, res) => {
   console.log(new Date().toLocaleTimeString(), req.method, req.url);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
   const reqUrl = new URL(req.url, 'http://localhost');
-  let pathname = decodeURIComponent(reqUrl.pathname);
+  const pathname = reqUrl.pathname;
 
   if (pathname === '/' || pathname === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -154,10 +163,10 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const filePath = path.join(ROOT, pathname.replace(/^\//, ''));
-  if (!filePath.startsWith(ROOT)) {
-    res.writeHead(403);
-    res.end('Forbidden');
+  const filePath = resolveSafe(ROOT, pathname);
+  if (!filePath) {   // refused paths look like missing ones
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not found');
     return;
   }
 
@@ -179,6 +188,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on http://0.0.0.0:${PORT}`);
+// listen only when run directly, so tests can import resolveSafe
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) server.listen(PORT, HOST, () => {
+  console.log(`Server listening on http://${HOST}:${PORT}`);
 });
