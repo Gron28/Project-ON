@@ -36,6 +36,7 @@ const settings = { pet: true, size: SIZES.Medium, x: null, y: null, top: true, o
 try { Object.assign(settings, JSON.parse(fs.readFileSync(SETTINGS, 'utf8'))); } catch {}
 settings.ml = { style: true, feel: true, world: true, beat: true, ...(settings.ml || {}) };   // the local models, layer by layer
 settings.cosmos = { ...COSMOS_DEFAULT(), ...(settings.cosmos || {}) };
+settings.organism = { watch: false, genome: 'best', ...(settings.organism || {}) };   // the lab organism, watched in the dashboard
 delete settings.driver; delete settings.blobs;   // experimental drivers that were tried and removed
 // the local folder's main-process side (being/local/main.cjs, not part of the repository): experimental features of its own,
 // menu entries, dashboard keys and the page's 'ext:' channels. Without it there is none of that.
@@ -161,6 +162,7 @@ function createWindow() {
       if (!settings.onboarded && settings.pet) setTimeout(openSettings, 1200);   // first run: one small card
       if (dash && !dash.isDestroyed()) wc.send('dev', true);
       sendCosmos();
+      sendOrganism();
       // prefer a running Spotify (per-app capture does not depend on the default output device), else all system audio
       if (SHOWCASE) return;   // it hears only the showcase's own silent music
       const want = settings.source, sp = (want && want.app && apps().find((a) => a.name === want.app)) || (!(want && want.system) && apps().find((a) => /spotify/i.test(a.name)));
@@ -302,6 +304,21 @@ function setExperimental(k, on) {
 }
 // motion: "Calm" (Settings) stills the dance, the beat pulse and the glints; "Bounce to the beat" (dashboard) is the finer switch
 function sendMotion() { send('bounce', settings.bounce !== false && !settings.calm); send('calm', !!settings.calm); }
+// the lab organism (lab/organism/watch.mjs, run in being/worker.mjs on the being's own ear; it drives nothing): the evolved
+// best genome is read here, since the sandboxed page cannot; without it the worker grows one from a seed
+function organismState() {
+  const o = { watch: !!settings.organism.watch, genome: null, seed: 1, label: '' };
+  if (!o.watch) return o;
+  try {
+    const b = JSON.parse(fs.readFileSync(path.join(__dirname, 'lab', 'results', 'organism-best.json'), 'utf8'));
+    if (Array.isArray(b.genome) && b.genome.length >= 20 && b.genome.length <= 64 && b.genome.every((x) => typeof x === 'number' && x >= 0 && x <= 1)) {
+      o.genome = b.genome; o.seed = Number.isInteger(b.seed) && b.seed > 0 ? b.seed : 1;
+      o.label = `best (gen ${b.gen ?? '?'}, fitness ${Number.isFinite(b.fitness) ? b.fitness.toFixed(3) : '?'})`;
+    }
+  } catch {}
+  return o;
+}
+const sendOrganism = () => send('organism', organismState());
 function setSize(v) {
   settings.size = v; save();
   if (win && !win.isDestroyed() && settings.pet) { const b = win.getBounds(); win.setBounds({ x: Math.round(b.x + (b.width - v) / 2), y: Math.round(b.y + (b.height - v) / 2), width: v, height: v }); }
@@ -431,6 +448,7 @@ ipcMain.handle('dash-app', (e, key, value) => {
   }
   if (key === 'retro') { if (value) setRetro(value.k, value.v); return { pix: settings.pix || 1, lev: settings.lev || 0, dith: settings.dith || 0 }; }
   if (key === 'action' && value === 'showcase') { openShowcase(); return true; }
+  if (key === 'organism') { if (value && typeof value.watch === 'boolean' && value.watch !== !!settings.organism.watch) { settings.organism.watch = value.watch; save(); sendOrganism(); } return { watch: !!settings.organism.watch }; }
   if (EXTM && EXTM.dashApp) { const r = EXTM.dashApp(key, value); if (r !== undefined) return r; }
   if (key === 'action' && ['feedback+', 'feedback-', 'burst', 'reseed', 'new-seed', 'open-memories'].includes(value)) { if (value === 'feedback+') send('feedback', 1); else if (value === 'feedback-') send('feedback', -1); else send(value); return true; }
   return false;

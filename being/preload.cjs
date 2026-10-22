@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const on = (ch, fn) => ipcRenderer.on(ch, (e, v) => fn(v));
 // state channels: main may send them before the page has registered its listener (its module is still loading), so the latest
 // value is kept from the start and handed to the listener when it arrives
-const STATE = ['system', 'source', 'look', 'bounce', 'retro', 'ml', 'quality', 'lexicon', 'track', 'cosmos', 'immersive', 'dev', 'dev-pause', 'calm'];
+const STATE = ['system', 'source', 'look', 'bounce', 'retro', 'ml', 'quality', 'lexicon', 'track', 'cosmos', 'immersive', 'dev', 'dev-pause', 'calm', 'organism'];
 const latest = new Map();
 for (const ch of STATE) ipcRenderer.on(ch, (e, v) => latest.set(ch, v));
 const onState = (ch, fn) => { if (latest.has(ch)) queueMicrotask(() => fn(latest.get(ch))); return on(ch, fn); };
@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('pet', {
   onDev: (fn) => onState('dev', fn),
   onDevPause: (fn) => onState('dev-pause', fn),          // true while the dashboard is minimized or hidden: no snapshots
   onCalm: (fn) => onState('calm', fn),                   // true: no glints or stars (with the bounce off, from main.cjs)
+  onOrganism: (fn) => onState('organism', fn),           // { watch, genome, seed, label }: the lab organism the dashboard watches (lab/organism/watch.mjs)
   devSnap: (snap) => ipcRenderer.send('dev-snap', snap),
   onDevCmd: (fn) => on('dev-cmd', fn),
   // inert parts of the original API

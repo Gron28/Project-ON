@@ -228,3 +228,26 @@ test('emergent anticipation in a genome with resonators (measured, reported, not
   for (const x of out) assert.ok(Number.isFinite(x));
 });
 void T;
+
+// ---- watched inside ON (lab/organism/watch.mjs, run by being/worker.mjs) -----------------------------------------------------
+test('watch: the ear tap leaves frame() unchanged; the snapshot carries what the dashboard draws', async () => {
+  const { createEar } = await import('../being/ear.mjs');
+  const { createWatch, transferables } = await import('../lab/organism/watch.mjs');
+  const a = createEar(), b = createEar(), w = createWatch({ genome: null, seed: 2 });
+  const x = (n) => 0.4 * Math.exp(-((n % 24000) / 48000) * 30) * Math.sin(n * 0.01);   // a hit every 0.5 s
+  for (let n = 0; n < 48000 * 3; n++) {
+    a.sample(x(n)); b.sample(x(n));
+    if (n % 192 === 191) w.tick(b.tap());
+    if (n === 48000 * 2.5) w.snapshot();   // someone looks: spikes are collected from here
+    if (n % 480 === 479) { const fa = a.frame(), fb = b.frame(); assert.equal(fa.onset, fb.onset); assert.equal(fa.rough, fb.rough); }
+  }
+  const s = w.snapshot(true), N = w.org.dev.N;
+  assert.equal(s.status, 'live'); assert.equal(s.static.N, N); assert.equal(s.static.pos.length, 3 * N); assert.equal(s.static.extra.length, 4 * N);
+  assert.ok(s.static.edges.pre.length > 0 && s.static.edges.pre.length === s.static.edges.w.length);
+  assert.equal(s.live.rf.length, N); assert.ok(s.live.spikes.length > 0); assert.equal(s.live.chrom.length, w.org.C.chrom.length);
+  assert.ok(Number.isFinite(s.live.state.energy) && Number.isFinite(s.live.state.stimNeed));
+  assert.ok(s.timing.impacts.length > 0 && s.timing.impacts.every((i) => Number.isFinite(i.leadMs)));
+  assert.equal(w.snapshot(false).static, undefined);   // unchanged graph: only its version
+  assert.ok(transferables(s).length >= 8);
+  console.log(`  develop ${w.developMs.toFixed(0)} ms, ${w.org.dev.N} cells, ${s.timing.impacts.length} impacts, lead ${s.timing.impacts.map((i) => i.leadMs).join(' ')} ms`);
+});

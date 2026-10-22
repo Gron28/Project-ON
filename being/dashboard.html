@@ -5,6 +5,8 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ON · dashboard</title>
+<!-- three.js for the Organism panel (being/dash/organism-panel.mjs, which shows the lab's views) -->
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }</script>
 <style>
   /* dark chart chrome from the dataviz reference palette: categorical slots for series, status colours for states, ink tokens for every label */
   :root {
@@ -253,6 +255,7 @@ function buildLive() {
   b = panel('mem', 'Memory'); P.memKv = h('div', { class: 'kv' }); b.append(P.memKv);
   b = panel('perf', 'Performance'); P.perfKv = h('div', { class: 'kv' }); P.frameC = canvas(40); P.gpuBars = h('div', { style: 'margin-top:8px' }); b.append(P.perfKv, P.frameC, P.gpuBars); sparkHover(P.frameC);
   b = panel('log', 'Log', true); P.log = h('div', { class: 'log' }); b.append(P.log);
+  ORG_READY.then(() => ORG.build?.());
   DEXT.buildLive?.();
 }
 const LAY = {};
@@ -398,6 +401,9 @@ const CTL = {};
 // the local folder (being/local/dashboard.mjs, not part of the repository) may add panels and controls: its hooks live here
 const DEXT = {};
 const DEXT_READY = import('./local/dashboard.mjs').then((m) => m.install(DEXT)).catch(() => {});
+// the lab organism ON can run beside the being, watched live (being/dash/organism-panel.mjs, snap.organism, dash-app 'organism')
+const ORG = {};
+const ORG_READY = import('./dash/organism-panel.mjs').then((m) => m.install(ORG, { h, panel, fmt })).catch((e) => console.error('[organism panel]', e));
 function buildRail(schema) {
   for (const d of document.querySelectorAll('aside details[data-id]')) { if (d.dataset.id in ui.open) d.open = !!ui.open[d.dataset.id]; d.addEventListener('toggle', () => { ui.open[d.dataset.id] = d.open; saveUi(); }); }
   // look
@@ -585,7 +591,7 @@ function sticky(s) {
 }
 let built = false, pending = false;
 dash.schema().then((schema) => { buildRail(schema); });
-dash.onSnap((s) => { S = s; sticky(s); if (!built) { built = true; buildLive(); } if (!frozen) feed(s); if (!frozen && !pending) { pending = true; requestAnimationFrame(() => { pending = false; try { render(); } catch (e) { console.error(e); } }); } });
+dash.onSnap((s) => { S = s; sticky(s); if (!built) { built = true; buildLive(); } if (ORG.feed) ORG.feed(s.organism, frozen); else if (s.organism && s.organism.static) ORG.early = s.organism; if (!frozen) feed(s); if (!frozen && !pending) { pending = true; requestAnimationFrame(() => { pending = false; try { render(); } catch (e) { console.error(e); } }); } });
 addEventListener('resize', () => { if (S) render(true); });
 </script>
 </body>

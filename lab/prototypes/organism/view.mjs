@@ -8,7 +8,8 @@
 //   Diagram  a live 3D schematic: each functional group (groups.mjs) collapsed into a block, laid out from the senses
 //            (outer ring above) through the areas to the nucleus (centre) and out to the effectors (ring below); tubes are
 //            the summed weights between groups, their moving pulses the summed activity; each block has a readout.
-// Also replays development as a time-lapse. Reads the organism, never drives it.
+// Also replays development as a time-lapse. Reads the organism, never drives it. ON's dashboard shows a remote organism
+// through the same view (being/dash/organism-proxy.mjs): one with takeSpikes() reports its spikes instead of rate jumps.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -269,6 +270,7 @@ export function createView(host, tip) {
   }
   /** spikes per cell since the last frame, read from the fast rate's jumps (the page steps many network ticks per frame) */
   function spikesSince() {
+    if (org.takeSpikes) { tPrev = org.time; return org.takeSpikes(spk); }   // a remote organism (being/dash/organism-proxy.mjs) reports spikes
     const rf = org.net.rf, N = org.dev.N, n = Math.max(0, Math.round((org.time - tPrev) / 0.004)); tPrev = org.time;
     if (!n) { spk.fill(0); return 0; }
     const dk = RF_DEC ** n, per = RF_JUMP * RF_DEC ** (n / 2); let tot = 0;

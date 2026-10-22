@@ -267,7 +267,11 @@ beingWorker.onmessage = e => {
   const d = e.data;
   if (d.type === 'ear') { earFrame = d; if (d.onset > onsetPeak) onsetPeak = d.onset; memoryHear(d); voiceHear(d); }
   else if (d.type === 'tissue') { tissueTex.image.data.set(d.tex); tissueTex.needsUpdate = true; tissueStats = d; beingWorker.postMessage({ type: 'recycle', tex: d.tex }, [d.tex.buffer]); }
+  else if (d.type === 'organism') ORG.last = d;
 };
+// the lab organism (lab/organism/watch.mjs) lives in the worker on this ear, only for the dashboard to watch: it drives nothing
+const ORG = { on: false, last: null, full: true };
+pet.onOrganism?.((o) => { ORG.on = !!(o && o.watch); ORG.last = null; ORG.full = true; beingWorker.postMessage({ type: 'organism', on: ORG.on, genome: o && o.genome, seed: o && o.seed, label: o && o.label }); });
 window.__being = () => ({ B2, mind, phys, U, S, earFrame, tissueStats, intensity: an.state.intensity, intensityAbs: an.state.intensityAbs, character: an.state.character, FB, frameMs: lastFrameMs });
 // lab: one row of the feeling against the model's reading of the music (scratch/affect-lab.cjs)
 window.__affect = () => { const b = ML.brain, mo = b ? b.moods : {}, mu = MAT.m.uniforms(); return {
@@ -1276,6 +1280,8 @@ function embSummary(E) {   // 1280 dims as 64 bands, centred and scaled to -1..1
 }
 function devFrame(now) {
   fpsN++; if (now - fpsT > 1000) { fps = fpsN; fpsN = 0; fpsT = now; }
+  if (!devOn) ORG.full = true;   // the dashboard gets the organism's whole graph again when it opens
+  else if (ORG.on && !devPaused) beingWorker.postMessage({ type: 'org-phase', phase: SHOW.phase });   // the beat it shows, for 'brace vs beat'
   if (!devOn || devPaused || now - devAt < 160) return;
   devAt = now;
   const st = an.state, r = ML.brain, sug = ML.sug;
@@ -1314,6 +1320,7 @@ function devFrame(now) {
     dev: DEV, seed: SEED, log: blog.slice(0, 8), events: DEV_EV.slice(-30),
   };
   if (now - (devFrame.picAt || 0) > 2500) { devFrame.picAt = now; try { snap.skinPng = songPng(); } catch {} snap.uniNames = Object.keys(U).filter((k) => typeof U[k].value === 'number'); }   // the grown skin, unrolled
+  if (ORG.on) { if (ORG.last) { snap.organism = ORG.last; ORG.last = null; } beingWorker.postMessage({ type: 'org-pull', full: ORG.full }); ORG.full = false; }   // the worker answers before the next snapshot
   pet.devSnap(snap);
 }
 // the dashboard's commands: tuning, colours, forcing systems, actions

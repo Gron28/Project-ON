@@ -5,8 +5,11 @@
 //      { type:'feedback', kind:'pattern'|'noise', band, amount }  (a predicted hit: a fixed stamp in band 0 low .. 2 high;
 //                                          a surprise: as many cells at random; see tissue.mjs)
 //      { type:'recycle', tex }            (optional: the page hands a tissue texture buffer back, so none is allocated per frame)
+//      { type:'organism', on, genome, seed, label }  (the lab organism, lab/organism/watch.mjs: grown on 'on', freed on 'off')
+//      { type:'org-pull', full } / { type:'org-phase', phase }  (the dashboard's snapshot request; the being's shown beat phase)
 // Out: { type:'ear', amp, mu, onset, rough, sub, level, hum }  every 10 ms of audio
 //      { type:'tissue', tex, act, sigma, branching }           every ~33 ms of audio
+//      { type:'organism', status, cost, staticVersion, static?, live, timing }  answering each 'org-pull'
 
 import { createEar, SR, NE, DELTA } from './ear.mjs';
 import { createTissue } from './tissue.mjs';
@@ -22,8 +25,26 @@ const EAR_EVERY = SR / 100, TISSUE_EVERY = SR * 4 / 1000, TEX_EVERY = SR / 30;
 // sync: captured audio reaches the ear before it reaches the listener (output latency), so it is delayed by `delay` ms
 const DL = new Float32Array(SR);   // up to 1 s
 let dlW = 0, delaySamples = Math.round(SR * 0.04);
+// the lab organism: hears this ear (a 4 ms tap per network step), drives nothing; loaded only when switched on
+let watch = null, orgGen = 0, orgStatus = 'off', orgError = '', toOrg = 0;
+async function setOrganism(d) {
+  const gen = ++orgGen;
+  watch = null; orgStatus = d.on ? 'developing' : 'off'; orgError = '';
+  if (!d.on) return;
+  try {
+    const m = await import('../lab/organism/watch.mjs');
+    if (gen !== orgGen) return;
+    watch = m.createWatch({ genome: d.genome, seed: d.seed, label: d.label }); watch.transferables = m.transferables; orgStatus = 'live'; toOrg = 0;
+  } catch (err) { if (gen === orgGen) { orgStatus = 'failed'; orgError = String(err && err.message || err); } }
+}
 self.onmessage = (e) => {
   const d = e.data;
+  if (d.type === 'organism') { setOrganism(d); return; }
+  if (d.type === 'org-phase') { if (watch) watch.onPhase = +d.phase || 0; return; }
+  if (d.type === 'org-pull') {
+    if (!watch) { self.postMessage({ type: 'organism', status: orgStatus, error: orgError || undefined }); return; }
+    const s = watch.snapshot(!!d.full); self.postMessage({ type: 'organism', ...s }, watch.transferables(s)); return;
+  }
   if (d.type === 'kick') { tissue.kick(d.amount || 1); return; }
   if (d.type === 'feedback') { if (d.kind === 'pattern') tissue.pattern(d.band, d.amount); else if (d.kind === 'noise') tissue.noise(d.amount); return; }
   if (d.type === 'recycle') { if (d.tex && d.tex.length === TEX_BYTES && pool.length < 4) pool.push(d.tex); return; }
@@ -36,6 +57,7 @@ self.onmessage = (e) => {
     const xs = DL[rd];
     if (++dlW === SR) dlW = 0;
     ear.sample(xs);
+    if (watch && ++toOrg === 192) { toOrg = 0; watch.tick(ear.tap()); }
     if (++toEar >= EAR_EVERY) { toEar = 0; const f = ear.frame(); self.postMessage(f, [f.amp.buffer, f.mu.buffer]); }
     if (++toTissue >= TISSUE_EVERY) {
       toTissue = 0;
