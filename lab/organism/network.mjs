@@ -19,6 +19,9 @@
 //                       target rate (Vogels et al. 2011): inhibition grows where excitation outruns it
 //   synaptic scaling    each second, a cell's excitatory inputs are scaled by its rate's distance from the set point
 //                       (Turrigiano et al. 1998), multiplicatively
+//   intrinsic plasticity each second, a cell's firing threshold moves by etaIP x its rate's relative distance from the set
+//                       point, within [-0.5, +1] (Desai et al. 1999): a set point that lost or saturated synapses cannot
+//                       undercut, since multiplicative scaling cannot raise a cell whose inputs are pruned or at their ceiling
 //   atrophy             synapses whose presynaptic cell is silent waste away over ~10 min (trophic support needs activity)
 //   pruning / sprouting every 5 s synapses below pruneThr x their birth weight are removed; active cells sprout a new
 //                       synapse onto an active neighbour of one of their targets
@@ -108,6 +111,7 @@ export function createNetwork(dev, opt = {}) {
   const ext = new Float32Array(N);                                   // receptors: rate (Hz); others: input current
   const modc = new Float32Array(N), modBar = new Float32Array(N);    // modulator concentration (0..1) and its slow mean
   const dead = new Uint8Array(N);                                    // lesioned cells
+  const th = new Float32Array(N);                                    // intrinsic threshold shift (intrinsic plasticity)
   const histI = new Float32Array(H * N);                             // inhibitory conductance, last H steps
   const gIq = new Float32Array(N);                                   // quiet-time inhibition (S.quiet set by the organism)
   // resonators
@@ -119,6 +123,9 @@ export function createNetwork(dev, opt = {}) {
   const oscK = G.oscK ?? 0, oscEta = G.oscEta ?? 0, DEC_GB = DT / 0.5;
   const DEC_A = Math.exp(-DT / G.tauAdapt), DEC_RB = Math.exp(-DT / 5), DEC_RF = Math.exp(-DT / 0.1);
   const alphaI = 2 * G.rTarget * 0.02;
+  // structural laws that can be switched off: for lesion studies, and during gestation (organism.mjs), when only the
+  // homeostatic laws run
+  const LAW = { atrophy: true, sprout: true, ...(opt.laws || {}) };
   let slot = 0, n = 0;
   const S = { energyFactor: 1, quiet: 1, sensoryIn: 0, spikes: 0, spikesByType: new Float32Array(10), gEmean: 0, gImean: 0, mod: 0 };
 
@@ -142,7 +149,7 @@ export function createNetwork(dev, opt = {}) {
         const gt = 1 + ge + gi, vinf = (ge * VE + gi * VI + ext[i]) / gt;
         const q = kv * gt, decay = 1 / (1 + q * (1 + q * (0.5 + q * (1 / 6 + q / 24))));   // ~exp(-q): Taylor in the denominator, stable
         const vv = vinf + (v[i] - vinf) * decay; v[i] = vv;
-        const u = (vv - THETA - a[i]) / DELTA + mg * modc[i];
+        const u = (vv - THETA - a[i] - th[i]) / DELTA + mg * modc[i];
         hz = u < -7 ? 0 : RHO0 * fexp(u > 6 ? 6 : u);                                 // below u = -7: < 0.02 Hz, skipped
         if (!isI[i]) { gEs += ge; gIs += gi; nEc++; }
       }
@@ -198,7 +205,7 @@ export function createNetwork(dev, opt = {}) {
         const m = c / (c + 5); modc[i] = m; modBar[i] += 0.005 * (m - modBar[i]); modSum += m;
       }
       S.mod = modSum / N;
-      const decE = Math.exp(-SLOW * DT / (G.tauElig ?? 1)), atro = SLOW * DT / 600, hk = G.etaH * SLOW * DT / 0.04;   // etaH is per 40 ms
+      const decE = Math.exp(-SLOW * DT / (G.tauElig ?? 1)), atro = LAW.atrophy ? SLOW * DT / 600 : 0, hk = G.etaH * SLOW * DT / 0.04;   // etaH is per 40 ms
       for (let p = 0; p < N; p++) {
         const use = Math.min(1, rbar[p] / 1), lose = atro * (1 - use), inh = isI[p];
         for (let s = p * KMAX, e = s + nOut[p]; s < e; s++) {
@@ -219,8 +226,10 @@ export function createNetwork(dev, opt = {}) {
   }
 
   function scale() {
+    const ip = G.etaIP ?? 0;
     for (let i = 0; i < N; i++) {
       if (recep[i] || dead[i]) continue;
+      if (ip) { const t = th[i] + ip * Math.max(-1, Math.min(1, (rbar[i] - G.rTarget) / G.rTarget)); th[i] = t < -0.5 ? -0.5 : t > 1 ? 1 : t; }
       const f = Math.max(0.8, Math.min(1.25, 1 + G.etaS * (G.rTarget - rbar[i]) / G.rTarget));
       for (let k = inStart[i], e = inStart[i + 1]; k < e; k++) { const s = inList[k]; if (!isI[(s / KMAX) | 0]) w[s] = Math.min(W_MAX_E, w[s] * f); }
     }
@@ -228,7 +237,7 @@ export function createNetwork(dev, opt = {}) {
   function removeSyn(p, s) { const last = p * KMAX + nOut[p] - 1; tgt[s] = tgt[last]; w[s] = w[last]; w0[s] = w0[last]; elig[s] = elig[last]; delay[s] = delay[last]; nOut[p]--; }
   function restructure() {
     for (let p = 0; p < N; p++) for (let s = p * KMAX + nOut[p] - 1; s >= p * KMAX; s--) if (w[s] < G.pruneThr * w0[s]) { removeSyn(p, s); stats.pruned++; }
-    for (let p = 0; p < N; p++) {
+    for (let p = 0; p < N && LAW.sprout; p++) {
       if (dead[p] || !nOut[p] || nOut[p] >= KMAX || rnd() > 0.1 * Math.min(2, rbar[p] / G.rTarget)) continue;
       const via = tgt[p * KMAX + ((rnd() * nOut[p]) | 0)], l = nb[via]; if (!l.length) continue;
       const k = l[(rnd() * l.length) | 0]; if (k === p || dead[k] || rbar[k] < 0.5 * G.rTarget) continue;
@@ -266,16 +275,19 @@ export function createNetwork(dev, opt = {}) {
   function serialize() {
     const e = edges(), rs = RS[0];
     return { n, slot, pre: Array.from(e.pre), post: Array.from(e.post), w: Array.from(e.w, (q) => +q.toFixed(5)), w0: Array.from(e.slot, (s) => +w0[s].toFixed(5)), delay: Array.from(e.slot, (s) => delay[s]),
-      v: Array.from(v), a: Array.from(a), rbar: Array.from(rbar), modBar: Array.from(modBar), dead: Array.from(dead), stats: { ...stats }, rs,
+      v: Array.from(v), a: Array.from(a), th: Array.from(th, (q) => +q.toFixed(5)), rbar: Array.from(rbar), modBar: Array.from(modBar), dead: Array.from(dead), stats: { ...stats }, rs,
       osc: Array.from(OSC, (i) => [phi[i], omega[i], geBar[i], lastP[i] - n * DT]) };
   }
   function restore(o) {
     nOut.fill(0);
     for (let k = 0; k < o.pre.length; k++) { const s = addSyn(o.pre[k], o.post[k], o.w[k], o.delay[k]); w0[s] = o.w0[k]; }
-    v.set(o.v); a.set(o.a); rbar.set(o.rbar); modBar.set(o.modBar); dead.set(o.dead); Object.assign(stats, o.stats); n = o.n; slot = o.slot; RS[0] = o.rs;
+    v.set(o.v); a.set(o.a); if (o.th) th.set(o.th); rbar.set(o.rbar); modBar.set(o.modBar); dead.set(o.dead); Object.assign(stats, o.stats); n = o.n; slot = o.slot; RS[0] = o.rs;
     if (o.osc) OSC.forEach((i, q) => { [phi[i], omega[i], geBar[i]] = o.osc[q]; lastP[i] = (o.osc[q][3] ?? -10) + o.n * DT; });
     rebuildIn(); fanIn();
   }
 
-  return { N, step, ext, spk, rf, rbar, v, gE, gI, modc, dead, w, w0, tgt, nOut, delay, S, stats, edges, lesion, serialize, restore, recep, isI, type, anticipation, resonators, OSC, phi, omega, fanS, get t() { return n * DT; } };
+  /** birth: the weights a synapse is born with are the ones it has at the end of gestation (pruning compares with them) */
+  function birth() { w0.set(w); }
+
+  return { N, step, birth, LAW, th, ext, spk, rf, rbar, v, gE, gI, modc, dead, w, w0, tgt, nOut, delay, S, stats, edges, lesion, serialize, restore, recep, isI, type, anticipation, resonators, OSC, phi, omega, fanS, get t() { return n * DT; } };
 }

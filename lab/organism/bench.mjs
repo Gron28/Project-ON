@@ -5,7 +5,8 @@
 // genome.json: any file with a `genome` array (default lab/results/organism-best.json).
 //
 // Two conditions per development seed:
-//   newborn  plasticity frozen (every eta* rate and pruning set to 0 in the developed genes), fresh for each world
+//   newborn  gestated (organism.mjs GESTATION), then plasticity frozen (every eta* rate, intrinsic plasticity included,
+//            and pruning set to 0 in the developed genes); each world hears a copy of the same newborn
 //   adult    lives the train worlds (worlds.mjs TRAIN, groove variant) with its own laws on, then a clone of that adult
 //            hears each bench world (plasticity still on: it keeps living)
 // Each bench world is heard in three variants (worlds.mjs): groove, shuffled (same onsets, shuffled intervals; beats
@@ -43,7 +44,8 @@ const KNOWN = new Set(['t', 'alive', 'energy', 'integrity', 'need', 'viability',
 export const fitGenome = (g) => Float64Array.from(Array.from(g).slice(0, NG), (x) => (Number.isFinite(+x) ? +x : 0.5));
 export const devSeeds = (k) => Array.from({ length: k }, (_, i) => mix(i + 1, 0xbe9c) % 1000003 + 1);
 
-/** development with plasticity frozen: every gene named eta* (learning rates, present or future) and pruning set to 0 */
+/** development with plasticity frozen: every eta* rate (genes, present or future, and the intrinsic plasticity law) and
+ *  pruning set to 0; gestation still runs with the genome's own homeostatic rates (organism.mjs) */
 export function frozenDev(genome, seed) {
   const dev = develop(genome, seed), G = { ...dev.G };
   for (const k of Object.keys(G)) if (/^eta/i.test(k) && typeof G[k] === 'number') G[k] = 0;
@@ -223,7 +225,11 @@ export function benchSeed(genome, seed, { set = 'test', dur = BENCH.dur, variant
     const runs = {}; for (const v of variants) runs[v] = runRecord(make(), framesFor(spec, v, { seed: worldSeed, dur }));
     return scoreWorld(runs);
   });
-  if (conditions.includes('newborn')) { out.newborn = runAll(() => createOrganism({ dev: frozenDev(genome, seed), seed })); }
+  if (conditions.includes('newborn')) {
+    // one gestation (organism.mjs), then every world hears a copy of the same newborn
+    const fd = frozenDev(genome, seed), nb = createOrganism({ dev: fd, seed }).serialize();
+    out.newborn = runAll(() => { const o = createOrganism({ dev: fd, seed, gestation: 0 }); o.restore(nb); return o; });
+  }
   if (conditions.includes('adult')) {
     const org = createOrganism({ genome, seed }); let lifeOk = true, lifeV = 0, lifeHz = 0;
     for (const spec of TRAIN) { const L = live(org, framesFor(spec, 'groove', { seed: worldSeed + 1000, dur: lifeDur })); lifeOk = lifeOk && L.died < 0; lifeV += L.viability / TRAIN.length; lifeHz += L.interHz / TRAIN.length; }

@@ -2,7 +2,9 @@
 // Gutkin 2014: homeostatic reinforcement). Pure module (no DOM).
 //
 // Three variables, each 0..1, each with a bound beyond which the organism dies:
-//   energy       basal income, minus the cost of every spike (Laughlin & Sejnowski 2003), of keeping synapses, of moving
+//   energy       basal income, minus the cost of every spike of the nervous system (Laughlin & Sejnowski 2003; receptor
+//                cells' firing is not charged: sensory transduction runs on the sense organ's own supply, as the cochlea's on
+//                the stria vascularis, so loud sound is not a drain the network cannot control), of keeping synapses, of moving
 //                and of repair. At each impact (a sensory event, brace.mjs) income is paid for inhibition that was
 //                already waiting for it 20-60 ms before (network.mjs anticipation: predicted in advance, chance-corrected,
 //                so a reaction earns nothing; paid on its running mean over the last ~4 impacts, so chance
@@ -36,7 +38,7 @@ export function createMilieu(G, P = MILIEU) {
   function viab() { const m = margins(); return 0.5 * Math.min(...m) + 0.5 * (m[0] + m[1] + m[2]) / 3; }
   s.viability = viab();
 
-  /** inp: { dt, rateHz (all cells), interHz (interneurons), motor, chrom, synMass (sum w / N), strain, stim,
+  /** inp: { dt, rateHz (spikes of non-receptor cells per cell of the body, Hz), interHz (interneurons), motor, chrom, synMass (sum w / N), strain, stim,
    *  impact: null or { a (0..1), p (protection 0..1), A (anticipation) } } */
   function update(inp) {
     const dt = inp.dt; if (!s.alive) return s;

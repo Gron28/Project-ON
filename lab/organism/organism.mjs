@@ -18,18 +18,27 @@ import { createNetwork, DT } from './network.mjs';
 import { createMilieu } from './milieu.mjs';
 import { decode } from './genome.mjs';
 import { BRACE, protection, createImpactDetector } from './brace.mjs';
+import { earFrames, frameAt } from './environment.mjs';
 
 export const FRAME = SR * DT;      // 192 audio samples per network step
 const MOTOR_F = 0.5;               // force of one fully contracted motor cell (the groove's own push peaks near 2-3)
 const c01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+// Gestation (developmental homeostatic plasticity; Turrigiano & Nelson 2004): before birth the new network hears
+// structure-free sound (the drums at random times, as through the womb: the same sounds as music, no rhythm) with only its
+// homeostatic laws on (synaptic scaling, inhibitory STDP, intrinsic plasticity; no Hebbian learning, no pruning, sprouting or atrophy) and the
+// milieu supplied from outside. So it is born near its own set point, and what a life changes afterwards is learning, not
+// the network settling. The milieu, body and effectors start fresh at birth; synapses' birth weights are their weights then.
+export const GESTATION = { dur: 30, world: [{ mode: 'scatter', dur: 30 }], seed: 1 };
+let GFRAMES = null;
+const gestationFrames = () => (GFRAMES ||= earFrames(GESTATION.world, GESTATION.seed));
 // real l=2 harmonics in physics.mjs's mode order: xy, yz, 2z^2-x^2-y^2, xz, x^2-y^2
 const Y2 = (u) => [u[0] * u[1], u[1] * u[2], 0.5 * (2 * u[2] * u[2] - u[0] * u[0] - u[1] * u[1]), u[0] * u[2], 0.5 * (u[0] * u[0] - u[1] * u[1])];
 
-export function createOrganism({ genome, seed = 1, dev = null } = {}) {
+export function createOrganism({ genome, seed = 1, dev = null, laws = null, gestation = GESTATION.dur } = {}) {
   dev = dev || develop(genome, seed);
   const G = dev.G || decode(genome), N = dev.N;
-  const net = createNetwork(dev, { seed });
-  const milieu = createMilieu(G);
+  const net = createNetwork(dev, { seed, laws });
+  let milieu = createMilieu(G);
   let ear = createEar(), phys = createPhysics();
   const by = (t) => { const l = []; for (let i = 0; i < N; i++) if (dev.type[i] === t) l.push(i); return Int32Array.from(l); };
   const C = { ear: by(T.EAR), onset: by(T.ONSET), rough: by(T.ROUGH), sub: by(T.SUB), proprio: by(T.PROPRIO), inter: by(T.INTER), intero: by(T.INTERO), mod: by(T.MOD), motor: by(T.MOTOR), chrom: by(T.CHROM) };
@@ -40,7 +49,8 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
   const stiff = new Float32Array(N), impactOf = createImpactDetector(), K_RISE = 1 - Math.exp(-DT / BRACE.tauRise);
   const DEC_M = Math.exp(-DT / BRACE.tauAct), DEC_C = Math.exp(-DT / 0.3), ADAPT = DT / 0.4;
   const out = { force: [0, 0, 0], torque: [0, 0, 0], motor: 0, chrom: 0, stim: 0, interHz: 0, rateHz: 0, brace: 0, impact: 0 };
-  let sinceImpact = 1, inSamples = 0, time = 0, interE = 0, rateE = 0, synMass = 0, trophic = 1;
+  let sinceImpact = 1, inSamples = 0, time = 0, interE = 0, rateE = 0, netE = 0, synMass = 0, trophic = 1;
+  let impactOf2 = impactOf;
   const rec = { motorSpikes: [], onsets: [], impacts: [] };   // optional recording for analysis (times in s)
   let recording = false;
 
@@ -89,7 +99,7 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
     out.force[0] = fx; out.force[1] = fy; out.force[2] = fz; out.torque[0] = tx; out.torque[1] = ty; out.torque[2] = tz;
     out.motor = mot / Math.max(1, C.motor.length); out.chrom = chr / Math.max(1, C.chrom.length); out.brace = B / Math.max(1, C.motor.length);
     // impact: a sensory event strikes the body; the brace at this moment decides how much of it lands
-    const a = impactOf(f.onset), p = protection(out.brace); let impact = null;
+    const a = impactOf2(f.onset), p = protection(out.brace); let impact = null;
     sinceImpact += DT;
     if (a > 0) { sinceImpact = 0; impact = { a, p, A: net.anticipation() }; if (recording) rec.impacts.push({ t: time, a, p, A: impact.A }); }
     out.impact = a;
@@ -97,7 +107,8 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
     // rates for the milieu
     let ni = 0; for (const i of C.inter) ni += net.spk[i];
     const kk = 1 - Math.exp(-DT / 0.25);
-    interE += kk * (ni / (C.inter.length * DT) - interE); rateE += kk * (S.spikes / (N * DT) - rateE);
+    let nr = 0; for (let t = 0; t <= T.PROPRIO; t++) nr += S.spikesByType[t];
+    interE += kk * (ni / (C.inter.length * DT) - interE); rateE += kk * (S.spikes / (N * DT) - rateE); netE += kk * ((S.spikes - nr) / (N * DT) - netE);
     out.interHz = interE; out.rateHz = rateE;
     // once a second: synaptic mass (maintenance cost) and trophic use (share of synapses whose presynaptic cell fires >= 2 Hz)
     if ((Math.round(time / DT) % 250) === 0) {
@@ -105,11 +116,21 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
       for (let p = 0; p < N; p++) { const u = Math.min(1, net.rbar[p] / 2); for (let q = p * KMAX, e = q + net.nOut[p]; q < e; q++) { s += net.w[q]; use += u; m++; } }
       synMass = s / N; trophic = m ? use / m : 0;
     }
-    milieu.update({ dt: DT, rateHz: rateE, interHz: interE, motor: out.motor, chrom: out.chrom, synMass, strain: phys.strain, stim: 0.7 * out.stim + 0.3 * trophic, impact });
+    milieu.update({ dt: DT, rateHz: netE, interHz: interE, motor: out.motor, chrom: out.chrom, synMass, strain: phys.strain, stim: 0.7 * out.stim + 0.3 * trophic, impact });
     if (recording) { for (const i of C.motor) if (net.spk[i]) rec.motorSpikes.push(time); if (f.onset > 1) rec.onsets.push(time); }
     time += DT;
   }
 
+  // ---- gestation (see GESTATION) ----
+  if (gestation > 0) {
+    const g0 = decode(dev.genome), keep = { etaS: G.etaS, etaI: G.etaI, etaIP: G.etaIP, etaH: G.etaH, pruneThr: G.pruneThr }, law = { ...net.LAW };
+    G.etaS = g0.etaS; G.etaI = g0.etaI; G.etaIP = g0.etaIP; G.etaH = 0; G.pruneThr = 0; net.LAW.atrophy = false; net.LAW.sprout = false;
+    const F = gestationFrames(), view = { amp: null, onset: 0, rough: 0, sub: 0 }, n = Math.min(F.n, Math.round(gestation / DT));
+    for (let f = 0; f < n; f++) { tick(frameAt(F, f, view)); milieu.s.energy = 0.8; milieu.s.integrity = 0.9; milieu.s.alive = true; }
+    Object.assign(G, keep); Object.assign(net.LAW, law); net.birth();
+    milieu = createMilieu(G); phys = createPhysics(); impactOf2 = createImpactDetector(); act.fill(0); stiff.fill(0); slow.fill(DELTA);
+    sinceImpact = 1; time = 0; interE = 0; rateE = 0; netE = 0;
+  }
   let last = null;
   /** advance by an audio chunk (48 kHz mono), or by dt seconds of silence when no chunk is given */
   function step(dt, chunk) {
@@ -137,8 +158,8 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
   function restore(o) { net.restore(o.net); milieu.restore(o.milieu); act.set(o.act); if (o.stiff) stiff.set(o.stiff); slow.set(o.slow); time = o.t; }
 
   return {
-    dev, G, net, milieu, C, act, stiff, out, rec, step, tick, state, skin, serialize, restore,
-    get phys() { return phys; }, get ear() { return ear; }, get time() { return time; }, get lastFrame() { return last; },
+    dev, G, net, C, act, stiff, out, rec, step, tick, state, skin, serialize, restore,
+    get milieu() { return milieu; }, get phys() { return phys; }, get ear() { return ear; }, get time() { return time; }, get lastFrame() { return last; },
     /** the new laws' readouts in one place: brace, last impact, reward prediction error, anticipation (running), the
      *  resonators' rates and phases, and the genome's hearing field */
     readouts() {
@@ -152,4 +173,4 @@ export function createOrganism({ genome, seed = 1, dev = null } = {}) {
 }
 
 /** restore an organism from serialize() output */
-export function restoreOrganism(o) { const org = createOrganism({ genome: Float64Array.from(o.genome), seed: o.seed }); org.restore(o); return org; }
+export function restoreOrganism(o) { const org = createOrganism({ genome: Float64Array.from(o.genome), seed: o.seed, gestation: 0 }); org.restore(o); return org; }
