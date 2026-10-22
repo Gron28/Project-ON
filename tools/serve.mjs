@@ -1,6 +1,7 @@
 // tools/serve.mjs - simple HTTP server for viewing ON in a browser over Tailscale / local network.
 //   HOST=<tailscale ip> node tools/serve.mjs      (PORT defaults to 4242, HOST to 127.0.0.1: this machine only)
-// Serves only being/ (never being/local/) and the three.js and onnxruntime-web builds the page imports; anything else is 404.
+// Serves only being/ (never being/local/), lab/prototypes/, and the three.js (build, examples/jsm) and onnxruntime-web builds the
+// pages import; anything else is 404.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,7 +12,7 @@ const ROOT = path.resolve(__dirname, '..');
 const PORT = parseInt(process.env.PORT || '4242', 10);
 const HOST = process.env.HOST || '127.0.0.1';
 // what may be served: prefixes of the path relative to the root ('/' separated); DENY wins over ALLOW
-const ALLOW = ['being/', 'node_modules/three/build/', 'node_modules/onnxruntime-web/dist/'];
+const ALLOW = ['being/', 'lab/prototypes/', 'node_modules/three/build/', 'node_modules/three/examples/jsm/', 'node_modules/onnxruntime-web/dist/'];
 const DENY = ['being/local/'];
 
 // the absolute file for a URL path under root, or null when it is refused (bad encoding, NUL, outside root, not allowed)

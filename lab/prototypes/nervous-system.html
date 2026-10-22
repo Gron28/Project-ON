@@ -1,0 +1,307 @@
+<!-- open: node tools/serve.mjs, then http://127.0.0.1:4242/lab/prototypes/nervous-system.html (ES modules do not load over file://) -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self'">
+<title>Nervous System Lab</title>
+<!-- lab: ON's nervous system in 3D, run from its real modules (being/ear, tissue, kuramoto via mind, mind, timing, physics, pressure,
+     restraint, plus the page's analyzer), wired as the being page wires them. Stimuli, lesions and parameters on the left, traces on
+     the right, and a table of which states actually reach the visible body (read live from being/index.html). -->
+<script type="importmap">{ "imports": { "three": "../../node_modules/three/build/three.module.js", "three/addons/": "../../node_modules/three/examples/jsm/" } }</script>
+<style>
+  :root { --bg: #07090c; --panel: #0d1116; --line: #1d242d; --ink: #e8e6e0; --ink2: #a3a9b2; --mute: #6c737d; --acc: #3987e5; --warn: #e66767; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 12px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
+  #app { display: grid; grid-template-columns: 268px 1fr 340px; height: 100%; }
+  aside { background: var(--panel); overflow-y: auto; padding: 10px 12px 16px; border-right: 1px solid var(--line); }
+  aside.right { border-right: 0; border-left: 1px solid var(--line); }
+  h1 { font-size: 13px; margin: 2px 0 2px; font-weight: 600; } h2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--mute); margin: 14px 0 6px; font-weight: 600; }
+  p.k { color: var(--mute); margin: 0 0 6px; }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  button { background: #161c24; color: var(--ink); border: 1px solid #252e39; border-radius: 5px; padding: 5px 6px; font: inherit; cursor: pointer; text-align: left; }
+  button:hover { border-color: #3a4757; } button.on { border-color: var(--acc); background: #12233a; } button.one { border-style: dashed; }
+  label.row { display: grid; grid-template-columns: 92px 1fr 44px; align-items: center; gap: 6px; margin: 3px 0; color: var(--ink2); }
+  label.row output { color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--acc); }
+  label.cut { display: flex; gap: 6px; align-items: center; color: var(--ink2); margin: 2px 0; cursor: pointer; }
+  label.cut input { accent-color: var(--warn); } label.cut:has(input:checked) { color: var(--warn); }
+  #view { position: relative; overflow: hidden; }
+  #view canvas { display: block; }
+  .labels { position: absolute; inset: 0; z-index: 1; }
+  .labels .grp { color: #c9ced6; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; opacity: .75; pointer-events: none; white-space: nowrap; }
+  .labels .nuc, .labels .sub { color: var(--ink2); font-size: 10px; pointer-events: none; white-space: nowrap; opacity: .8; }
+  .labels .feel { color: #fff; font-size: 17px; font-weight: 300; letter-spacing: .04em; pointer-events: none; }
+  #bar { position: absolute; z-index: 3; top: 8px; left: 10px; right: 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; pointer-events: none; }
+  #bar > * { pointer-events: auto; }
+  #bar select, #bar input[type=number] { background: #161c24; color: var(--ink); border: 1px solid #252e39; border-radius: 5px; padding: 4px; font: inherit; }
+  #bar input[type=number] { width: 92px; }
+  #clock { color: var(--ink2); font-variant-numeric: tabular-nums; margin-left: 4px; }
+  #legend { position: absolute; z-index: 2; left: 10px; bottom: 8px; color: var(--mute); font-size: 10.5px; max-width: 64%; pointer-events: none; }
+  #log { position: absolute; z-index: 2; right: 10px; bottom: 8px; text-align: right; color: var(--ink2); font-size: 11px; pointer-events: none; }
+  #log div { opacity: .9; } #log div.old { opacity: .45; }
+  #tip { position: fixed; z-index: 9; background: #0b0e12f0; border: 1px solid #2a3440; border-radius: 6px; padding: 6px 8px; white-space: pre; font-size: 11px; color: var(--ink); pointer-events: none; max-width: 420px; }
+  .trace { margin: 0 0 8px; } .trace canvas { width: 100%; height: 64px; display: block; background: #0a0d11; border-radius: 4px; }
+  .thead { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-bottom: 3px; color: var(--ink2); font-size: 10.5px; }
+  .thead b { color: var(--ink); font-weight: 600; margin-right: 2px; }
+  .key i { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 4px; border-radius: 1px; }
+  #reach { position: absolute; inset: 44px 10px 10px; background: #0b0e12f5; border: 1px solid var(--line); border-radius: 8px; overflow: auto; padding: 12px 14px; display: none; z-index: 5; }
+  #reach.open { display: block; }
+  #reach table { border-collapse: collapse; width: 100%; } #reach td, #reach th { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid #161c24; vertical-align: top; }
+  #reach th { color: var(--mute); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
+  .v { white-space: nowrap; font-weight: 600; } .v.shown { color: #7bd88f; } .v.barely { color: #e0b44c; } .v.not { color: #e66767; }
+  #reach details summary { cursor: pointer; color: var(--ink2); } #reach code { color: var(--ink2); font-size: 10.5px; display: block; white-space: pre-wrap; word-break: break-all; }
+  #reach .sum { color: var(--ink2); margin: 0 0 10px; }
+  @media (max-width: 1000px) { html, body { overflow: auto; } #app { grid-template-columns: 1fr; grid-template-rows: auto 70vh auto; height: auto; } #view { order: -1; } aside { border: 0; } }
+</style></head>
+<body>
+<div id="app">
+  <aside>
+    <h1>Nervous system lab</h1>
+    <p class="k">ON's real modules, wired as the being page wires them. Hover an organ for what it holds now.</p>
+    <h2>Source</h2>
+    <div class="btns">
+      <button id="srcSynth" class="on">Synthetic</button>
+      <button id="srcFile">Audio file…</button>
+      <button id="srcMic">Microphone</button>
+      <label class="cut" style="padding-left:4px"><input type="checkbox" id="audible" checked> audible</label>
+    </div>
+    <input type="file" id="file" accept="audio/*" hidden>
+    <h2>Stimuli</h2>
+    <div class="btns" id="modes">
+      <button data-mode="click">Click track</button>
+      <button data-mode="groove">Groove</button>
+      <button data-mode="tone">Sustained tone</button>
+      <button data-mode="rough">40 Hz rough noise</button>
+      <button data-mode="build">Build-up and drop</button>
+      <button data-mode="poly">Polyrhythm 3:2</button>
+      <button data-mode="silence" class="on">Silence</button>
+    </div>
+    <div class="btns" style="margin-top:4px">
+      <button class="one" id="burst">Startle burst</button>
+      <button class="one" id="dropBeat">Drop the next kick</button>
+      <button class="one" id="jump">Tempo jump</button>
+      <button class="one" id="poke">Poke the body</button>
+    </div>
+    <label class="row">tempo <input type="range" id="bpm" min="60" max="180" step="1" value="120"><output></output></label>
+    <label class="row">syncopation <input type="range" id="sync" min="0" max="1" step=".05" value=".25"><output></output></label>
+    <label class="row">tone Hz <input type="range" id="freq" min="0" max="1" step=".001" value=".55"><output></output></label>
+    <label class="row">level <input type="range" id="level" min="0" max="1" step=".01" value=".8"><output></output></label>
+    <h2>Lesions (cut a wire)</h2>
+    <div id="lesions"></div>
+    <h2>Parameters</h2>
+    <p class="k">Only what the modules accept. Traits act live; ear, tissue, body and pressure options re-create that module.</p>
+    <div id="params"></div>
+  </aside>
+  <main id="view">
+    <div id="bar">
+      <button id="pause">Pause</button><button id="step">Step</button>
+      <select id="speed"><option value=".25">0.25x</option><option value=".5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>
+      <button id="reset">Reset, new seed</button><input type="number" id="seed" title="seed" min="1">
+      <button id="reachBtn">What reaches the body</button>
+      <span id="clock"></span>
+    </div>
+    <div id="legend">Size and glow: activity now · travelling dots: signal along a wire (speed and brightness follow it) · red wire: cut · white ring at the startle nucleus: readiness to flinch (habituation) · timing grid: bars p(hit), white ring predicted, green dot heard and expected, pink dot heard as a surprise · drag to orbit, scroll to zoom, click the body to poke it</div>
+    <div id="log"></div>
+    <div id="reach"></div>
+  </main>
+  <aside class="right">
+    <h2 style="margin-top:2px">Last 20 s</h2>
+    <div id="traces"></div>
+  </aside>
+</div>
+<div id="tip" hidden></div>
+<script type="module">
+import { createSim, LESIONS } from './nervous-system/sim.mjs';
+import { createStimuli } from './nervous-system/stimuli.mjs';
+import { createScene } from './nervous-system/scene.mjs';
+import { createTraces } from './nervous-system/traces.mjs';
+import { readReach } from './nervous-system/reach.mjs';
+
+const $ = (id) => document.getElementById(id);
+const errors = []; addEventListener('error', (e) => errors.push(String(e.message))); addEventListener('unhandledrejection', (e) => errors.push(String(e.reason)));
+const SR = 48000;
+let seed = (Math.random() * 1e6 | 0) + 1;
+const sim = createSim({ seed }), stim = createStimuli();
+$('seed').value = seed;
+
+// ---- audio out / mic / file -----------------------------------------------------------------------------------------------
+let ctx = null, io = null, source = 'synth', fileBuf = null, filePos = 0;
+const micQ = [];
+let micN = 0;
+async function ensureAudio() {
+  if (ctx) { if (ctx.state === 'suspended') await ctx.resume(); return; }
+  ctx = new AudioContext({ sampleRate: SR });
+  await ctx.audioWorklet.addModule('nervous-system/io-worklet.js');
+  io = new AudioWorkletNode(ctx, 'ns-io', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+  io.port.onmessage = (e) => { micQ.push(e.data); micN += e.data.length; while (micN > SR) micN -= micQ.shift().length; };
+  io.connect(ctx.destination);
+}
+let micStream = null, micNode = null;
+async function useMic() {
+  await ensureAudio();
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  micNode = ctx.createMediaStreamSource(micStream); micNode.connect(io); io.port.postMessage({ type: 'capture', on: true });
+}
+function stopMic() { if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micNode.disconnect(); micStream = null; io.port.postMessage({ type: 'capture', on: false }); micQ.length = 0; micN = 0; } }
+function setSource(s) {
+  source = s; for (const [id, k] of [['srcSynth', 'synth'], ['srcFile', 'file'], ['srcMic', 'mic']]) $(id).classList.toggle('on', s === k);
+  if (s !== 'mic') stopMic();
+  if (io) io.port.postMessage({ type: 'flush' });
+}
+$('srcSynth').onclick = async () => { await ensureAudio(); setSource('synth'); };
+$('srcFile').onclick = async () => { await ensureAudio(); $('file').click(); };
+$('file').onchange = async () => {
+  const f = $('file').files[0]; if (!f) return;
+  const ab = await ctx.decodeAudioData(await f.arrayBuffer()), n = ab.length, m = new Float32Array(n);
+  for (let c = 0; c < ab.numberOfChannels; c++) { const d = ab.getChannelData(c); for (let i = 0; i < n; i++) m[i] += d[i] / ab.numberOfChannels; }
+  fileBuf = m; filePos = 0; setSource('file'); $('srcFile').textContent = f.name.slice(0, 22);
+};
+$('srcMic').onclick = async () => { try { await useMic(); setSource('mic'); } catch (e) { errors.push('microphone: ' + e.message); setSource('synth'); } };
+
+// ---- stimuli ---------------------------------------------------------------------------------------------------------------
+const modeBtns = [...document.querySelectorAll('#modes button')];
+function play(mode) { stim.setMode(mode); modeBtns.forEach((b) => b.classList.toggle('on', b.dataset.mode === mode)); if (source !== 'synth') setSource('synth'); }
+modeBtns.forEach((b) => (b.onclick = () => { ensureAudio(); play(b.dataset.mode); }));
+$('burst').onclick = () => { ensureAudio(); stim.burst(); };
+$('dropBeat').onclick = () => stim.dropBeat();
+$('jump').onclick = () => { stim.tempoJump(); $('bpm').value = stim.o.bpm; showVal($('bpm')); };
+$('poke').onclick = () => sim.poke();
+const freqOf = (u) => Math.round(55 * 2 ** (u * 6.2));
+const showVal = (el) => { const o = el.parentElement.querySelector('output'); if (o) o.textContent = el.id === 'freq' ? freqOf(+el.value) : el.value; };
+for (const id of ['bpm', 'sync', 'freq', 'level']) {
+  const el = $(id); showVal(el);
+  el.oninput = () => { showVal(el); if (id === 'bpm') stim.o.bpm = +el.value; else if (id === 'sync') stim.o.sync = +el.value; else if (id === 'freq') stim.o.freq = freqOf(+el.value); else stim.o.level = +el.value; };
+  el.oninput();
+}
+
+// ---- lesions and parameters --------------------------------------------------------------------------------------------------
+for (const [k, txt] of Object.entries(LESIONS)) {
+  const l = document.createElement('label'); l.className = 'cut'; l.innerHTML = `<input type="checkbox"> ${txt}`;
+  l.querySelector('input').onchange = (e) => { sim.cut[k] = e.target.checked; };
+  $('lesions').appendChild(l);
+}
+const T = () => sim.mind.traits;
+const PARAMS = [   // [label, min, max, step, get, set, apply on change only]
+  ['rhythm dial', 0, 1, 0.05, () => sim.P.rhythm, (v) => { sim.P.rhythm = v; }],
+  ['own tempo bpm', 72, 168, 1, () => T().f0 * 60, (v) => { T().f0 = v / 60; }],
+  ['looseness', 0.35, 1.6, 0.05, () => T().looseness, (v) => { T().looseness = v; }],
+  ['dopamine gain', 0.4, 1.5, 0.05, () => T().gDA, (v) => { T().gDA = v; }],
+  ['likes sync.', 0.1, 0.65, 0.01, () => T().sStar, (v) => { T().sStar = v; }],
+  ['ear tau mu s', 0.5, 10, 0.1, () => sim.P.ear.tauMu, (v) => { sim.P.ear.tauMu = v; sim.makeEar(); }, true],
+  ['ear gain', 0.25, 4, 0.05, () => sim.P.ear.gain, (v) => { sim.P.ear.gain = v; sim.makeEar(); }, true],
+  ['tissue set point ‰', 1, 10, 0.1, () => sim.P.tissue.target * 1000, (v) => { sim.P.tissue.target = v / 1000; sim.makeTissue(); }, true],
+  ['tissue wander', 0, 1.5, 0.05, () => sim.P.tissue.wander, (v) => { sim.P.tissue.wander = v; sim.makeTissue(); }, true],
+  ['tissue plastic', 0, 0.2, 0.005, () => sim.P.tissue.plastic, (v) => { sim.P.tissue.plastic = v; sim.makeTissue(); }, true],
+  ['body stiffness', 8, 60, 1, () => sim.P.physics.kBody, (v) => { sim.P.physics.kBody = v; sim.makePhysics(); }, true],
+  ['slosh damping', 0.5, 8, 0.1, () => sim.P.physics.cSlosh, (v) => { sim.P.physics.cSlosh = v; sim.makePhysics(); }, true],
+  ['pressure rate', 0.005, 0.15, 0.005, () => sim.P.pressure.rate, (v) => { sim.P.pressure.rate = v; sim.makePressure(); }, true],
+];
+const paramEls = PARAMS.map(([name, mn, mx, st, get, set, onChange]) => {
+  const l = document.createElement('label'); l.className = 'row';
+  l.innerHTML = `${name} <input type="range" min="${mn}" max="${mx}" step="${st}"><output></output>`;
+  const el = l.querySelector('input'), out = l.querySelector('output'), fmt = (v) => (st >= 1 ? v.toFixed(0) : st >= 0.05 ? v.toFixed(2) : v.toFixed(3));
+  el[onChange ? 'onchange' : 'oninput'] = () => set(+el.value);
+  el.addEventListener('input', () => { out.textContent = fmt(+el.value); });
+  $('params').appendChild(l);
+  return { el, out, get, fmt };
+});
+const syncParams = () => paramEls.forEach((p) => { if (document.activeElement !== p.el) { p.el.value = p.get(); p.out.textContent = p.fmt(p.get()); } });
+syncParams(); setInterval(syncParams, 1000);   // traits drift (enculturation)
+
+// ---- run controls --------------------------------------------------------------------------------------------------------------
+let paused = false, stepReq = false, speed = 1;
+$('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? 'Play' : 'Pause'; if (io) io.port.postMessage({ type: 'flush' }); };
+$('step').onclick = () => { paused = true; $('pause').textContent = 'Play'; stepReq = true; };
+$('speed').onchange = () => { speed = +$('speed').value; };
+$('reset').onclick = () => { seed = (Math.random() * 1e6 | 0) + 1; $('seed').value = seed; doReset(); };
+$('seed').onchange = () => { seed = Math.max(1, +$('seed').value | 0); doReset(); };
+function doReset() { sim.reset(seed); traces.clear(); seenEv = 0; syncParams(); }
+
+// ---- view, traces, reach -----------------------------------------------------------------------------------------------------
+const view = createScene($('view'), sim, $('tip'));
+const C = { a: '#3987e5', b: '#d95926', c: '#199e70', d: '#c98500' };
+const m = () => sim.mind;
+const last = (a) => (a.length ? a[a.length - 1] : NaN);
+const traces = createTraces($('traces'), [
+  { title: 'Feeling', min: 0, max: 1, grid: [0.5], ticks: ['startle', 'chills'], series: [
+    { name: 'arousal', color: C.b, get: () => m().arousal }, { name: 'lock', color: C.a, get: () => m().lock }, { name: 'groove', color: C.c, get: () => m().groove }] },
+  { title: 'Valence', min: -1, max: 1, grid: [0], series: [
+    { name: 'valence', color: C.a, get: () => m().valence }, { name: 'mood x10', color: C.d, get: () => m().mood * 10 }] },
+  { title: 'Dopamine', min: -1.5, max: 1.5, grid: [0], ticks: ['chills', 'disappointed'], series: [
+    { name: 'phasic', color: C.d, get: () => m().daPhasic }, { name: 'anticipatory', color: C.b, get: () => m().daAnticipation }, { name: 'tonic', color: C.c, get: () => m().daTonic }] },
+  { title: 'Surprise (bits)', min: 0, max: 3, grid: [1, 2], series: [
+    { name: 'surprise F', color: C.b, get: () => m().surprise }, { name: 'uncertainty', color: C.a, get: () => m().entropy }] },
+  { title: 'Tissue activity ‰', min: 0, max: 20, grid: [3.5, 10], ticks: ['startle'], series: [
+    { name: 'activity', color: C.c, get: () => sim.tissueStats.act * 1000 }, { name: 'set point', color: '#6c737d', get: () => sim.P.tissue.target * 1000 }] },
+  { title: 'Tissue criticality', min: 0, max: 2, grid: [1], series: [
+    { name: 'branching', color: C.a, get: () => sim.tissueStats.branching }, { name: 'coupling σ', color: C.b, get: () => sim.tissueStats.sigma }] },
+  { title: 'Tempo (bpm)', min: 40, max: 200, grid: [60, 120, 180], series: [
+    { name: 'felt', color: C.b, get: () => m().pulseHz * 60 }, { name: 'stimulus', color: '#c3c2b7', get: () => (source === 'synth' && stim.bpm ? stim.bpm : NaN) },
+    { name: 'tracker', color: C.a, get: () => (sim.an.state.beat.confidence > 0.15 ? sim.an.state.beat.bpm : NaN) }, { name: 'own', color: C.c, get: () => m().traits.f0 * 60 }] },
+  { title: 'Timing (ms)', min: -150, max: 150, grid: [0], series: [
+    { name: 'kick heard - predicted', color: C.b, get: () => last(sim.asyn) }, { name: 'learned error', color: C.a, get: () => sim.timing.errorMs }] },
+  { title: 'Body', min: 0, max: 1, grid: [0.5], ticks: ['burst into beads'], series: [
+    { name: 'strain', color: C.c, get: () => sim.phys.strain }, { name: 'pressure', color: C.b, get: () => sim.pressure.pressure }, { name: 'restraint M', color: C.a, get: () => sim.S.M || 0 }] },
+]);
+const TICK = { startle: '#ffffff', chills: '#c98500', disappointed: '#e66767', 'burst into beads': '#9085e9', 'drop (analyzer)': '#199e70' };
+let reachOpen = false, reachData = null;
+$('reachBtn').onclick = async () => {
+  reachOpen = !reachOpen; $('reach').classList.toggle('open', reachOpen); $('reachBtn').classList.toggle('on', reachOpen);
+  if (reachOpen) { $('reach').textContent = 'reading being/index.html…'; try { reachData = await readReach(); renderReach(); } catch (e) { $('reach').textContent = 'could not read being/index.html: ' + e.message; } }
+};
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+function renderReach() {
+  const cnt = { shown: 0, 'barely shown': 0, 'not shown': 0 }; reachData.forEach((r) => cnt[r.verdict]++);
+  const cls = { shown: 'shown', 'barely shown': 'barely', 'not shown': 'not' }, icon = { shown: '●', 'barely shown': '◐', 'not shown': '○' };
+  const rows = reachData.map((r) => {
+    const ev = (lst, what) => lst.length ? `<div>${what}:</div>` + lst.slice(0, 8).map((x) => `<code>${x.line}${x.u.length ? ' [' + x.u.join(', ') + ']' : ''}: ${esc(x.snip)}</code>`).join('') : '';
+    return `<tr><td>${r.organ}</td><td>${r.name}</td><td class="v ${cls[r.verdict]}">${icon[r.verdict]} ${r.verdict}</td><td>${r.note}</td>
+      <td><details><summary>${r.body.length} body, ${r.memory.length} memory, ${r.readout.length} readout${r.inner.length ? ', ' + r.inner.length + ' to the mind' : ''}</summary>${ev(r.body, 'drives the body')}${ev(r.memory, 'memory / voice')}${ev(r.readout, 'readout only')}${ev(r.inner, 'back into the mind')}</details></td></tr>`;
+  }).join('');
+  $('reach').innerHTML = `<h1>What reaches the body</h1><p class="sum">Each state of the nervous system, and the lines of being/index.html (read now) that use it. ${cnt.shown} shown, ${cnt['barely shown']} barely shown, ${cnt['not shown']} not shown. Lines inside the HUD, dashboard snapshot and lab hooks count as readout only; where a line count misleads, the verdict is corrected by reading the lines (see reach.mjs).</p>
+    <table><tr><th>organ</th><th>state</th><th>verdict</th><th>how it lands</th><th>evidence</th></tr>${rows}</table>`;
+}
+
+// ---- the loop --------------------------------------------------------------------------------------------------------------------
+let lastT = performance.now(), zacc = 0, seenEv = 0;
+const logEl = $('log'), logLines = [];
+function take(n) {
+  const x = new Float32Array(n);
+  if (source === 'synth') stim.fill(x);
+  else if (source === 'file' && fileBuf) for (let i = 0; i < n; i++) { x[i] = fileBuf[filePos++]; if (filePos >= fileBuf.length) filePos = 0; }
+  return x;
+}
+function takeMic() {
+  let n = Math.min(micN, SR / 10), x = new Float32Array(n), o = 0;
+  while (o < n) { const c = micQ[0], k = Math.min(c.length, n - o); x.set(c.subarray(0, k), o); o += k; if (k === c.length) micQ.shift(); else micQ[0] = c.subarray(k); }
+  micN -= n; return x;
+}
+function advance(dtSim) {
+  let x;
+  if (source === 'mic') { x = takeMic(); dtSim = x.length / SR; }
+  else { zacc += dtSim * SR; const n = zacc | 0; zacc -= n; x = take(n); }
+  // chunks of at most 50 ms, so the mind steps as often as it does in the page at a slow frame rate
+  for (let o = 0; o < x.length; o += 2400) { const c = x.subarray(o, Math.min(x.length, o + 2400)); const out = c.slice(); sim.hear(c); sim.think(c.length / SR); if (playOut) playOut(out); }
+}
+let playOut = null;
+function frame(now) {
+  const dtw = Math.min(0.1, Math.max(0, (now - lastT) / 1000)); lastT = now;
+  try {
+    const audible = $('audible').checked && io && speed === 1 && !paused && source !== 'mic';
+    playOut = audible ? (c) => io.port.postMessage({ type: 'play', data: c }, [c.buffer]) : null;
+    if (!paused) advance(dtw * speed); else if (stepReq) { stepReq = false; advance(1 / 30); }
+    for (const e of sim.events) if (e.id >= seenEv) { logLines.unshift(`${e.type}${e.amount !== 1 && e.amount !== undefined ? ' ' + e.amount.toFixed(2) : ''} · ${e.t.toFixed(1)} s`); traces.tick(e.t, e.type, TICK[e.type] || '#6c737d'); }
+    seenEv = sim.evN;
+    logLines.length = Math.min(logLines.length, 6);
+    logEl.innerHTML = logLines.map((l, i) => `<div class="${i > 1 ? 'old' : ''}">${l}</div>`).join('');
+    traces.sample(sim.time); traces.draw(sim.time);
+    view.frame(dtw, !paused);
+    $('clock').textContent = `${sim.time.toFixed(1)} s · seed ${sim.P.seed} · ${source === 'synth' ? stim.mode : source}`;
+  } catch (e) { errors.push(String(e && e.stack || e)); console.error(e); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__ns = { sim, stim, play, errors, burst: () => stim.burst(), dropBeat: () => stim.dropBeat(), tempoJump: () => stim.tempoJump(),
+  pause: (p = true) => { paused = p; }, speed: (s) => { speed = s; }, reach: () => $('reachBtn').click(), cut: (k, v = true) => { sim.cut[k] = v; } };
+</script>
+</body></html>
