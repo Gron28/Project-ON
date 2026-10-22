@@ -29,6 +29,7 @@ export function createScene(host, sim, tip) {
   const hover = [];                                              // { obj, info(instanceId) }
   const label = (text, pos, cls = 'grp') => { const d = document.createElement('div'); d.className = cls; d.textContent = text; const o = new CSS2DObject(d); o.position.copy(pos); scene.add(o); return d; };
   const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+  const M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), SC = new THREE.Vector3(), POS = new THREE.Vector3(), C = new THREE.Color();
 
   // ---- a nucleus: a core and an additive halo -------------------------------------------------------------------------
   const SPH = new THREE.SphereGeometry(1, 24, 16), SPH_LO = new THREE.SphereGeometry(1, 12, 8);
@@ -65,17 +66,51 @@ export function createScene(host, sim, tip) {
   const nAn = nucleus(P_AN, 0x8a93a6, 'analyzer (being/analysis.mjs, a page organ, not the being\'s own)', () => { const b = sim.an.state.beat; return `beat tracker ${b.bpm.toFixed(0)} bpm, confidence ${b.confidence.toFixed(2)}\nbuild-up tension ${sim.an.state.structure.tension.toFixed(2)}\nfeeds drum events to timing, beat and tension to the mind`; }, 0.2);
   label('sound in', V3(-8.6, 0.85, 0)); label('analyzer (page)', V3(-7.2, -3.55, 0.4));
 
-  // ---- ear: 28 Hopf units on a spiral (the base, high frequencies, outside; the apex, low, inside) -----------------------
+  // ---- ear: a cochlea. A coiled duct (2.1 turns, apex and low notes inside, base and high notes outside) holding the
+  // basilar membrane as a ribbon that bulges where the sound lands, and the 28 Hopf units standing on it ------------------
   const EAR_C = V3(-6.4, 0.6, 0);
-  const earDots = new THREE.InstancedMesh(SPH, new THREE.MeshBasicMaterial(), NE), earHum = new THREE.InstancedMesh(SPH_LO, new THREE.MeshBasicMaterial({ ...add }), NE);
+  const coil = (u) => { const ang = -u * 2.1 * TAU + 1.2, r = 0.3 + 1.25 * u; return [ang, r, (1 - u) * 0.9 - 0.45]; };   // u: 0 apex .. 1 base
+  const coilAt = (u, out = V3(0, 0, 0)) => { const [ang, r, z] = coil(u); return out.set(EAR_C.x + r * Math.cos(ang), EAR_C.y + r * Math.sin(ang), EAR_C.z + z); };
+  const earU = (k) => k / (NE - 1);
   const earPos = [], earHue = [];
-  for (let k = 0; k < NE; k++) {
-    const u = k / (NE - 1), ang = -u * 2.1 * TAU + 1.2, r = 0.3 + 1.25 * u;
-    earPos.push(V3(EAR_C.x + r * Math.cos(ang), EAR_C.y + r * Math.sin(ang), EAR_C.z + (1 - u) * 0.9 - 0.45));
-    earHue.push(new THREE.Color().setHSL(0.02 + 0.72 * u, 0.85, 0.55));
+  for (let k = 0; k < NE; k++) { earPos.push(coilAt(earU(k))); earHue.push(new THREE.Color().setHSL(0.02 + 0.72 * earU(k), 0.85, 0.55)); }
+  // the duct: a glassy tube that widens from apex to base
+  {
+    const curve = new THREE.CatmullRomCurve3(Array.from({ length: 160 }, (_, i) => coilAt(i / 159)));
+    const SEG = 220, RAD = 10, geo = new THREE.TubeGeometry(curve, SEG, 1, RAD), pos = geo.attributes.position, c = V3(0, 0, 0), v = V3(0, 0, 0);
+    for (let i = 0; i <= SEG; i++) {
+      curve.getPointAt(i / SEG, c); const w = 0.07 + 0.11 * (i / SEG);
+      for (let j = 0; j <= RAD; j++) { const n = i * (RAD + 1) + j; v.fromBufferAttribute(pos, n).sub(c).multiplyScalar(w).add(c); pos.setXYZ(n, v.x, v.y, v.z); }
+    }
+    geo.computeVertexNormals();
+    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x2a3a4c, opacity: 0.22, ...add, side: THREE.DoubleSide })));
   }
-  scene.add(earDots, earHum); label('ear: 28 Hopf units', V3(-6.4, 2.3, 0));
-  hover.push({ obj: earDots, info: (i) => { const f = sim.earFrame; return `ear unit ${i}: ${EAR_CF[i].toFixed(0)} Hz\namplitude ${(f ? f.amp[i] : 0).toFixed(4)} (its own hum settles at ${DELTA})\nmu ${(f ? f.mu[i] : 0).toFixed(4)} (> 0: it hums by itself; < 0: tired)`; } });
+  // the basilar membrane: a ribbon along the duct, its height the units' amplitude (interpolated between units), with a
+  // ripple running from the base inward (the real wave runs at the unit's own frequency, far too fast to see)
+  const NR = 240, ribPos = new Float32Array(NR * 2 * 3), ribCol = new Float32Array(NR * 2 * 3), ribBase = [], ribSide = [], ribUp = [];
+  for (let i = 0; i < NR; i++) {
+    const u = i / (NR - 1), p = coilAt(u), [ang] = coil(u), w = 0.05 + 0.08 * u;
+    ribBase.push(p); ribSide.push(V3(Math.cos(ang), Math.sin(ang), 0).multiplyScalar(w)); ribUp.push(V3(0, 0, 1));
+  }
+  const ribIdx = []; for (let i = 0; i < NR - 1; i++) { const a = 2 * i; ribIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const ribGeo = new THREE.BufferGeometry(); ribGeo.setIndex(ribIdx);
+  ribGeo.setAttribute('position', new THREE.BufferAttribute(ribPos, 3).setUsage(THREE.DynamicDrawUsage));
+  ribGeo.setAttribute('color', new THREE.BufferAttribute(ribCol, 3).setUsage(THREE.DynamicDrawUsage));
+  const ribbon = new THREE.Mesh(ribGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, ...add }));
+  scene.add(ribbon);
+  const ribHue = Array.from({ length: NR }, (_, i) => new THREE.Color().setHSL(0.02 + 0.72 * (i / (NR - 1)), 0.85, 0.55));
+  // the units: a bead each, standing on the membrane; warm when it hums by itself (mu > 0), cold when tired
+  const earDots = new THREE.InstancedMesh(SPH, new THREE.MeshBasicMaterial(), NE), earHum = new THREE.InstancedMesh(SPH_LO, new THREE.MeshBasicMaterial({ ...add }), NE);
+  scene.add(earDots, earHum); label('ear: a cochlea of 28 Hopf units', V3(-6.4, 2.3, 0));
+  label('low notes', coilAt(0).add(V3(0, -0.28, 0.2)), 'sub'); label('high notes', coilAt(1).add(V3(0.2, -0.3, 0)), 'sub');
+  hover.push({ obj: earDots, info: (i) => { const f = sim.earFrame, mu = f ? f.mu[i] : 0; return `ear unit ${i}: ${EAR_CF[i].toFixed(0)} Hz\namplitude ${(f ? f.amp[i] : 0).toFixed(4)} (its own hum settles at ${DELTA})\nmu ${mu.toFixed(4)}: ${mu > 0 ? 'humming by itself (silence lets it drift up)' : 'held below its own hum (loud sound tires it)'}\nits fibre feeds rows of the tissue (high notes top)`; } });
+  hover.push({ obj: ribbon, info: () => `basilar membrane: each unit's amplitude, interpolated along the duct\nthe ripple only shows the direction of the wave (base to apex), not its speed` });
+  // its fibres: each unit projects onto its own rows of the tissue (tonotopy), lit by the drive it sends (worker.mjs formula)
+  const FS = 24, fibPos = new Float32Array(NE * FS * 2 * 3), fibCol = new Float32Array(NE * FS * 2 * 3), fibCurves = [];
+  const fibGeo = new THREE.BufferGeometry();
+  fibGeo.setAttribute('position', new THREE.BufferAttribute(fibPos, 3)); fibGeo.setAttribute('color', new THREE.BufferAttribute(fibCol, 3).setUsage(THREE.DynamicDrawUsage));
+  const fibres = new THREE.LineSegments(fibGeo, new THREE.LineBasicMaterial({ vertexColors: true, ...add }));
+  scene.add(fibres);
   const nRough = nucleus(V3(-4.2, -2.5, 0.9), 0xe66767, 'roughness / alarm (ear 30-150 Hz envelope)', () => `rough ${(sim.earFrame ? sim.earFrame.rough : 0).toFixed(3)} -> mind x2.5 clamped: ${c01((sim.earFrame ? sim.earFrame.rough : 0) * 2.5).toFixed(2)}`);
   const nStartle = nucleus(V3(-2.7, -2.7, 0.9), 0xffffff, 'startle nucleus (mind.mjs)', () => `startle ${sim.mind.startle.toFixed(2)}\nhabituation ${sim.mind.habituation.toFixed(2)} (1 = fresh, falls x0.7 per startle, recovers ~30 s)\nring: how ready it is to flinch`);
   const nSub = nucleus(V3(-1.2, -2.85, 0.9), 0x3987e5, 'body ear: sub-bass (ear.mjs sub)', () => `sub ${(sim.earFrame ? sim.earFrame.sub : 0).toFixed(3)} -> physics`);
@@ -83,22 +118,62 @@ export function createScene(host, sim, tip) {
   const habRing = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.02, 6, 64), new THREE.MeshBasicMaterial({ color: 0xffffff }));
   habRing.position.copy(nStartle.pos); scene.add(habRing);
 
-  // ---- tissue: the 128x64 sheet as a membrane wrapped round (it wraps in x); high frequencies at the top -----------------
-  const TIS_C = V3(-2.5, 0.6, -0.9);
+  // ---- tissue: the 128 x 64 sheet of excitable cells, one vertex each, tilted back like a cortex seen from above. A cell
+  // that fires rises and burns white, its wake cools to teal, and where activity keeps returning a violet memory stays.
+  // Rows are tonotopic: each ear unit feeds its own band (high notes at the top), so sound visibly enters from the left. ---
+  const TIS_C = V3(-2.4, 0.55, -0.6), SW = 3.6, SH = 1.9;
   const texData = new Uint8Array(TW * TH * 4), tisTex = new THREE.DataTexture(texData, TW, TH, THREE.RGBAFormat);
-  tisTex.wrapS = THREE.RepeatWrapping; tisTex.magFilter = tisTex.minFilter = THREE.LinearFilter; tisTex.needsUpdate = true;
+  tisTex.magFilter = tisTex.minFilter = THREE.LinearFilter; tisTex.needsUpdate = true;
   const tisMat = new THREE.ShaderMaterial({
-    uniforms: { uT: { value: tisTex } }, transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
-    vertexShader: 'varying vec2 vUv; varying float vF; void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.); vec3 n = normalize(normalMatrix * normal); vF = abs(n.z); gl_Position = projectionMatrix * mv; }',
-    fragmentShader: `uniform sampler2D uT; varying vec2 vUv; varying float vF;
-      void main(){ vec4 t = texture2D(uT, vec2(vUv.x, 1. - vUv.y)); float tr = max(0., t.r - .3) / .7;
-        vec3 c = vec3(.02, .035, .05) + tr * vec3(.05, .55, .65) + t.g * vec3(.9, 1., .95) * 1.8 + t.b * vec3(.35, .2, .6) * .2;
-        gl_FragColor = vec4(c * (.45 + .55 * vF), 1.); }`,
+    uniforms: { uT: { value: tisTex }, uW: { value: SW / 2 } }, transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: `uniform sampler2D uT; uniform float uW; varying vec4 vT; varying float vEdge;
+      void main(){ vT = texture2D(uT, vec2(uv.x, 1. - uv.y)); float tr = max(0., vT.r - .3) / .7;
+        vec3 p = position; float e = p.x / uW; p.z -= .3 * e * e;          // a shallow cup: the middle comes forward
+        p.z += .2 * vT.g + .06 * tr;                                       // firing cells rise, their wake settles
+        vEdge = min(min(uv.x, 1. - uv.x) * 40., min(uv.y, 1. - uv.y) * 20.);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.); gl_PointSize = 1.; }`,
+    fragmentShader: `varying vec4 vT; varying float vEdge;
+      void main(){ float tr = max(0., vT.r - .3) / .7;
+        vec3 c = vec3(.025, .04, .06) + vT.b * vec3(.4, .22, .7) * .35 + tr * vec3(.05, .55, .65) + vT.g * vec3(1., .95, .85) * 1.6;
+        gl_FragColor = vec4(c * min(1., .35 + vEdge), 1.); }`,
   });
-  const tisMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.45, 1.45, 2.1, 96, 1, true, -0.6 * Math.PI, 1.2 * Math.PI), tisMat);
-  tisMesh.position.copy(TIS_C); tisMesh.rotation.x = 0.3; scene.add(tisMesh);
-  label('nervous tissue 128 x 64', V3(-2.5, 2.05, -0.9));
-  hover.push({ obj: tisMesh, info: () => { const t = sim.tissueStats; return `tissue (Kinouchi sheet, rate homeostasis)\nactivity ${(t.act * 1000).toFixed(2)} per mille (set point ${(sim.P.tissue.target * 1000).toFixed(1)})\ncoupling sigma ${t.sigma.toFixed(3)}, branching ${t.branching.toFixed(2)} (1 = critical)\ncoherence ${(t.coherence || 0).toFixed(2)} -> mind\nbright: firing now; teal: recent trace; violet: slow memory`; } });
+  const tisMesh = new THREE.Mesh(new THREE.PlaneGeometry(SW, SH, TW - 1, TH - 1), tisMat);
+  tisMesh.position.copy(TIS_C); tisMesh.rotation.x = -0.42; scene.add(tisMesh); tisMesh.updateMatrixWorld();
+  const sheetAt = (x01, y01, out = V3(0, 0, 0)) => { const x = (x01 - 0.5) * SW, e = x / (SW / 2); return tisMesh.localToWorld(out.set(x, (0.5 - y01) * SH, -0.3 * e * e)); };   // y01: 0 top row
+  label('nervous tissue: 8192 excitable cells', sheetAt(0.5, 0).add(V3(0, 0.35, 0)));
+  label('high notes', sheetAt(1, 0.08).add(V3(0.45, 0, 0)), 'sub'); label('low notes', sheetAt(1, 0.92).add(V3(0.42, 0, 0)), 'sub');
+  hover.push({ obj: tisMesh, info: (_, hit) => {
+    const t = sim.tissueStats, uv = hit && hit.uv, x = uv ? Math.min(TW - 1, (uv.x * TW) | 0) : 0, y = uv ? Math.min(TH - 1, ((1 - uv.y) * TH) | 0) : 0, j = (y * TW + x) * 4;
+    const unit = Math.min(NE - 1, ((1 - (y + 0.5) / TH) * NE) | 0);
+    return `tissue (Kinouchi sheet, rate homeostasis)\ncell ${x}, ${y}: fed by ear unit ${unit} (${EAR_CF[unit].toFixed(0)} Hz)\n  firing ${(texData[j + 1] / 255).toFixed(2)}, wake ${Math.max(0, (texData[j] / 255 - 0.3) / 0.7).toFixed(2)}, memory ${(texData[j + 2] / 255).toFixed(2)}\nactivity ${(t.act * 1000).toFixed(2)} per mille (set point ${(sim.P.tissue.target * 1000).toFixed(1)})\ncoupling sigma ${t.sigma.toFixed(3)}, branching ${t.branching.toFixed(2)} (1 = critical)\ncoherence ${(t.coherence || 0).toFixed(2)} -> mind\nwhite: firing now; teal: its wake; violet: where activity keeps returning`;
+  } });
+  // where the fibres land: unit k's rows on the left edge of the sheet (tissue.mjs rowUnit)
+  for (let k = 0; k < NE; k++) {
+    let y0 = TH, y1 = -1; for (let y = 0; y < TH; y++) if (Math.min(NE - 1, ((1 - (y + 0.5) / TH) * NE) | 0) === k) { y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const end = sheetAt(0.004, y1 < 0 ? 1 - earU(k) : (y0 + y1 + 1) / 2 / TH), a = earPos[k];
+    const mid = a.clone().lerp(end, 0.5).add(V3(0, 0, 0.5 + 0.25 * Math.sin(k)));
+    fibCurves.push(new THREE.QuadraticBezierCurve3(a, mid, end));
+  }
+  for (let k = 0; k < NE; k++) for (let s = 0; s < FS; s++) {
+    const p = fibCurves[k].getPoint(s / FS), q = fibCurves[k].getPoint((s + 1) / FS), o = (k * FS + s) * 6;
+    fibPos.set([p.x, p.y, p.z, q.x, q.y, q.z], o);
+  }
+  fibGeo.attributes.position.needsUpdate = true;
+  // the edge of criticality: a dial under the sheet. Left: input dies out (deaf); middle: each spike causes one more
+  // (critical, the widest dynamic range); right: activity feeds itself (runaway). The needle is the measured branching.
+  const GA_C = V3(-2.4, -1.35, 0.35), GA_R = 0.55, NG = 33;
+  const gArc = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial(), NG); scene.add(gArc);
+  const brToAng = (b) => Math.PI * (1 - c01((b - 0.5) / 1.0));   // branching 0.5 .. 1.5 over the half circle
+  for (let i = 0; i < NG; i++) {
+    const f = i / (NG - 1), a = Math.PI * (1 - f), col = new THREE.Color().setHSL(f < 0.5 ? 0.6 - 0.28 * f * 2 : 0.32 - 0.32 * (f - 0.5) * 2, 0.7, 0.45);
+    M4.compose(V3(GA_C.x + GA_R * Math.cos(a), GA_C.y + GA_R * Math.sin(a), GA_C.z), Q.setFromAxisAngle(V3(0, 0, 1), a), SC.set(0.03, 0.09, 0.03));
+    gArc.setMatrixAt(i, M4); gArc.setColorAt(i, col);
+  }
+  Q.identity();
+  const gNeedle = new THREE.Mesh(new THREE.BoxGeometry(0.025, GA_R * 0.9, 0.025), new THREE.MeshBasicMaterial({ color: 0xffffff })); scene.add(gNeedle);
+  const gSet = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.16, 0.018), new THREE.MeshBasicMaterial({ color: 0x9085e9 })); scene.add(gSet);
+  label('deaf', V3(GA_C.x - GA_R - 0.25, GA_C.y + 0.02, GA_C.z), 'sub'); label('critical', V3(GA_C.x, GA_C.y + GA_R + 0.18, GA_C.z), 'sub'); label('runaway', V3(GA_C.x + GA_R + 0.35, GA_C.y + 0.02, GA_C.z), 'sub');
+  hover.push({ obj: gArc, info: () => { const t = sim.tissueStats; return `edge of criticality (Kinouchi & Copelli 2006: widest dynamic range at 1)\nwhite needle: measured branching ${t.branching.toFixed(2)} (spikes caused per spike)\nviolet tick: coupling sigma ${t.sigma.toFixed(2)}, which homeostasis tunes to hold activity at its set point\nloud music drives the sheet, so homeostasis lowers sigma; silence lets it rise toward reverberation`; } });
 
   // ---- motor: 8 regions x 6 oscillators, the felt pulse (heart), the resonance bank ------------------------------------
   const MOT_C = V3(2.3, 0.4, 0);
@@ -174,7 +249,6 @@ export function createScene(host, sim, tip) {
   const L = sim.cut;
   axon(P_IN, earPos[NE - 1], V3(0, 0.6, 0.3), lvl, () => false);
   axon(P_IN, P_AN, V3(-0.4, -0.3, 0.3), lvl, () => false, 0xb0b8c8);
-  axon(EAR_C, TIS_C, V3(0, 0.7, 0.5), () => c01(sim.tissueStats.act * 120), () => L.earTissue);
   axon(EAR_C, nStartle.pos, V3(0, -0.4, 0.6), () => c01((ef() ? ef().onset : 0) * 2 + sim.mind.startle), () => L.onsets);
   axon(EAR_C, nRough.pos, V3(-0.3, -0.3, 0.4), () => c01((ef() ? ef().rough : 0) * 2.5), () => L.rough, 0xe66767);
   axon(EAR_C, nSub.pos, V3(0, -1.0, 0.9), () => c01((ef() ? ef().sub : 0) * 6), () => false, 0x3987e5);
@@ -198,26 +272,55 @@ export function createScene(host, sim, tip) {
   pulses.count = Math.min(256, axons.length * PPA);
 
   // ---- per frame ---------------------------------------------------------------------------------------------------------
-  const M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), SC = new THREE.Vector3(), POS = new THREE.Vector3(), C = new THREE.Color();
   const RED = new THREE.Color(0x5a2020), TUBE = new THREE.Color(0x24303c), WHITE = new THREE.Color(1, 1, 1), VIOLET = new THREE.Color(0x9085e9), HEART = new THREE.Color(0xe34948);
   const GREEN = new THREE.Color(0x7bf0a0), PINK = new THREE.Color(0xff5fa8);
   const facing = new THREE.Quaternion();
   const put = (mesh, i, p, s, q = Q) => { M4.compose(p, q, SC.setScalar(s)); mesh.setMatrixAt(i, M4); };
-  let wallT = 0;
+  const WARM = new THREE.Color(0xffb36b), COLD = new THREE.Color(0x6b8cff);
+  const earA = new Float32Array(NE), fibA = new Float32Array(NE), fibPh = Float32Array.from({ length: NE }, (_, k) => (k * 0.37) % 1);
+  let wallT = 0, ripT = 0, gBr = 1;
 
   function frame(dtWall, playing) {
     wallT += dtWall;
     const m = sim.mind, e = sim.earFrame;
-    // ear
+    // ear: unit amplitudes (log, 0 at its own hum level), eased so the membrane moves like tissue, not like a meter
     for (let k = 0; k < NE; k++) {
-      const a = e ? Math.log1p(e.amp[k] / DELTA) / 4 : 0, mu = e ? e.mu[k] : -0.05;
-      put(earDots, k, earPos[k], 0.06 + 0.13 * c01(a));
-      earDots.setColorAt(k, C.copy(earHue[k]).multiplyScalar(0.18 + 0.82 * c01(a)));
-      const hum = c01(mu / 0.04);   // above 0 it oscillates by itself: a shimmer that breathes at its own rate
-      put(earHum, k, earPos[k], (0.12 + 0.2 * hum) * (1 + 0.15 * Math.sin(wallT * (3 + k * 0.37))));
-      earHum.setColorAt(k, C.copy(earHue[k]).multiplyScalar(0.05 + 0.5 * hum + 0.25 * c01(a)));
+      const a = e ? c01(Math.log1p(e.amp[k] / DELTA) / 4) : 0;
+      earA[k] += (a - earA[k]) * (1 - Math.exp(-dtWall / (a > earA[k] ? 0.03 : 0.25)));
+    }
+    if (playing) ripT += dtWall;
+    for (let i = 0; i < NR; i++) {
+      const u = i / (NR - 1), f = u * (NE - 1), k0 = Math.min(NE - 2, f | 0), w = f - k0, a = earA[k0] * (1 - w) + earA[k0 + 1] * w;
+      const h = 0.32 * a * (0.75 + 0.25 * Math.sin(ripT * 9 + u * 26));   // the ripple runs from the base (u = 1) inward
+      const b = ribBase[i], sd = ribSide[i], o = i * 6;
+      ribPos[o] = b.x - sd.x; ribPos[o + 1] = b.y - sd.y; ribPos[o + 2] = b.z + h;
+      ribPos[o + 3] = b.x + sd.x; ribPos[o + 4] = b.y + sd.y; ribPos[o + 5] = b.z + h;
+      C.copy(ribHue[i]).multiplyScalar(0.06 + 0.94 * a);
+      ribCol[o] = ribCol[o + 3] = C.r; ribCol[o + 1] = ribCol[o + 4] = C.g; ribCol[o + 2] = ribCol[o + 5] = C.b;
+    }
+    ribGeo.attributes.position.needsUpdate = ribGeo.attributes.color.needsUpdate = true; ribGeo.computeBoundingSphere();
+    for (let k = 0; k < NE; k++) {
+      const a = earA[k], mu = e ? e.mu[k] : -0.05, hum = c01(mu / 0.04);   // above 0 it oscillates by itself
+      POS.copy(earPos[k]); POS.z += 0.32 * a * (0.75 + 0.25 * Math.sin(ripT * 9 + earU(k) * 26)) + 0.04;
+      put(earDots, k, POS, 0.045 + 0.08 * a);
+      earDots.setColorAt(k, C.copy(earHue[k]).lerp(mu > 0 ? WARM : COLD, 0.45 * c01(Math.abs(mu) / 0.04)).multiplyScalar(0.3 + 0.7 * a));
+      put(earHum, k, POS, (0.08 + 0.16 * hum) * (1 + 0.2 * Math.sin(wallT * (3 + k * 0.37))));
+      earHum.setColorAt(k, C.copy(WARM).multiplyScalar(0.35 * hum));
     }
     earDots.instanceMatrix.needsUpdate = earHum.instanceMatrix.needsUpdate = true; earDots.instanceColor.needsUpdate = earHum.instanceColor.needsUpdate = true;
+    // fibres: the drive each unit sends into the tissue (worker.mjs: 0.012 * max(0, log1p(env / DELTA) - 0.8)), a pulse running along
+    const cutET = sim.cut.earTissue;
+    for (let k = 0; k < NE; k++) {
+      const d = e ? c01((Math.log1p(e.amp[k] / DELTA) - 0.8) / 2.5) : 0;
+      fibA[k] += (d - fibA[k]) * (1 - Math.exp(-dtWall / 0.12));
+      if (playing) fibPh[k] = (fibPh[k] + dtWall * (0.4 + 1.6 * fibA[k])) % 1;
+      for (let s = 0; s < FS; s++) {
+        const dd = ((s / FS - fibPh[k] + 1.5) % 1) - 0.5, pulse = Math.exp(-dd * dd * 120), o = (k * FS + s) * 6;
+        if (cutET) C.copy(RED).multiplyScalar(0.6); else C.copy(earHue[k]).multiplyScalar(0.025 + fibA[k] * (0.25 + 0.75 * pulse));
+        fibCol[o] = fibCol[o + 3] = C.r; fibCol[o + 1] = fibCol[o + 4] = C.g; fibCol[o + 2] = fibCol[o + 5] = C.b;
+      }
+    }
+    fibGeo.attributes.color.needsUpdate = true;
     nIn.set(lvl(), lvl());
     nAn.set(sim.an.state.beat.confidence, sim.an.state.beat.confidence);
     // brainstem
@@ -228,6 +331,11 @@ export function createScene(host, sim, tip) {
     nSub.set(c01((e ? e.sub : 0) * 6), c01((e ? e.sub : 0) * 6));
     // tissue
     if (sim.tex) { texData.set(sim.tex); tisTex.needsUpdate = true; }
+    const ts = sim.tissueStats;
+    gBr += (ts.branching - gBr) * (1 - Math.exp(-dtWall / 0.3));
+    const na0 = brToAng(gBr), ns = brToAng(ts.sigma);
+    gNeedle.position.set(GA_C.x + 0.45 * GA_R * Math.cos(na0), GA_C.y + 0.45 * GA_R * Math.sin(na0), GA_C.z + 0.01); gNeedle.rotation.z = na0 - Math.PI / 2;
+    gSet.position.set(GA_C.x + (GA_R + 0.1) * Math.cos(ns), GA_C.y + (GA_R + 0.1) * Math.sin(ns), GA_C.z); gSet.rotation.z = ns - Math.PI / 2;
     // motor
     const R = m.regions, ph = m.pulsePhase;
     facing.copy(camera.quaternion);
@@ -315,13 +423,13 @@ export function createScene(host, sim, tip) {
     ptr.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ptr, camera);
     const hit = ray.intersectObjects(hover.map((h) => h.obj), false)[0];
-    hoverHit = hit ? { h: hover.find((x) => x.obj === hit.object), id: hit.instanceId, x: ev.clientX, y: ev.clientY } : null;
+    hoverHit = hit ? { h: hover.find((x) => x.obj === hit.object), id: hit.instanceId, hit, x: ev.clientX, y: ev.clientY } : null;
   });
   labels.domElement.addEventListener('pointerleave', () => { hoverHit = null; });
   labels.domElement.addEventListener('click', () => { if (hoverHit && hoverHit.h.obj === body) sim.poke(); });
   setInterval(() => {
     if (!hoverHit) { tip.hidden = true; return; }
-    tip.hidden = false; tip.textContent = hoverHit.h.info(hoverHit.id);
+    tip.hidden = false; tip.textContent = hoverHit.h.info(hoverHit.id, hoverHit.hit);
     tip.style.left = hoverHit.x + 14 + 'px'; tip.style.top = hoverHit.y + 12 + 'px';
   }, 100);
   return { frame, renderer };
