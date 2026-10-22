@@ -7,9 +7,10 @@
 // Rating (rateGenome, one development seed at a time, `--seeds` seeds per genome): the organism lives the train worlds
 // (worlds.mjs TRAIN, groove variant, `--dur` s each) once as experience, then hears each of them again as groove and as
 // the shuffled control, plasticity on throughout, motor spikes recorded (bench.mjs metrics). Per world
-//   attunement = max(0, beyondReflex) + 0.5 max(0, credit) + 0.25 vs exp(-|errMs| / 80)
-// (beyondReflex: vector strength above what a pure reflex would give; credit: groove minus shuffled; the last term pays
-// for being on the beat at all). Fitness = mean attunement x min(1, viability / 0.75). Balance and life are hard
+//   attunement = braceLock exp(-|braceErrMs| / 80) + max(0, protectCredit) + 0.5 max(0, credit) + 0.25 max(0, beyondReflex)
+// (brace: when the body's stiffness peaks relative to the beat and how consistently; protectCredit: protection at beat
+// impacts in the groove minus in the shuffled control; credit: motor vector strength groove minus shuffled;
+// beyondReflex: motor vector strength above what a pure reflex would give). Fitness = mean attunement x min(1, viability / 0.75). Balance and life are hard
 // constraints: a seed that dies, or whose interneurons average below 1 Hz or above 25 Hz, or exceed 40 Hz for more than
 // 2% of the time, sets the genome's fitness to 0.02 x viability.
 // Search: MAP-Elites (Mouret & Clune 2015) over two descriptors (default: an ear-spread gene if the genome has one, else
@@ -25,7 +26,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { randomGenome, mutate, crossover, lcg, mix, decode, toArray, GENES } from './genome.mjs';
+import { randomGenome, mutate, crossover, lcg, mix, decode, toArray, GENES, padGenome } from './genome.mjs';
 import { createOrganism } from './organism.mjs';
 import { live } from './environment.mjs';
 import { depth, louvain, graphOf } from './analysis.mjs';
@@ -44,8 +45,9 @@ export function descriptorAxis(name, bins = 8) {
   if (!R) throw new Error('unknown descriptor ' + name);
   return { name, ...R, bins };
 }
-/** default descriptors: an ear-spread gene when the genome has one, else sensor -> motor depth; and interneuron rate */
-export function defaultDescriptors() { const sp = GENES.find(([n]) => /spread/i.test(n)); return [sp ? 'gene:' + sp[0] : 'motorDepth', 'interHz']; }
+/** default descriptors: the hearing-field gene and the resonator count when the genome has them, else sensor -> motor
+ *  depth and interneuron rate */
+export function defaultDescriptors() { const has = (n) => GENES.some(([g]) => g === n); return has('earSpread') && has('nOsc') ? ['gene:earSpread', 'gene:nOsc'] : ['motorDepth', 'interHz']; }
 
 export function createArchive(axes) {
   const cells = new Map();
@@ -79,9 +81,13 @@ export function archiveFrom(json) { const A = createArchive(json.axes); for (con
 // ---- rating -----------------------------------------------------------------------------------------------------------------
 
 export const RATE = { dur: 12, seeds: 2, vGate: 0.75 };
+/** per world: a brace that peaks on the beat, consistently (brace lock x closeness of its peak to the beat), plus the
+ *  protection the groove's predictability buys over the shuffled control, plus motor timing beyond reflex and vs shuffled.
+ *  Without brace readouts (older organisms) only the motor terms count. */
 export function attunementOf(w) {
-  const pos = (x) => (Number.isFinite(x) ? Math.max(0, x) : 0);
-  return pos(w.beyondReflex) + 0.5 * pos(w.credit) + 0.25 * (Number.isFinite(w.vs) ? w.vs : 0) * (Number.isFinite(w.errMs) ? Math.exp(-Math.abs(w.errMs) / 80) : 0);
+  const pos = (x) => (Number.isFinite(x) ? Math.max(0, x) : 0), fin = (x) => (Number.isFinite(x) ? x : 0);
+  const brace = Number.isFinite(w.braceErrMs) ? fin(w.braceLock) * Math.exp(-Math.abs(w.braceErrMs) / 80) : 0;
+  return brace + pos(w.protectCredit) + 0.5 * pos(w.credit) + 0.25 * pos(w.beyondReflex);
 }
 
 /** one development seed: a life through the train worlds, then each world again as groove and shuffled */
@@ -99,7 +105,7 @@ export function rateSeed(genome, seed, { dur = RATE.dur, worlds = TRAIN, structu
   const ok = alive && interHz >= 1 && interHz <= 25 && run < 0.02;
   const m = (k) => { const v = rows.map((r) => r[k]).filter(Number.isFinite); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN; };
   const att = rows.reduce((a, r) => a + attunementOf(r), 0) / rows.length;
-  const out = { seed, ok, alive, viability, interHz, runaway: run, att, vs: m('vs'), credit: m('credit'), beyondReflex: m('beyondReflex'), errMs: m('errMs'), motorDepth: D.motorDepth, motorReached: D.motorReached, ms: performance.now() - t0, simS: n };
+  const out = { seed, ok, alive, viability, interHz, runaway: run, att, vs: m('vs'), credit: m('credit'), beyondReflex: m('beyondReflex'), errMs: m('errMs'), braceErrMs: m('braceErrMs'), braceLock: m('braceLock'), protect: m('protect'), protectCredit: m('protectCredit'), resonVs: m('resonVs'), motorDepth: D.motorDepth, motorReached: D.motorReached, ms: performance.now() - t0, simS: n };
   if (structure) out.modularity = louvain(graphOf(org)).Q;
   return out;
 }
@@ -108,7 +114,7 @@ export function rateGenome(genome, seeds, opt = {}) {
   const per = seeds.map((s) => rateSeed(genome, s, opt)), mean = (k) => per.reduce((a, p) => a + (Number.isFinite(p[k]) ? p[k] : 0), 0) / per.length;
   const ok = per.every((p) => p.ok), viability = mean('viability'), att = mean('att');
   const fitness = ok ? att * Math.min(1, viability / RATE.vGate) : 0.02 * viability;
-  const o = { fitness, ok, alive: per.every((p) => p.alive), viability, att, interHz: mean('interHz'), runaway: Math.max(...per.map((p) => p.runaway)), vs: mean('vs'), credit: mean('credit'), beyondReflex: mean('beyondReflex'), errMs: mean('errMs'), motorDepth: mean('motorDepth'), motorReached: mean('motorReached'), ms: per.reduce((a, p) => a + p.ms, 0), simS: per.reduce((a, p) => a + p.simS, 0), seeds };
+  const o = { fitness, ok, alive: per.every((p) => p.alive), viability, att, interHz: mean('interHz'), runaway: Math.max(...per.map((p) => p.runaway)), vs: mean('vs'), credit: mean('credit'), beyondReflex: mean('beyondReflex'), errMs: mean('errMs'), braceErrMs: mean('braceErrMs'), braceLock: mean('braceLock'), protect: mean('protect'), protectCredit: mean('protectCredit'), resonVs: mean('resonVs'), motorDepth: mean('motorDepth'), motorReached: mean('motorReached'), ms: per.reduce((a, p) => a + p.ms, 0), simS: per.reduce((a, p) => a + p.simS, 0), seeds };
   if (per[0].modularity !== undefined) o.modularity = mean('modularity');
   return o;
 }
@@ -148,7 +154,7 @@ if (isCli) {
     const seedsFor = (k) => Array.from({ length: NS }, (_, j) => (mix(BASE + k, j + 1) % 1000003) + 1);
     /** the k-th offspring: deterministic in k (resumable) */
     function offspring(k) {
-      if (k < BATCH || A.size === 0) return k === 0 && prevBest ? fitGenome(prevBest.genome) : randomGenome(1000 + k);
+      if (k < BATCH || A.size === 0) return k === 0 && prevBest ? padGenome(fitGenome(prevBest.genome)) : randomGenome(1000 + k);
       const r = lcg(mix(BASE, k)), a = A.sample(r);
       let g = r() < 0.3 && A.size > 1 ? crossover(a.genome, A.sample(r).genome, r) : Float64Array.from(a.genome);
       return mutate(g, r, 0.2, 0.08);
@@ -158,8 +164,8 @@ if (isCli) {
     const logBatch = () => {
       const b = A.best(), mean = A.size ? [...A.cells.values()].reduce((s, e) => s + e.fitness, 0) / A.size : 0;
       history.push({ gen: history.length, evals, best: +(b?.fitness ?? 0).toFixed(4), mean: +mean.toFixed(4), alive: batchStats.alive, balanced: batchStats.ok, batch: batchStats.n, newCells: batchStats.ins, replaced: batchStats.rep, filled: A.size, qd: +A.qd().toFixed(4),
-        bestInterHz: +(b?.interHz ?? 0).toFixed(2), bestVs: +(b?.vs ?? 0).toFixed(4), bestCredit: +(b?.credit ?? 0).toFixed(4), bestBeyondReflex: +(b?.beyondReflex ?? 0).toFixed(4), bestGenome: b ? toArray(b.genome) : null, bestSeed: b?.seeds?.[0] ?? 0 });
-      console.log(`batch ${String(history.length - 1).padStart(3)}  evals ${evals}  cells ${A.size}  new ${batchStats.ins} better ${batchStats.rep}  best ${(b?.fitness ?? 0).toFixed(4)} (vs ${(b?.vs ?? 0).toFixed(3)} credit ${(b?.credit ?? 0).toFixed(3)} beyond ${(b?.beyondReflex ?? 0).toFixed(3)})  alive ${batchStats.alive}/${batchStats.n}  balanced ${batchStats.ok}/${batchStats.n}  (${((Date.now() - t0) / 60000).toFixed(1)} min)`);
+        bestInterHz: +(b?.interHz ?? 0).toFixed(2), bestVs: +(b?.vs ?? 0).toFixed(4), bestCredit: +(b?.credit ?? 0).toFixed(4), bestBeyondReflex: +(b?.beyondReflex ?? 0).toFixed(4), bestBraceErrMs: +(+(b?.braceErrMs ?? NaN)).toFixed(1), bestBraceLock: +(+(b?.braceLock ?? NaN)).toFixed(4), bestProtectCredit: +(+(b?.protectCredit ?? NaN)).toFixed(4), bestGenome: b ? toArray(b.genome) : null, bestSeed: b?.seeds?.[0] ?? 0 });
+      console.log(`batch ${String(history.length - 1).padStart(3)}  evals ${evals}  cells ${A.size}  new ${batchStats.ins} better ${batchStats.rep}  best ${(b?.fitness ?? 0).toFixed(4)} (brace ${(+(b?.braceErrMs ?? NaN)).toFixed(0)} ms lock ${(+(b?.braceLock ?? NaN)).toFixed(2)} p-credit ${(+(b?.protectCredit ?? NaN)).toFixed(3)} vs ${(b?.vs ?? 0).toFixed(3)} credit ${(b?.credit ?? 0).toFixed(3)})  alive ${batchStats.alive}/${batchStats.n}  balanced ${batchStats.ok}/${batchStats.n}  (${((Date.now() - t0) / 60000).toFixed(1)} min)`);
       batchStats = { n: 0, alive: 0, ok: 0, ins: 0, rep: 0 };
       fs.writeFileSync(ckFile, JSON.stringify({ archive: A.toJSON(), history, evals, spentMs: Date.now() - t0, simS, cpuMs, opt, descNames }));
     };
@@ -187,7 +193,7 @@ if (isCli) {
     console.log('re-rating the top elites on fresh development seeds...');
     const fresh = Array.from({ length: 4 }, (_, j) => (mix(BASE ^ 0xfeed, j + 1) % 1000003) + 1);
     const top = A.top(5), rer = await Promise.all(top.map((e) => rate(e.genome, fresh)));
-    top.forEach((e, i) => { e.rerated = { fitness: rer[i].fitness, ok: rer[i].ok, vs: rer[i].vs, credit: rer[i].credit, beyondReflex: rer[i].beyondReflex, viability: rer[i].viability }; console.log(`  elite ${e.desc.map((x) => (+x).toFixed(2)).join(',')}: ${e.fitness.toFixed(4)} -> ${rer[i].fitness.toFixed(4)}`); });
+    top.forEach((e, i) => { e.rerated = { fitness: rer[i].fitness, ok: rer[i].ok, vs: rer[i].vs, credit: rer[i].credit, beyondReflex: rer[i].beyondReflex, braceErrMs: rer[i].braceErrMs, braceLock: rer[i].braceLock, protectCredit: rer[i].protectCredit, viability: rer[i].viability }; console.log(`  elite ${e.desc.map((x) => (+x).toFixed(2)).join(',')}: ${e.fitness.toFixed(4)} -> ${rer[i].fitness.toFixed(4)}`); });
     const win = top.slice().sort((a, b) => b.rerated.fitness - a.rerated.fitness)[0];
     workers.forEach((w) => w.terminate());
     // held-out bench: the winner and the previous best
@@ -197,12 +203,12 @@ if (isCli) {
     let baseline = null;
     if (prevBest && !has('no-baseline')) { console.log('held-out bench of the previous best...'); baseline = await benchParallel(fitGenome(prevBest.genome), { seeds: devSeeds(3), set: 'test', dur: +arg('bench-dur', 24) }); console.log(table(baseline, 'PREVIOUS BEST on the held-out worlds')); }
     const cost = { msPerSimSecond: +(cpuMs / simS).toFixed(3), note: 'wall ms per simulated second per organism in a worker: network, body, milieu and bench recording (ear frames precomputed once per worker)' };
-    const archiveSummary = { axes, filled: A.size, of: axes.reduce((s, a) => s * a.bins, 1), qd: A.qd(), cells: [...A.cells.entries()].map(([key, e]) => ({ key, desc: e.desc.map((x) => +(+x).toFixed(4)), fitness: +e.fitness.toFixed(4), ok: e.ok, viability: +e.viability.toFixed(4), vs: +(+e.vs).toFixed(4), credit: +(+e.credit).toFixed(4), beyondReflex: +(+e.beyondReflex).toFixed(4), errMs: +(+e.errMs).toFixed(1), interHz: +e.interHz.toFixed(2), motorDepth: +(+e.motorDepth).toFixed(3), born: e.born, genome: toArray(e.genome) })) };
+    const archiveSummary = { axes, filled: A.size, of: axes.reduce((s, a) => s * a.bins, 1), qd: A.qd(), cells: [...A.cells.entries()].map(([key, e]) => ({ key, desc: e.desc.map((x) => +(+x).toFixed(4)), fitness: +e.fitness.toFixed(4), ok: e.ok, viability: +e.viability.toFixed(4), vs: +(+e.vs).toFixed(4), credit: +(+e.credit).toFixed(4), beyondReflex: +(+e.beyondReflex).toFixed(4), braceErrMs: +(+e.braceErrMs).toFixed(1), braceLock: +(+e.braceLock).toFixed(4), protectCredit: +(+e.protectCredit).toFixed(4), resonVs: +(+e.resonVs).toFixed(4), errMs: +(+e.errMs).toFixed(1), interHz: +e.interHz.toFixed(2), motorDepth: +(+e.motorDepth).toFixed(3), born: e.born, genome: toArray(e.genome) })) };
     fs.mkdirSync(outDir, { recursive: true });
     const trainWorlds = TRAIN.map((w) => w.name);
-    fs.writeFileSync(evoFile, JSON.stringify({ algorithm: 'map-elites', pop: BATCH, gens: history.length, evals, minutes: MIN, workers: NW, seedsPerGenome: NS, life: { trainWorlds, dur, protocol: 'live each train world (groove) once, then hear each again as groove and shuffled' }, fitness: 'mean over seeds and worlds of max(0, beyondReflex) + 0.5 max(0, credit) + 0.25 vs exp(-|errMs|/80), x min(1, viability/0.75); 0.02 x viability when any seed dies or balance fails', cost, history, archive: archiveSummary, winner: { desc: win.desc, fitness: win.fitness, rerated: win.rerated }, heldOut: { headline: headline(heldOut), bench: heldOut }, baseline: baseline ? { headline: headline(baseline), bench: baseline } : null }, null, 1));
+    fs.writeFileSync(evoFile, JSON.stringify({ algorithm: 'map-elites', pop: BATCH, gens: history.length, evals, minutes: MIN, workers: NW, seedsPerGenome: NS, life: { trainWorlds, dur, protocol: 'live each train world (groove) once, then hear each again as groove and shuffled' }, fitness: 'mean over seeds and worlds of braceLock exp(-|braceErrMs|/80) + max(0, protectCredit) + 0.5 max(0, credit) + 0.25 max(0, beyondReflex), x min(1, viability/0.75); 0.02 x viability when any seed dies or balance fails', cost, history, archive: archiveSummary, winner: { desc: win.desc, fitness: win.fitness, rerated: win.rerated }, heldOut: { headline: headline(heldOut), bench: heldOut }, baseline: baseline ? { headline: headline(baseline), bench: baseline } : null }, null, 1));
     console.log('measuring the best genome...');
-    const best = { genome: toArray(win.genome), seed: win.seeds[0], gen: history.length - 1, born: win.born, fitness: win.rerated.fitness, viability: win.rerated.viability, genes: describe(win.genome), cost, rating: { fitness: win.fitness, vs: win.vs, credit: win.credit, beyondReflex: win.beyondReflex, errMs: win.errMs, interHz: win.interHz, motorDepth: win.motorDepth, desc: win.desc }, heldOut: headline(heldOut) };
+    const best = { genome: toArray(win.genome), seed: win.seeds[0], gen: history.length - 1, born: win.born, fitness: win.rerated.fitness, viability: win.rerated.viability, genes: describe(win.genome), cost, rating: { fitness: win.fitness, vs: win.vs, credit: win.credit, beyondReflex: win.beyondReflex, errMs: win.errMs, braceErrMs: win.braceErrMs, braceLock: win.braceLock, protectCredit: win.protectCredit, interHz: win.interHz, motorDepth: win.motorDepth, desc: win.desc }, heldOut: headline(heldOut) };
     best.measures = measure(win.genome, best.seed, { log: console.log });
     fs.writeFileSync(bestFile, JSON.stringify(best, null, 1));
     console.log('wrote', path.relative(ROOT, evoFile), 'and', path.relative(ROOT, bestFile));

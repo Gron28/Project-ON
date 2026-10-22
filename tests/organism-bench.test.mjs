@@ -51,11 +51,11 @@ test('beatLock: spikes 20 ms before every beat read as vs 1 and -20 ms; uniform 
 
 test('bench: the committed best genome gives finite metrics in both conditions', () => {
   const best = JSON.parse(fs.readFileSync(new URL('../lab/results/organism-best.json', import.meta.url), 'utf8'));
-  assert.equal(fitGenome(best.genome).length, NG);
+  assert.ok(fitGenome(best.genome).length <= NG);
   const r = benchSeed(best.genome, 11, { set: [TEST[0], TEST[3]], dur: 10, lifeDur: 4 });
   for (const c of ['newborn', 'adult']) {
     const s = r[c + 'Summary'];
-    for (const k of ['vs', 'vsShuffled', 'credit', 'vsReflex', 'beyondReflex', 'errMs', 'iqrMs', 'viability', 'interHz', 'msPerSimS']) assert.ok(Number.isFinite(s[k]), `${c} ${k} = ${s[k]}`);
+    for (const k of ['vs', 'vsShuffled', 'credit', 'vsReflex', 'beyondReflex', 'errMs', 'iqrMs', 'braceErrMs', 'braceLock', 'protect', 'protectShuffled', 'viability', 'interHz', 'msPerSimS']) assert.ok(Number.isFinite(s[k]), `${c} ${k} = ${s[k]}`);
     assert.ok(s.vs >= 0 && s.vs <= 1 && s.viability > 0 && s.viability <= 1);
     assert.ok(r[c].every((w) => w.omission && w.omission.nOmit > 0), `${c}: omissions measured`);
     console.log(`  ${c}: vs ${s.vs.toFixed(3)}, shuffled ${s.vsShuffled.toFixed(3)}, reflex ${s.vsReflex.toFixed(3)}, err ${s.errMs.toFixed(1)} ms, omission ${s.omissionHz.toFixed(3)} Hz, ${s.msPerSimS.toFixed(1)} ms per simulated s`);

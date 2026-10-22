@@ -36,10 +36,11 @@ import { TRAIN, TEST, VARIANTS, makeWorld, framesOf, DT_FRAME } from './worlds.m
 
 export const BENCH = { warm: 4, dur: 24, seeds: 3, post: [0.03, 0.15] };
 // readouts the current organism's state() has; anything else numeric is a new law's readout and is probed at omissions
-const KNOWN = new Set(['t', 'alive', 'energy', 'integrity', 'need', 'viability', 'valence', 'arousal', 'rateHz', 'interHz', 'predShare', 'strain', 'motor', 'chrom', 'gE', 'gI']);
+const KNOWN = new Set(['t', 'alive', 'energy', 'integrity', 'need', 'viability', 'valence', 'arousal', 'rateHz', 'interHz', 'predShare', 'strain', 'motor', 'chrom', 'gE', 'gI', 'brace', 'protection', 'impact', 'events']);
 
-/** a stored genome fitted to the current gene list (genes added since it was saved start mid-range) */
-export const fitGenome = (g) => Float64Array.from({ length: NG }, (_, i) => (Number.isFinite(+g[i]) ? +g[i] : 0.5));
+/** a stored genome as a Float64Array, at most NG genes, non-finite genes at mid-range. A shorter (legacy) genome stays
+ *  short: genome.mjs decode() pads it so it develops exactly as it did when it was evolved */
+export const fitGenome = (g) => Float64Array.from(Array.from(g).slice(0, NG), (x) => (Number.isFinite(+x) ? +x : 0.5));
 export const devSeeds = (k) => Array.from({ length: k }, (_, i) => mix(i + 1, 0xbe9c) % 1000003 + 1);
 
 /** development with plasticity frozen: every gene named eta* (learning rates, present or future) and pruning set to 0 */
@@ -60,7 +61,8 @@ export function framesFor(spec, variant, { seed = 1, dur = BENCH.dur, set = '' }
 
 /** live an organism through a world's frames, recording motor spike times, interneuron spikes per frame and new readouts */
 export function runRecord(org, F) {
-  const motor = [], inter = new Uint16Array(F.n), sig = {}, C = org.C;
+  const motor = [], inter = new Uint16Array(F.n), sig = {}, C = org.C, brace = new Float32Array(F.n), impacts = [], reson = [];
+  const osc = org.net.resonators ? Int32Array.from(org.net.resonators().cells || []) : new Int32Array(0);
   const s0 = org.state();
   for (const [k, v] of Object.entries(s0)) if (typeof v === 'number' && (!KNOWN.has(k))) sig[k] = new Float32Array(F.n);
   const keys = Object.keys(sig);
@@ -70,9 +72,12 @@ export function runRecord(org, F) {
     for (let q = 0; q < C.motor.length; q++) if (spk[C.motor[q]]) motor.push(t);
     let c = 0; for (let q = 0; q < C.inter.length; q++) c += spk[C.inter[q]]; inter[f] = c;
     for (const k of keys) { const v = s[k]; sig[k][f] = Number.isFinite(v) ? v : 0; }
+    for (let q = 0; q < osc.length; q++) if (spk[osc[q]]) reson.push(t);
+    if (Number.isFinite(s.brace)) brace[f] = s.brace;
+    if (s.impact > 0) impacts.push({ t, a: s.impact, p: s.protection });
   } });
   const ms = performance.now() - t0;
-  return { world: F.world, motor, inter, nInter: C.inter.length, sig, viability: L.viability, alive: L.died < 0, died: L.died, interHz: L.interHz, runaway: L.runaway, maxInter1s: L.maxInter1s, msPerSimS: ms / (F.n * DT_FRAME) };
+  return { world: F.world, motor, inter, brace, impacts, reson, nOsc: osc.length, nInter: C.inter.length, sig, viability: L.viability, alive: L.died < 0, died: L.died, interHz: L.interHz, runaway: L.runaway, maxInter1s: L.maxInter1s, msPerSimS: ms / (F.n * DT_FRAME) };
 }
 
 // ---- metrics -------------------------------------------------------------------------------------------------------------------
@@ -154,13 +159,37 @@ export function reflexVS(recS, recG, { from = BENCH.warm, span = 0.4 } = {}) {
   return m > 0 ? Math.hypot(c, s) / m : NaN;
 }
 
+/** the body's brace (mean motor stiffness, brace.mjs) against the beat: per beat, when the brace peaks in its window
+ *  (ms; negative: before the beat), the consistency of that peak (vector strength of the peak phases), and the protection
+ *  it gave at impacts that carried a beat (within 30 ms of one) */
+export function braceTiming(rec, beats, { from = BENCH.warm } = {}) {
+  const tr = rec.brace; if (!tr) return null;
+  const errs = []; let c = 0, s = 0, mod = 0, nb = 0;
+  for (const b of beats) {
+    if (b.t < from) continue;
+    const f0 = Math.max(0, Math.ceil((b.t - b.period / 2) / DT_FRAME) - 1), f1 = Math.min(tr.length, Math.ceil((b.t + b.period / 2) / DT_FRAME) - 1);
+    if (f1 - f0 < 3) continue;
+    let fm = f0, lo = Infinity; for (let f = f0; f < f1; f++) { if (tr[f] > tr[fm]) fm = f; if (tr[f] < lo) lo = tr[f]; }
+    if (!(tr[fm] > 0)) continue;
+    const dt = (fm + 1) * DT_FRAME - b.t; errs.push(1000 * dt); c += Math.cos(2 * Math.PI * dt / b.period); s += Math.sin(2 * Math.PI * dt / b.period); mod += (tr[fm] - lo) / tr[fm]; nb++;
+  }
+  const bt = beats.map((b) => b.t), near = (t) => { const i = lowerBound(bt, t - 0.03); return i < bt.length && Math.abs(bt[i] - t) <= 0.03; };
+  const pb = rec.impacts.filter((x) => x.t >= from && near(x.t)).map((x) => x.p), pa = rec.impacts.filter((x) => x.t >= from).map((x) => x.p);
+  return { braceErrMs: quant(errs, 0.5), braceIqrMs: quant(errs, 0.75) - quant(errs, 0.25), braceLock: nb ? Math.hypot(c, s) / nb : NaN, braceMod: nb ? mod / nb : NaN, errs,
+    protectBeat: pb.length ? mean(pb) : NaN, protectAll: pa.length ? mean(pa) : NaN, impacts: pa.length };
+}
+
 /** the metrics of one world for one condition, from its three variant runs */
 export function scoreWorld(runs, opt = {}) {
   const g = runs.groove, s = runs.shuffled, o = runs.omission;
   const lg = beatLock(g.motor, g.world.beats, opt), ls = s ? beatLock(s.motor, s.world.beats, opt) : null;
   const vsReflex = s ? reflexVS(s, g, opt) : NaN;
+  const bg = braceTiming(g, g.world.beats, opt), bs = s ? braceTiming(s, s.world.beats, opt) : null;
+  const resonVs = g.nOsc ? beatLock(g.reson, g.world.beats, opt).vs : NaN;
   const all = Object.values(runs);
   return {
+    braceErrMs: bg?.braceErrMs ?? NaN, braceIqrMs: bg?.braceIqrMs ?? NaN, braceLock: bg?.braceLock ?? NaN, braceLockShuffled: bs?.braceLock ?? NaN, braceMod: bg?.braceMod ?? NaN, braceErrs: bg?.errs ?? [],
+    protect: bg?.protectBeat ?? NaN, protectShuffled: bs?.protectBeat ?? NaN, protectCredit: (bg?.protectBeat ?? NaN) - (bs?.protectBeat ?? NaN), resonVs, nOsc: g.nOsc || 0,
     world: g.world.name, vs: lg.vs, vsShuffled: ls ? ls.vs : NaN, credit: ls ? lg.vs - ls.vs : NaN, vsReflex, beyondReflex: lg.vs - vsReflex, phase: lg.phase, motorSpikes: lg.n,
     errMs: lg.errMs, iqrMs: lg.iqrMs, errs: lg.errs, omission: o && s ? omissionResponse(o, s) : null,
     viability: mean(all.map((r) => r.viability)), alive: all.every((r) => r.alive), interHz: mean(all.map((r) => r.interHz)),
@@ -170,10 +199,12 @@ export function scoreWorld(runs, opt = {}) {
 
 /** one condition averaged over its worlds (errors pooled over beats) */
 export function summarizeCondition(rows) {
-  const errs = rows.flatMap((r) => r.errs), om = rows.map((r) => r.omission).filter(Boolean);
+  const errs = rows.flatMap((r) => r.errs), berrs = rows.flatMap((r) => r.braceErrs || []), om = rows.map((r) => r.omission).filter(Boolean);
   const sigKeys = [...new Set(om.flatMap((x) => Object.keys(x.signals)))];
   return {
     vs: mean(rows.map((r) => r.vs)), vsShuffled: mean(rows.map((r) => r.vsShuffled)), credit: mean(rows.map((r) => r.credit)),
+    braceErrMs: quant(berrs, 0.5), braceIqrMs: quant(berrs, 0.75) - quant(berrs, 0.25), braceLock: mean(rows.map((r) => r.braceLock).filter(Number.isFinite)), braceLockShuffled: mean(rows.map((r) => r.braceLockShuffled).filter(Number.isFinite)),
+    protect: mean(rows.map((r) => r.protect).filter(Number.isFinite)), protectShuffled: mean(rows.map((r) => r.protectShuffled).filter(Number.isFinite)), protectCredit: mean(rows.map((r) => r.protectCredit).filter(Number.isFinite)), resonVs: mean(rows.map((r) => r.resonVs).filter(Number.isFinite)),
     vsReflex: mean(rows.map((r) => r.vsReflex).filter(Number.isFinite)), beyondReflex: mean(rows.map((r) => r.beyondReflex).filter(Number.isFinite)),
     errMs: quant(errs, 0.5), iqrMs: quant(errs, 0.75) - quant(errs, 0.25), beats: errs.length,
     omissionHz: om.length ? mean(om.map((x) => x.hz)) : NaN, omissionZ: om.length ? mean(om.map((x) => x.z).filter(Number.isFinite)) : NaN,
@@ -204,7 +235,7 @@ export function benchSeed(genome, seed, { set = 'test', dur = BENCH.dur, variant
   return out;
 }
 
-const HEAD = ['vs', 'vsShuffled', 'credit', 'vsReflex', 'beyondReflex', 'errMs', 'iqrMs', 'omissionHz', 'omissionZ', 'viability', 'interHz', 'msPerSimS'];
+const HEAD = ['vs', 'vsShuffled', 'credit', 'vsReflex', 'beyondReflex', 'errMs', 'iqrMs', 'braceErrMs', 'braceIqrMs', 'braceLock', 'braceLockShuffled', 'protect', 'protectShuffled', 'protectCredit', 'resonVs', 'omissionHz', 'omissionZ', 'viability', 'interHz', 'msPerSimS'];
 /** mean +- sd over development seeds, per condition, plus per-world means */
 export function aggregate(perSeed) {
   const out = { seeds: perSeed.map((p) => p.seed) };
@@ -217,13 +248,13 @@ export function aggregate(perSeed) {
     const worlds = perSeed[0][c].map((r) => r.world);
     h.worlds = worlds.map((w) => {
       const rows = perSeed.map((p) => p[c].find((r) => r.world === w)).filter(Boolean), m = (k) => mean(rows.map((r) => r[k]).filter(Number.isFinite));
-      return { world: w, vs: m('vs'), vsShuffled: m('vsShuffled'), credit: m('credit'), vsReflex: m('vsReflex'), beyondReflex: m('beyondReflex'), errMs: m('errMs'), iqrMs: m('iqrMs'), omissionHz: mean(rows.map((r) => r.omission?.hz).filter(Number.isFinite)), viability: m('viability') };
+      return { world: w, vs: m('vs'), vsShuffled: m('vsShuffled'), credit: m('credit'), vsReflex: m('vsReflex'), beyondReflex: m('beyondReflex'), errMs: m('errMs'), iqrMs: m('iqrMs'), braceErrMs: m('braceErrMs'), braceLock: m('braceLock'), protect: m('protect'), protectCredit: m('protectCredit'), resonVs: m('resonVs'), omissionHz: mean(rows.map((r) => r.omission?.hz).filter(Number.isFinite)), viability: m('viability') };
     });
     out[c] = h;
   }
   // what a life added, seed by seed (adult minus its own frozen newborn, same worlds)
   const both = perSeed.filter((p) => p.adultSummary && p.newbornSummary);
-  if (both.length) out.learned = Object.fromEntries(['vs', 'credit', 'beyondReflex', 'errMs'].map((k) => { const v = both.map((p) => p.adultSummary[k] - p.newbornSummary[k]).filter(Number.isFinite); return [k, { mean: mean(v), sd: sd(v) }]; }));
+  if (both.length) out.learned = Object.fromEntries(['vs', 'credit', 'beyondReflex', 'errMs', 'braceErrMs', 'braceLock', 'protect', 'protectCredit'].map((k) => { const v = both.map((p) => p.adultSummary[k] - p.newbornSummary[k]).filter(Number.isFinite); return [k, { mean: mean(v), sd: sd(v) }]; }));
   const lifes = perSeed.map((p) => p.life).filter(Boolean);
   if (lifes.length) out.life = { alive: lifes.filter((l) => l.alive).length / lifes.length, viability: mean(lifes.map((l) => l.viability)), interHz: mean(lifes.map((l) => l.interHz)), motorDepth: mean(lifes.map((l) => l.motorDepth).filter(Number.isFinite)) };
   return out;
@@ -253,13 +284,15 @@ export function table(agg, title = '') {
     L.push('', `${c === 'newborn' ? 'NEWBORN (plasticity frozen)' : 'ADULT (after a life)'}   alive ${(100 * h.alive).toFixed(0)}% of seeds`);
     L.push(`  vector strength  groove ${pm(h.vs)}   shuffled ${pm(h.vsShuffled)}   credit (groove - shuffled) ${pm(h.credit)}`);
     L.push(`  reflex model     vs a reflex alone would give ${pm(h.vsReflex)}   beyond reflex (vs - that) ${pm(h.beyondReflex)}`);
+    L.push(`  brace            peak ${pm(h.braceErrMs, 1)} ms   IQR ${pm(h.braceIqrMs, 1)} ms   lock ${pm(h.braceLock)} (shuffled ${pm(h.braceLockShuffled)})`);
+    L.push(`  protection       at beat impacts ${pm(h.protect)}   shuffled ${pm(h.protectShuffled)}   credit ${pm(h.protectCredit)}   resonators vs ${pm(h.resonVs)}`);
     L.push(`  alignment        median ${pm(h.errMs, 1)} ms   IQR ${pm(h.iqrMs, 1)} ms   (negative: early)`);
     L.push(`  omission         ${pm(h.omissionHz, 3)} Hz   z ${pm(h.omissionZ, 2)}${h.omissionSignals ? '   readouts ' + Object.entries(h.omissionSignals).map(([k, v]) => `${k} ${pm(v, 4)}`).join(', ') : ''}`);
     L.push(`  viability ${pm(h.viability)}   interneurons ${pm(h.interHz, 2)} Hz   cost ${pm(h.msPerSimS, 1)} ms per simulated s`);
-    L.push('  world            vs     shuffled  credit   reflex  beyond   err ms   IQR ms   omission Hz');
-    for (const w of h.worlds) L.push(`  ${w.world.padEnd(15)} ${f(w.vs)}   ${f(w.vsShuffled)}   ${f(w.credit).padStart(6)}   ${f(w.vsReflex)}   ${f(w.beyondReflex).padStart(6)}   ${f(w.errMs, 1).padStart(6)}   ${f(w.iqrMs, 1).padStart(6)}   ${f(w.omissionHz)}`);
+    L.push('  world            vs     shuffled  credit   reflex  beyond   err ms   IQR ms   brace ms  protect  p-credit  reson  omission Hz');
+    for (const w of h.worlds) L.push(`  ${w.world.padEnd(15)} ${f(w.vs)}   ${f(w.vsShuffled)}   ${f(w.credit).padStart(6)}   ${f(w.vsReflex)}   ${f(w.beyondReflex).padStart(6)}   ${f(w.errMs, 1).padStart(6)}   ${f(w.iqrMs, 1).padStart(6)}   ${f(w.braceErrMs, 1).padStart(6)}   ${f(w.protect)}   ${f(w.protectCredit).padStart(6)}   ${f(w.resonVs)}  ${f(w.omissionHz)}`);
   }
-  if (agg.learned) L.push('', 'LEARNED (adult minus its own frozen newborn, per seed): ' + Object.entries(agg.learned).map(([k, v]) => `${k} ${pm(v, k === 'errMs' ? 1 : 3)}`).join('   '));
+  if (agg.learned) L.push('', 'LEARNED (adult minus its own frozen newborn, per seed): ' + Object.entries(agg.learned).map(([k, v]) => `${k} ${pm(v, /Ms$/.test(k) ? 1 : 3)}`).join('   '));
   return L.join('\n');
 }
 

@@ -147,12 +147,13 @@ export function omitScore(sc, seed, { gap = [4, 8], after = 4 } = {}) {
 
 const G = (bpm, dur, o = {}) => ({ style: 'groove', bpm, dur, ...o });
 /** world specs (durations in s; `dur` scales every segment proportionally). Train and held-out sets share no tempo and the
- *  held-out set adds a triplet shuffle, heavy syncopation, a tempo jump and the tempo extremes 80 and 160 bpm. */
+ *  held-out set adds a triplet shuffle, heavy syncopation, a tempo jump, the tempo extremes 80 and 160 bpm and
+ *  environment.mjs's held-out tempi (HELD_OUT: 100, 150), which no train world uses. */
 export const TRAIN = [
   { name: 'groove-96', segments: [G(96, 24, { sync: 0.25 })] },
   { name: 'swing-120', segments: [G(120, 24, { sync: 0.5, swing: 0.2 })] },
   { name: 'sync-140', segments: [G(140, 24, { sync: 0.7 })] },
-  { name: 'poly-100', segments: [{ style: 'poly', bpm: 100, dur: 24 }] },
+  { name: 'poly-112', segments: [{ style: 'poly', bpm: 112, dur: 24 }] },
   { name: 'build-124', segments: [{ style: 'build', bpm: 124, dur: 24 }] },
   { name: 'ramp-108-132', segments: [G(108, 24, { bpm2: 132, sync: 0.4 })] },
   { name: 'silence-104', segments: [G(104, 10), { style: 'silence', dur: 4 }, G(104, 10)] },
@@ -161,7 +162,8 @@ export const TRAIN = [
 export const TEST = [
   { name: 'groove-80', segments: [G(80, 24, { sync: 0.25 })] },
   { name: 'shuffle-88', segments: [G(88, 24, { sync: 0.4, swing: 0.33 })] },
-  { name: 'sync-152', segments: [G(152, 24, { sync: 0.9 })] },
+  { name: 'sync-150', segments: [G(150, 24, { sync: 0.9 })] },
+  { name: 'groove-100', segments: [G(100, 24, { sync: 0.5 })] },
   { name: 'jump-116-92', segments: [G(116, 24, { bpm2: 92, change: 'jump', sync: 0.4 })] },
   { name: 'poly-136', segments: [{ style: 'poly', bpm: 136, dur: 24 }] },
   { name: 'build-146', segments: [{ style: 'build', bpm: 146, dur: 24 }] },
