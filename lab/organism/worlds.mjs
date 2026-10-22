@@ -12,6 +12,15 @@
 // Sounds are lab/prototypes/nervous-system/stimuli.mjs's one-shots at its level; layers (white noise, the build's rising
 // wash, the drop's sub-bass) follow lab/organism/environment.mjs. framesOf() runs being/ear.mjs once over the audio and
 // returns frames in environment.mjs's earFrames() format, so environment.live() runs an organism through a world.
+// Stereo: sound comes from around the body. Every sound source of a world (kick, snare, hat, woodblock) sits somewhere in
+// the stereo field, seeded per world: the kick near the centre, the others anywhere, and some of them moving (a slow
+// sweep across the field). Each event carries its pan (-1 left .. 1 right) and keeps it in the shuffled and omission
+// variants. render() mixes with a 'centre at full level' law, steep toward the sides (gain L = min(1, 1 - pan)^2, R =
+// min(1, 1 + pan)^2: half right is -12 dB on the left, hard right is silent there), so a centred world gives both
+// channels exactly the mono signal; the layers (noise, wash, sub-bass) are centred. framesOf() runs one ear per channel
+// and returns both (ampL/ampR, onsetL/onsetR), the body-level signals (amp: their mean, onset: the larger, rough and sub:
+// the mean) and pan: the direction the sounds that began in the last 30 ms came from (amplitude-weighted pan; the side an
+// impact strikes, organism.mjs). A fully centred world gives exactly the frames of its mono render.
 // Everything is deterministic by world seed.
 
 import { oneShots } from '../prototypes/nervous-system/stimuli.mjs';
@@ -171,16 +180,31 @@ export const TEST = [
 ];
 export const VARIANTS = ['groove', 'shuffled', 'omission'];
 
-/** a world: spec + variant -> the score to render, deterministic by (spec name, variant, seed) */
-export function makeWorld(spec, variant = 'groove', { seed = 1, dur = null, set = '' } = {}) {
+/** where each sound source of a world sits in the stereo field: { type: { p0, depth, hz, ph } }; pan(t) = p0 + depth
+ *  sin(2 pi hz t + ph), clamped to [-1, 1]. The kick stays near the centre; snare, hat and woodblock sit anywhere, and each
+ *  sweeps slowly with probability 0.5. stereo: false (or spec.mono) centres everything */
+export function sourcesOf(wseed, stereo = true) {
+  const r = lcg(mix(wseed, 0x57e)), out = {};
+  for (const type of ['kick', 'snare', 'hat', 'block']) {
+    const p0 = type === 'kick' ? 0.3 * (2 * r() - 1) : 0.9 * (2 * r() - 1), moving = type !== 'kick' && r() < 0.5;
+    out[type] = stereo ? { p0, depth: moving ? 0.4 + 0.5 * r() : 0, hz: 0.04 + 0.12 * r(), ph: 2 * Math.PI * r() } : { p0: 0, depth: 0, hz: 0, ph: 0 };
+  }
+  return out;
+}
+export const panAt = (src, t) => Math.max(-1, Math.min(1, src.p0 + src.depth * Math.sin(2 * Math.PI * src.hz * t + src.ph)));
+
+/** a world: spec + variant -> the score to render, deterministic by (spec name, variant, seed). stereo: false centres every
+ *  source (the mono world) */
+export function makeWorld(spec, variant = 'groove', { seed = 1, dur = null, set = '', stereo = true } = {}) {
   const total = spec.segments.reduce((s, x) => s + x.dur, 0), k = dur ? dur / total : 1;
   const segments = spec.segments.map((s) => ({ ...s, dur: s.dur * k }));
-  const wseed = mix(seed, strHash(spec.name));
+  const wseed = mix(seed, strHash(spec.name)), sources = sourcesOf(wseed, stereo && !spec.mono);
   let sc = scoreOf({ segments });
+  sc.events = sc.events.map((e) => ({ ...e, pan: panAt(sources[e.type] || sources.hat, e.t) }));
   if (variant === 'shuffled') sc = shuffleScore(sc, wseed);
   else if (variant === 'omission') sc = omitScore(sc, wseed);
   else if (variant !== 'groove') throw new Error('unknown variant ' + variant);
-  return { name: spec.name, set, variant, seed: wseed, segments, ...sc, omitted: sc.omitted || [] };
+  return { name: spec.name, set, variant, seed: wseed, segments, sources, ...sc, omitted: sc.omitted || [] };
 }
 /** every world of a set in the requested variants */
 export function worldSet(specs, { variants = VARIANTS, seed = 1, dur = null, set = '' } = {}) {
@@ -191,34 +215,46 @@ export const onsetCount = (w) => groupsOf(w.events, []).length;
 // ---- rendering -------------------------------------------------------------------------------------------------------------
 
 let SHOTS = null;
-/** the world's audio at 48 kHz */
+/** the world's audio at 48 kHz, as two channels { L, R } (see the header for the pan law) */
 export function render(w) {
   SHOTS = SHOTS || oneShots();
-  const n = Math.floor(w.dur * SR), x = new Float32Array(n), r = lcg(mix(w.seed, 0xa0d));
+  const n = Math.floor(w.dur * SR), L = new Float32Array(n), R = new Float32Array(n), r = lcg(mix(w.seed, 0xa0d));
   for (const e of w.events) {
-    const b = SHOTS[e.type], i0 = Math.round(e.t * SR), a = e.amp * LEVEL;
-    for (let i = 0; i < b.length && i0 + i < n; i++) if (i0 + i >= 0) x[i0 + i] += b[i] * a;
+    const b = SHOTS[e.type], i0 = Math.round(e.t * SR), a = e.amp * LEVEL, pan = e.pan || 0, gl = Math.min(1, 1 - pan) ** 2, gr = Math.min(1, 1 + pan) ** 2;
+    for (let i = 0; i < b.length && i0 + i < n; i++) if (i0 + i >= 0) { const v = b[i] * a; L[i0 + i] += v * gl; R[i0 + i] += v * gr; }
   }
-  for (const L of w.layers) {
-    const i0 = Math.max(0, Math.round(L.t0 * SR)), i1 = Math.min(n, Math.round(L.t1 * SR));
-    if (L.kind === 'noise') { const a = (L.amp ?? 0.25) * (LEVEL / 0.8); for (let i = i0; i < i1; i++) x[i] += a * (2 * r() - 1); }
-    else if (L.kind === 'wash') for (let i = i0; i < i1; i++) { const u = (L.b + (i - i0) / (L.bar * SR)) / 4; if (u < 0.94) x[i] += LEVEL * 0.12 * u * u * (2 * r() - 1); }
-    else if (L.kind === 'sub') for (let i = i0; i < i1; i++) x[i] += LEVEL * 0.35 * Math.sin(TAU * 45 * i / SR);
+  const both = (i, v) => { L[i] += v; R[i] += v; };
+  for (const Ly of w.layers) {
+    const i0 = Math.max(0, Math.round(Ly.t0 * SR)), i1 = Math.min(n, Math.round(Ly.t1 * SR));
+    if (Ly.kind === 'noise') { const a = (Ly.amp ?? 0.25) * (LEVEL / 0.8); for (let i = i0; i < i1; i++) both(i, a * (2 * r() - 1)); }
+    else if (Ly.kind === 'wash') for (let i = i0; i < i1; i++) { const u = (Ly.b + (i - i0) / (Ly.bar * SR)) / 4; if (u < 0.94) both(i, LEVEL * 0.12 * u * u * (2 * r() - 1)); }
+    else if (Ly.kind === 'sub') for (let i = i0; i < i1; i++) both(i, LEVEL * 0.35 * Math.sin(TAU * 45 * i / SR));
   }
-  return x;
+  return { L, R };
 }
 
-/** being/ear.mjs over the world, in environment.mjs earFrames() format (+ the world itself) */
+/** being/ear.mjs over each channel of the world, in environment.mjs earFrames() format plus the channels (+ the world) */
 export function framesOf(w) {
-  const x = render(w), ear = createEar(), n = Math.floor(x.length / FRAME);
+  const x = render(w), earL = createEar(), earR = createEar(), n = Math.floor(x.L.length / FRAME);
   const amp = new Float32Array(n * NE), onset = new Float32Array(n), rough = new Float32Array(n), sub = new Float32Array(n), seg = new Uint8Array(n);
+  const ampL = new Float32Array(n * NE), ampR = new Float32Array(n * NE), onsetL = new Float32Array(n), onsetR = new Float32Array(n), pan = new Float32Array(n);
+  { // where the sounds that began in the last 30 ms came from
+    const ev = w.events; let j0 = 0;
+    for (let f = 0; f < n; f++) {
+      const t1 = (f + 1) * DT_FRAME, t0 = t1 - 0.03; while (j0 < ev.length && ev[j0].t < t0) j0++;
+      let s = 0, a = 0; for (let j = j0; j < ev.length && ev[j].t <= t1; j++) { s += ev[j].amp * (ev[j].pan || 0); a += ev[j].amp; }
+      pan[f] = a > 0 ? s / a : 0;
+    }
+  }
   const schedule = w.segs.map((s) => ({ mode: s.style, dur: s.t1 - s.t0, bpm: s.bpm }));
   let si = 0;
   for (let f = 0; f < n; f++) {
-    for (let i = f * FRAME, e = i + FRAME; i < e; i++) ear.sample(x[i]);
-    const fr = ear.frame(); amp.set(fr.amp, f * NE); onset[f] = fr.onset; rough[f] = fr.rough; sub[f] = fr.sub;
+    for (let i = f * FRAME, e = i + FRAME; i < e; i++) { earL.sample(x.L[i]); earR.sample(x.R[i]); }
+    const a = earL.frame(), b = earR.frame(), o = f * NE;
+    ampL.set(a.amp, o); ampR.set(b.amp, o); for (let k = 0; k < NE; k++) amp[o + k] = 0.5 * (a.amp[k] + b.amp[k]);
+    onsetL[f] = a.onset; onsetR[f] = b.onset; onset[f] = Math.max(a.onset, b.onset); rough[f] = 0.5 * (a.rough + b.rough); sub[f] = 0.5 * (a.sub + b.sub);
     while (si < w.segs.length - 1 && (f + 1) * DT_FRAME > w.segs[si].t1) si++;
     seg[f] = si;
   }
-  return { n, amp, onset, rough, sub, seg, schedule, world: w };
+  return { n, amp, onset, rough, sub, seg, ampL, ampR, onsetL, onsetR, pan, schedule, world: w };
 }

@@ -31,13 +31,14 @@ import { isMainThread, parentPort, workerData, Worker } from 'node:worker_thread
 import { createOrganism, restoreOrganism } from './organism.mjs';
 import { develop } from './develop.mjs';
 import { live } from './environment.mjs';
-import { depth } from './analysis.mjs';
+import { depth, hubProfile } from './analysis.mjs';
+import { WIN } from './brace.mjs';
 import { mix, NG } from './genome.mjs';
 import { TRAIN, TEST, VARIANTS, makeWorld, framesOf, DT_FRAME } from './worlds.mjs';
 
 export const BENCH = { warm: 4, dur: 24, seeds: 3, post: [0.03, 0.15] };
 // readouts the current organism's state() has; anything else numeric is a new law's readout and is probed at omissions
-const KNOWN = new Set(['t', 'alive', 'energy', 'integrity', 'need', 'viability', 'valence', 'arousal', 'rateHz', 'interHz', 'predShare', 'strain', 'motor', 'chrom', 'gE', 'gI', 'brace', 'protection', 'impact', 'events']);
+const KNOWN = new Set(['t', 'alive', 'energy', 'integrity', 'need', 'viability', 'valence', 'arousal', 'rateHz', 'interHz', 'predShare', 'strain', 'motor', 'chrom', 'gE', 'gI', 'brace', 'protection', 'impact', 'events', 'wireHz', 'impactDone', 'impactP', 'impactAt', 'impactSide']);
 
 /** a stored genome as a Float64Array, at most NG genes, non-finite genes at mid-range. A shorter (legacy) genome stays
  *  short: genome.mjs decode() pads it so it develops exactly as it did when it was evolved */
@@ -76,7 +77,8 @@ export function runRecord(org, F) {
     for (const k of keys) { const v = s[k]; sig[k][f] = Number.isFinite(v) ? v : 0; }
     for (let q = 0; q < osc.length; q++) if (spk[osc[q]]) reson.push(t);
     if (Number.isFinite(s.brace)) brace[f] = s.brace;
-    if (s.impact > 0) impacts.push({ t, a: s.impact, p: s.protection });
+    // an impact is judged when its window has passed (brace.mjs): its time is the detection's, WIN - 1 frames earlier
+    if (s.impactDone > 0) impacts.push({ t: (f + 2 - WIN) * DT_FRAME, a: s.impactDone, p: s.impactP, side: s.impactSide });
   } });
   const ms = performance.now() - t0;
   return { world: F.world, motor, inter, brace, impacts, reson, nOsc: osc.length, nInter: C.inter.length, sig, viability: L.viability, alive: L.died < 0, died: L.died, interHz: L.interHz, runaway: L.runaway, maxInter1s: L.maxInter1s, msPerSimS: ms / (F.n * DT_FRAME) };
@@ -227,20 +229,22 @@ export function benchSeed(genome, seed, { set = 'test', dur = BENCH.dur, variant
   });
   if (conditions.includes('newborn')) {
     // one gestation (organism.mjs), then every world hears a copy of the same newborn
-    const fd = frozenDev(genome, seed), nb = createOrganism({ dev: fd, seed }).serialize();
+    const fd = frozenDev(genome, seed), nbo = createOrganism({ dev: fd, seed }), nb = nbo.serialize();
+    out.hubNewborn = hubProfile(nbo);
     out.newborn = runAll(() => { const o = createOrganism({ dev: fd, seed, gestation: 0 }); o.restore(nb); return o; });
   }
   if (conditions.includes('adult')) {
     const org = createOrganism({ genome, seed }); let lifeOk = true, lifeV = 0, lifeHz = 0;
     for (const spec of TRAIN) { const L = live(org, framesFor(spec, 'groove', { seed: worldSeed + 1000, dur: lifeDur })); lifeOk = lifeOk && L.died < 0; lifeV += L.viability / TRAIN.length; lifeHz += L.interHz / TRAIN.length; }
     const snap = org.serialize(), D = depth(org);
-    out.life = { alive: lifeOk, viability: lifeV, interHz: lifeHz, simS: TRAIN.length * lifeDur, motorDepth: D.motorDepth, motorReached: D.motorReached };
+    out.life = { alive: lifeOk, viability: lifeV, interHz: lifeHz, simS: TRAIN.length * lifeDur, motorDepth: D.motorDepth, motorReached: D.motorReached, hub: hubProfile(org) };
     out.adult = runAll(() => restoreOrganism(snap));
   }
   for (const c of conditions) if (out[c]) out[c + 'Summary'] = summarizeCondition(out[c]);
   return out;
 }
 
+const HUB = ['offset', 'hearOffset', 'wireOffset', 'rInt', 'rInter', 'corrRadInt', 'earOffset', 'areaOffset', 'areaRadius', 'arbor', 'nReach'];
 const HEAD = ['vs', 'vsShuffled', 'credit', 'vsReflex', 'beyondReflex', 'errMs', 'iqrMs', 'braceErrMs', 'braceIqrMs', 'braceLock', 'braceLockShuffled', 'protect', 'protectShuffled', 'protectCredit', 'resonVs', 'omissionHz', 'omissionZ', 'viability', 'interHz', 'msPerSimS'];
 /** mean +- sd over development seeds, per condition, plus per-world means */
 export function aggregate(perSeed) {
@@ -263,6 +267,10 @@ export function aggregate(perSeed) {
   if (both.length) out.learned = Object.fromEntries(['vs', 'credit', 'beyondReflex', 'errMs', 'braceErrMs', 'braceLock', 'protect', 'protectCredit'].map((k) => { const v = both.map((p) => p.adultSummary[k] - p.newbornSummary[k]).filter(Number.isFinite); return [k, { mean: mean(v), sd: sd(v) }]; }));
   const lifes = perSeed.map((p) => p.life).filter(Boolean);
   if (lifes.length) out.life = { alive: lifes.filter((l) => l.alive).length / lifes.length, viability: mean(lifes.map((l) => l.viability)), interHz: mean(lifes.map((l) => l.interHz)), motorDepth: mean(lifes.map((l) => l.motorDepth).filter(Number.isFinite)) };
+  // where integration sits (analysis.mjs hubProfile), newborn and adult, mean over seeds
+  const hubMean = (hs) => { hs = hs.filter(Boolean); if (!hs.length) return null; const o = {}; for (const k of HUB) o[k] = mean(hs.map((h) => h[k]).filter(Number.isFinite)); o.rows = hs[0].rows.map((r, j) => ({ r: r.r, n: mean(hs.map((h) => h.rows[j].n)), integration: mean(hs.map((h) => h.rows[j].integration).filter(Number.isFinite)) })); return o; };
+  const hn = hubMean(perSeed.map((p) => p.hubNewborn)), ha = hubMean(lifes.map((l) => l.hub));
+  if (hn || ha) out.hub = { newborn: hn, adult: ha };
   return out;
 }
 
@@ -284,6 +292,7 @@ export function table(agg, title = '') {
   const L = [];
   if (title) L.push(title);
   L.push(`development seeds: ${agg.seeds.join(', ')}`);
+  if (agg.hub) for (const c of ['newborn', 'adult']) { const h = agg.hub[c]; if (h) L.push(`hub (${c}): integration centroid ${f(h.offset)} from the nucleus (hearing only ${f(h.hearOffset)}, wiring ${f(h.wireOffset)}, hair cells' ${f(h.earOffset)}), integration-weighted radius ${f(h.rInt)} vs interneurons ${f(h.rInter)}, corr(radius, integration) ${f(h.corrRadInt)}, areas at radius ${f(h.areaRadius)} offset ${f(h.areaOffset)}, arbor ${f(h.arbor)}   by radius: ${h.rows.map((r) => `${r.r[0]}-${r.r[1]} ${f(r.integration, 1)}`).join(', ')}`); }
   if (agg.life) L.push(`life (train worlds, groove): alive ${(100 * agg.life.alive).toFixed(0)}%, viability ${f(agg.life.viability)}, interneurons ${f(agg.life.interHz, 2)} Hz, sensor->motor depth ${f(agg.life.motorDepth, 2)}`);
   for (const c of ['newborn', 'adult']) {
     const h = agg[c]; if (!h) continue;

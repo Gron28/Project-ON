@@ -133,7 +133,7 @@ export function develop(genome, seed = 1) {
     for (let x = cx - s; x <= cx + s; x++) for (let y = cy - s; y <= cy + s; y++) for (let z = cz - s; z <= cz + s; z++) { const l = grid.get((x * GN + y) * GN + z); if (l) for (const i of l) out.push(i); }
     return out;
   };
-  const syn = { pre: [], post: [], delay: [], t: [] }, axons = [];   // axons: { cell, pts: [x,y,z,...], t0, t1 }
+  const syn = { pre: [], post: [], delay: [], t: [], len: [], br: [] }, axons = [];   // len: axon path length to the synapse, br: its branch   // axons: { cell, pts: [x,y,z,...], t0, t1 }
   const outN = new Int32Array(N), has = new Set(), cand = [];
   const rho2 = G.capture * G.capture, nSteps = Math.max(2, Math.round(G.axonLen / STEP));
   // the motor cells' trophic field and the pull it exerts on a growth cone: its relative gradient, at most unit length
@@ -173,7 +173,7 @@ export function develop(genome, seed = 1) {
           const kk = c.id * N + j; if (has.has(kk)) continue;
           if (r() < G.synDensity * Math.exp(-d2 / rho2)) {
             has.add(kk); outN[c.id]++;
-            syn.pre.push(c.id); syn.post.push(j); syn.delay.push(1 + Math.min(15, Math.round(s * STEP * 6))); syn.t.push(ts);
+            syn.pre.push(c.id); syn.post.push(j); syn.delay.push(1 + Math.min(15, Math.round(s * STEP * 6))); syn.t.push(ts); syn.len.push(s * STEP); syn.br.push(b);
           }
         }
       }
@@ -198,7 +198,7 @@ export function develop(genome, seed = 1) {
   return {
     N, genome: Float64Array.from(padGenome(genome)), seed, G, pos, birthPos, type, isI, extra, vec, osc,
     born: Float32Array.from(cells, (c) => c.born),
-    syn: { pre: Int32Array.from(syn.pre), post: Int32Array.from(syn.post), delay: Uint8Array.from(syn.delay), t: Float32Array.from(syn.t) },
+    syn: { pre: Int32Array.from(syn.pre), post: Int32Array.from(syn.post), delay: Uint8Array.from(syn.delay), t: Float32Array.from(syn.t), len: Float32Array.from(syn.len), br: Uint8Array.from(syn.br) },
     axons, morph: { dP, dQ, lamP: G.lamP, lamQ: G.lamQ, lamC },
   };
 }
