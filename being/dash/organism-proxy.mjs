@@ -34,7 +34,7 @@ export function createRemoteOrganism() {
     dev = { N, pos: f32(s.pos, 3 * N), type, isI, extra, osc, seed: s.seed ?? 0, G: { earSpread: s.earSpread, nOsc: s.nOsc },
       label: s.genomeLabel || '', axons: [], syn: { pre: [], post: [], t: [] }, born: new Float32Array(N), birthPos: f32(s.pos, 3 * N) };
     const by = (t) => { const l = []; for (let i = 0; i < N; i++) if (type[i] === t) l.push(i); return Int32Array.from(l); };
-    C = { ear: by(T.EAR), onset: by(T.ONSET), rough: by(T.ROUGH), sub: by(T.SUB), proprio: by(T.PROPRIO), inter: by(T.INTER), intero: by(T.INTERO), mod: by(T.MOD), motor: by(T.MOTOR), chrom: by(T.CHROM) };
+    C = { ear: by(T.EAR), onset: by(T.ONSET), rough: by(T.ROUGH), sub: by(T.SUB), proprio: by(T.PROPRIO), inter: by(T.INTER), intero: by(T.INTERO), mod: by(T.MOD), motor: by(T.MOTOR), chrom: by(T.CHROM), clock: by(T.CLOCK) };
     const e = s.edges || {}, pre = Int32Array.from(e.pre || []), post = Int32Array.from(e.post || []), w = f32(e.w || []);
     edgeCache = { pre, post, w, m: Math.min(pre.length, post.length, w.length) };
     const rf = new Float32Array(N), rbar = new Float32Array(N), dead = new Uint8Array(N);

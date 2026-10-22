@@ -11,6 +11,7 @@ import { createStimuli, oneShots } from '../prototypes/nervous-system/stimuli.mj
 import { createSequencer } from './rhythm.mjs';
 import { createEar, SR, NE } from '../../being/ear.mjs';
 import { lcg, mix } from './genome.mjs';
+import { withClock } from './clock.mjs';
 
 const FRAME = 192;
 const GRID_MODES = new Set(['groove', 'build', 'poly', 'click']);
@@ -69,18 +70,18 @@ export function createEnvironment(schedule, seed = 1) {
 export function earFrames(schedule, seed = 1) {
   const env = createEnvironment(schedule, seed), ear = createEar();
   const n = Math.floor(env.total * SR / FRAME);
-  const amp = new Float32Array(n * NE), onset = new Float32Array(n), rough = new Float32Array(n), sub = new Float32Array(n), seg = new Uint8Array(n);
+  const amp = new Float32Array(n * NE), onset = new Float32Array(n), rough = new Float32Array(n), sub = new Float32Array(n), level = new Float32Array(n), seg = new Uint8Array(n);
   const buf = new Float32Array(FRAME);
   let si = 0, acc = schedule[0].dur;
   for (let f = 0; f < n; f++) {
     env.fill(buf); for (let i = 0; i < FRAME; i++) ear.sample(buf[i]);
-    const fr = ear.frame(); amp.set(fr.amp, f * NE); onset[f] = fr.onset; rough[f] = fr.rough; sub[f] = fr.sub;
+    const fr = ear.frame(); amp.set(fr.amp, f * NE); onset[f] = fr.onset; rough[f] = fr.rough; sub[f] = fr.sub; level[f] = fr.level;
     while ((f + 1) * FRAME / SR > acc && si < schedule.length - 1) acc += schedule[++si].dur;
     seg[f] = si;
   }
   env.close();
   const beats = env.grid.map((b, i, a) => { const nx = a[i + 1], pv = a[i - 1]; const period = nx && nx.seg === b.seg ? nx.t - b.t : pv && pv.seg === b.seg ? b.t - pv.t : 0.5; return { ...b, period }; });
-  return { n, amp, onset, rough, sub, seg, schedule, beats };
+  return { n, amp, onset, rough, sub, level, seg, schedule, beats };
 }
 /** a reusable frame view for organism.tick(); stereo frames (worlds.mjs framesOf) also carry each channel's amplitudes
  *  and onset (ampL, ampR, onsetL, onsetR) and the direction of the sounds that just began (pan); mono frames leave them
@@ -89,6 +90,7 @@ export function frameAt(F, f, view = { amp: null, onset: 0, rough: 0, sub: 0 }) 
   view.amp = F.amp.subarray(f * NE, (f + 1) * NE); view.onset = F.onset[f]; view.rough = F.rough[f]; view.sub = F.sub[f];
   if (F.ampL) { view.ampL = F.ampL.subarray(f * NE, (f + 1) * NE); view.ampR = F.ampR.subarray(f * NE, (f + 1) * NE); view.onsetL = F.onsetL[f]; view.onsetR = F.onsetR[f]; view.pan = F.pan ? F.pan[f] : 0; }
   else { view.ampL = view.ampR = null; view.pan = 0; }
+  view.clockPhase = F.clockPhase ? F.clockPhase[f] : undefined; view.clockLock = F.clockLock ? F.clockLock[f] : 0;
   return view;
 }
 
@@ -126,6 +128,7 @@ export function worldFor(gen, { rhythmic = 6, segDur = 20 } = {}) {
  *  mode, spec, inter / rate (Hz), pred (mean running anticipation at impacts), events, anticIncome, impactLoss, E0/E1, I0/I1, need0/need1 */
 export function live(org, F, { from = 0, to = F.n, each = null } = {}) {
   const view = { amp: null, onset: 0, rough: 0, sub: 0 };
+  if (org.C && org.C.clock && org.C.clock.length) withClock(F);   // an organism with clock receptors hears ON's beat phase too
   let vSum = 0, n = 0, died = -1, interSum = 0, rateSum = 0, run = 0, win = 0, winN = 0, maxWin = 0;
   const seg = new Map();      // segment index -> per-segment record
   for (let f = from; f < to; f++) {

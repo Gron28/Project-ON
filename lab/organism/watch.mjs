@@ -8,7 +8,8 @@
 // snapshot(): { status, cost: { developMs, msPerSec }, staticVersion, static? (sent when full or when the graph changed),
 //   live: { t, rf, spikes, spikeAge, beatPhase, dead, resonators, state, stats, phys, chrom }, timing: { impacts: [{ t, a, p, leadMs, beatPhase }] } }
 // leadMs: how far ahead of the impact its brace peaked (> 0 braced before the hit); beatPhase: the being's shown beat
-// phase then. static.version is new for every organism (a module-wide count) and bumps when pruning or sprouting changed it.
+// phase then. An organism with clock receptors (develop.mjs T.CLOCK) reads the same phase as its clock sense, with the mind's
+// lock as their gain (setClock(); lab/organism/clock.mjs computes the same in the lab). static.version is new for every organism (a module-wide count) and bumps when pruning or sprouting changed it.
 // drive(): the compact state that lets the organism move ON when settings.organism.drive is on (being/worker.mjs posts it
 // as 'org-drive' after each audio block, at most ~60/s; being/index.html ORGD maps it): { t, reg[8] (its motor cells'
 // activation grouped by the nearest of kuramoto's REGION_DIRS, over their running peak, 0..1; a region with no motor cell
@@ -36,7 +37,12 @@ export function createWatch({ genome = null, seed = 1, label = '' } = {}) {
   const genomeLabel = own ? label || 'genome' : `seed ${seed} (no evolved genome)`;
   const spikes = new Uint16Array(SPIKE_CAP), spikeAt = new Int32Array(SPIKE_CAP), brace = new Float32Array(RING), pending = [], impacts = [];
   let nSpk = 0, step = 0, pulledAt = -1e9, version = 1000 * ++organisms, sent = -1, structure = -1, costMs = 0, costN = 0, msPerSec = 0;
-  const w = { org, developMs, onPhase: 0 };
+  const w = { org, developMs, onPhase: 0, onLock: 0, onHz: 0 };
+  // the clock (being/index.html org-phase: the shown beat phase, the mind's lock and pulse rate, ~60/s): carried forward
+  // at the pulse rate between messages, so each 4 ms step reads its own phase; a clock older than 0.5 s fades out
+  let clockAt = 0;
+  w.setClock = (d) => { w.onPhase = Number.isFinite(+d.phase) ? +d.phase : 0; w.onLock = Number.isFinite(+d.lock) ? +d.lock : 0; w.onHz = Number.isFinite(+d.hz) ? +d.hz : 0; clockAt = org.time; };
+  const hasClock = org.C.clock.length > 0;
   // drive: each motor cell's region, by its normal (its position when it has none)
   const motors = org.C.motor, regOf = new Uint8Array(motors.length), regN = new Float32Array(NREG), PEAK_TAU = 5;
   motors.forEach((i, k) => {
@@ -49,6 +55,7 @@ export function createWatch({ genome = null, seed = 1, label = '' } = {}) {
 
   w.tick = (f) => {
     const a = now();
+    if (hasClock) { const age = org.time - clockAt, ph = w.onPhase + w.onHz * age; f.clockPhase = ph - Math.floor(ph); f.clockLock = age < 0.5 ? w.onLock : 0; }
     org.tick(f);
     const o = org.out;
     brace[step % RING] = o.brace;
@@ -83,7 +90,8 @@ export function createWatch({ genome = null, seed = 1, label = '' } = {}) {
     const st = org.state(), ph = org.phys, r = net.OSC.length ? net.resonators() : null;
     out.live = {
       t: org.time, rf: Float32Array.from(net.rf), spikes: spikes.slice(0, nSpk),
-      spikeAge: Uint16Array.from(spikeAt.subarray(0, nSpk), (s) => Math.min(65535, step - s - 1)), beatPhase: w.onPhase,   // each spike's age in 4 ms steps; the being's shown beat phase now dead: anyDead ? Uint8Array.from(net.dead) : null,
+      spikeAge: Uint16Array.from(spikeAt.subarray(0, nSpk), (s) => Math.min(65535, step - s - 1)), beatPhase: w.onPhase,   // each spike's age in 4 ms steps; the being's shown beat phase now
+      dead: anyDead ? Uint8Array.from(net.dead) : null,
       resonators: r ? { cells: Int32Array.from(r.cells), hz: r.hz, phase: r.phase } : null,
       state: { ...st, stimNeed: st.need },
       stats: { ...net.stats, synapses: e2m(net, N) },

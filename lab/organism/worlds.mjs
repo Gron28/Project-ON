@@ -236,7 +236,7 @@ export function render(w) {
 /** being/ear.mjs over each channel of the world, in environment.mjs earFrames() format plus the channels (+ the world) */
 export function framesOf(w) {
   const x = render(w), earL = createEar(), earR = createEar(), n = Math.floor(x.L.length / FRAME);
-  const amp = new Float32Array(n * NE), onset = new Float32Array(n), rough = new Float32Array(n), sub = new Float32Array(n), seg = new Uint8Array(n);
+  const amp = new Float32Array(n * NE), onset = new Float32Array(n), rough = new Float32Array(n), sub = new Float32Array(n), level = new Float32Array(n), seg = new Uint8Array(n);
   const ampL = new Float32Array(n * NE), ampR = new Float32Array(n * NE), onsetL = new Float32Array(n), onsetR = new Float32Array(n), pan = new Float32Array(n);
   { // where the sounds that began in the last 30 ms came from
     const ev = w.events; let j0 = 0;
@@ -252,9 +252,9 @@ export function framesOf(w) {
     for (let i = f * FRAME, e = i + FRAME; i < e; i++) { earL.sample(x.L[i]); earR.sample(x.R[i]); }
     const a = earL.frame(), b = earR.frame(), o = f * NE;
     ampL.set(a.amp, o); ampR.set(b.amp, o); for (let k = 0; k < NE; k++) amp[o + k] = 0.5 * (a.amp[k] + b.amp[k]);
-    onsetL[f] = a.onset; onsetR[f] = b.onset; onset[f] = Math.max(a.onset, b.onset); rough[f] = 0.5 * (a.rough + b.rough); sub[f] = 0.5 * (a.sub + b.sub);
+    onsetL[f] = a.onset; onsetR[f] = b.onset; onset[f] = Math.max(a.onset, b.onset); rough[f] = 0.5 * (a.rough + b.rough); sub[f] = 0.5 * (a.sub + b.sub); level[f] = 0.5 * (a.level + b.level);
     while (si < w.segs.length - 1 && (f + 1) * DT_FRAME > w.segs[si].t1) si++;
     seg[f] = si;
   }
-  return { n, amp, onset, rough, sub, seg, ampL, ampR, onsetL, onsetR, pan, schedule, world: w };
+  return { n, amp, onset, rough, sub, level, seg, ampL, ampR, onsetL, onsetR, pan, schedule, world: w };
 }

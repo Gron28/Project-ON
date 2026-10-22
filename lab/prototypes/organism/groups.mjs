@@ -21,6 +21,7 @@ export function buildGroups(org, member, depthArr, areaColor, typeCol) {
   add('rough', 'roughness', 'sense', ofType(T.ROUGH), typeCol[T.ROUGH], 'feeds stimulation');
   add('sub', 'sub-bass touch', 'sense', ofType(T.SUB), typeCol[T.SUB], 'feeds stimulation');
   add('proprio', 'proprioception', 'sense', ofType(T.PROPRIO), typeCol[T.PROPRIO], 'feels strain');
+  add('clock', 'beat clock', 'sense', ofType(T.CLOCK), typeCol[T.CLOCK], 'reads the beat phase the being shows');
   // areas: interneurons by community; areas under 8 interneurons fold into one 'scattered' group
   const inter = ofType(T.INTER), byC = new Map();
   for (const i of inter) { const c = member ? member[i] : 0; if (!byC.has(c)) byC.set(c, []); byC.get(c).push(i); }

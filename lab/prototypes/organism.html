@@ -237,7 +237,7 @@ function renderMetrics() {
 }
 function renderKeys() {
   const m = $('colorBy').value;
-  if (m === 'type') $('keys').innerHTML = [T.EAR, T.ONSET, T.ROUGH, T.SUB, T.PROPRIO, T.INTER, T.INTERO, T.MOD, T.MOTOR, T.CHROM].map((t) => `<span class="sw" style="background:#${TYPE_COL[t].toString(16).padStart(6, '0')}"></span>${TYPE_NAMES[t]}`).join(' · ') + ' · <span class="sw" style="background:#5a7dff"></span>inhibitory inter';
+  if (m === 'type') $('keys').innerHTML = [T.EAR, T.ONSET, T.ROUGH, T.SUB, T.PROPRIO, T.INTER, T.INTERO, T.MOD, T.MOTOR, T.CHROM, T.CLOCK].map((t) => `<span class="sw" style="background:#${TYPE_COL[t].toString(16).padStart(6, '0')}"></span>${TYPE_NAMES[t]}`).join(' · ') + ' · <span class="sw" style="background:#5a7dff"></span>inhibitory inter';
   else if (m === 'ei') $('keys').innerHTML = '<span class="sw" style="background:#f0a040"></span>excitatory · <span class="sw" style="background:#5a7dff"></span>inhibitory · <span class="sw" style="background:#e8e6e0"></span>receptor';
   else if (m === 'depth') $('keys').innerHTML = 'blue: the senses (0 hops) → red: 6+ hops · grey: unreachable';
   else $('keys').innerHTML = Array.from({ length: 8 }, (_, c) => `<span class="sw" style="background:#${communityColor(c).getHexString()}"></span>${c + 1}`).join(' ') + ' · grey: small';

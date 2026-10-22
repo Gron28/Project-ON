@@ -7,7 +7,7 @@
 //      { type:'recycle', tex }            (optional: the page hands a tissue texture buffer back, so none is allocated per frame)
 //      { type:'organism', on, genome, seed, label, drive }  (the lab organism, lab/organism/watch.mjs: grown on 'on', freed on 'off')
 //      { type:'org-drive', on }           (drive switched without regrowing the organism)
-//      { type:'org-pull', full } / { type:'org-phase', phase }  (the dashboard's snapshot request; the being's shown beat phase)
+//      { type:'org-pull', full } / { type:'org-phase', phase, lock, hz }  (the dashboard's snapshot request; the being's shown beat phase, the mind's lock and pulse rate)
 // Out: { type:'ear', amp, mu, onset, rough, sub, level, hum }  every 10 ms of audio
 //      { type:'tissue', tex, act, sigma, branching }           every ~33 ms of audio
 //      { type:'organism', status, cost, staticVersion, static?, live, timing }  answering each 'org-pull'
@@ -47,7 +47,7 @@ self.onmessage = (e) => {
   const d = e.data;
   if (d.type === 'organism') { setOrganism(d); return; }
   if (d.type === 'org-drive') { orgDrive = !!d.on; return; }
-  if (d.type === 'org-phase') { if (watch) watch.onPhase = +d.phase || 0; return; }
+  if (d.type === 'org-phase') { if (watch) watch.setClock(d); return; }
   if (d.type === 'org-pull') {
     if (!watch) { self.postMessage({ type: 'organism', status: orgStatus, error: orgError || undefined }); return; }
     const s = watch.snapshot(!!d.full); self.postMessage({ type: 'organism', ...s }, watch.transferables(s)); return;

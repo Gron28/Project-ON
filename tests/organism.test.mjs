@@ -304,7 +304,7 @@ test('anticipation credit pays only for inhibition in place before an impact: a 
   // (a reaction); the drums are a steady rock pattern or the same hits with shuffled intervals
   // (on the network as development leaves it, before gestation: a gestated network can already anticipate a steady
   // groove on its own, which would blur the controlled baseline)
-  const g = setGenes(RES, { nOsc: 0 });
+  const g = setGenes(RES, { nOsc: 0, nClock: 0 });
   const run = (shuffle, mode) => {
     const F = earFrames([{ mode: 'rhythm', pattern: 'rock', bpm: 100, shuffle, dur: 40 }], 5), org = createOrganism({ genome: g, seed: 3, gestation: 0 }), net = org.net;
     const e = net.edges(), targets = new Set(); for (let i = 0; i < org.dev.N; i++) if (net.fanS[i] > 0.05) targets.add(i);
@@ -342,7 +342,7 @@ test('emergent anticipation in a genome with resonators (measured, reported, not
 
 test('a 38-gene genome (evolved before the motor trophic field) develops exactly as with tropM = 0', () => {
   for (const k of [1, 2]) {
-    const g = randomGenome(k), short = g.slice(0, NG_TROPHIC), zero = setGenes(g, { tropM: 0 });
+    const g = randomGenome(k), short = g.slice(0, NG_TROPHIC), zero = setGenes(g, { tropM: 0, nClock: 0 });
     assert.equal(fingerprint(develop(short, k)), fingerprint(develop(zero, k)));
   }
 });

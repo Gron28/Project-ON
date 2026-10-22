@@ -1376,7 +1376,7 @@ function embSummary(E) {   // 1280 dims as 64 bands, centred and scaled to -1..1
 function devFrame(now) {
   fpsN++; if (now - fpsT > 1000) { fps = fpsN; fpsN = 0; fpsT = now; }
   if (!devOn) ORG.full = true;   // the dashboard gets the organism's whole graph again when it opens
-  else if (ORG.on && !devPaused) beingWorker.postMessage({ type: 'org-phase', phase: SHOW.phase });   // the beat it shows, for 'brace vs beat'
+  if (ORG.on && !(devOn && devPaused)) beingWorker.postMessage({ type: 'org-phase', phase: SHOW.phase, lock: mind.lock, hz: mind.pulseHz });   // the beat it shows: 'brace vs beat' and the organism's clock sense
   if (!devOn || devPaused || now - devAt < 160) return;
   devAt = now;
   const st = an.state, r = ML.brain, sug = ML.sug;

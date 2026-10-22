@@ -2,7 +2,11 @@
 //
 // Inputs come only from real sensors: being/ear.mjs (28 unit amplitudes, onset, roughness, sub-bass) and being/physics.mjs
 // proprioception (local surface deformation from the l=2 modes, displacement and slosh at each receptor, plus jolt). No
-// analyzer, no ML, no beat tracker. Receptor transduction is physiology (adapting hair cells, a saturating rate), not
+// analyzer, no ML, no beat tracker reaches it, except through one sense: its clock receptors (nClock, develop.mjs T.CLOCK)
+// read the beat phase ON's own beat organ predicts (clock.mjs: the mind's felt pulse and timing grid; frame.clockPhase,
+// frame.clockLock), each tuned to its own phase (von Mises, clockKappa), as strongly as the mind is locked; what the
+// organism does with that is its own (laws, learning). step() gives it a clock from its own ear (the mind alone, no
+// analyzer). Receptor transduction is physiology (adapting hair cells, a saturating rate), not
 // wiring. Interoceptive cells feel the milieu's variables as an input current; modulatory cells feel the reward
 // prediction error of impacts (milieu.mjs). Outputs: motor cells add forces and torques to the physical body and stiffen
 // it (brace.mjs: only strong hits strike, kicks and snares, never hats; an impact met by a brace already stiff costs
@@ -30,8 +34,10 @@ import { createMilieu } from './milieu.mjs';
 import { decode } from './genome.mjs';
 import { BRACE, EMD, protection, createImpactDetector, createImpact, createLowBand, fatigueStep } from './brace.mjs';
 import { earFrames, frameAt } from './environment.mjs';
+import { createClock, withClock } from './clock.mjs';
 
 export const FRAME = SR * DT;      // 192 audio samples per network step
+const CLOCK_HZ = 150;               // a clock receptor's peak rate at its preferred phase, at full lock
 const MOTOR_F = 0.5;               // force of one fully contracted motor cell (the groove's own push peaks near 2-3)
 const c01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 // Gestation (developmental homeostatic plasticity; Turrigiano & Nelson 2004): before birth the new network hears
@@ -52,10 +58,12 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
   let milieu = createMilieu(G);
   let ear = createEar(), phys = createPhysics();
   const by = (t) => { const l = []; for (let i = 0; i < N; i++) if (dev.type[i] === t) l.push(i); return Int32Array.from(l); };
-  const C = { ear: by(T.EAR), onset: by(T.ONSET), rough: by(T.ROUGH), sub: by(T.SUB), proprio: by(T.PROPRIO), inter: by(T.INTER), intero: by(T.INTERO), mod: by(T.MOD), motor: by(T.MOTOR), chrom: by(T.CHROM) };
+  const C = { ear: by(T.EAR), onset: by(T.ONSET), rough: by(T.ROUGH), sub: by(T.SUB), proprio: by(T.PROPRIO), inter: by(T.INTER), intero: by(T.INTERO), mod: by(T.MOD), motor: by(T.MOTOR), chrom: by(T.CHROM), clock: by(T.CLOCK) };
   const unit = (i) => dev.extra[4 * i] | 0, u3 = (i) => { const p = dev.pos, l = Math.hypot(p[3 * i], p[3 * i + 1], p[3 * i + 2]) || 1; return [p[3 * i] / l, p[3 * i + 1] / l, p[3 * i + 2] / l]; };
   const propY = Array.from(C.proprio, (i) => Y2(u3(i))), propU = Array.from(C.proprio, u3);
   const slow = new Float32Array(NE).fill(DELTA);
+  const prefC = Float32Array.from(C.clock, (i) => dev.extra[4 * i]), kappa = G.clockKappa ?? 8;
+  const clk = C.clock.length ? createClock({ bias: 0 }) : null;   // step(): the clock from its own ear, the mind alone (no analyzer)
   // stereo hearing: each hair cell's and onset receptor's cardioid gains on the two channels, and each hair cell's own
   // adaptation (on its own mix)
   const latX = (i) => u3(i)[0], gainR = (list) => Float32Array.from(list, (i) => 0.5 * (1 + latX(i)));
@@ -93,6 +101,12 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
       for (const i of C.onset) net.ext[i] = 2 + 120 * Math.tanh(f.onset / 5);
     }
     stim /= C.ear.length;
+    // clock receptors: ON's beat phase (clock.mjs), each cell tuned to its own phase (von Mises, concentration clockKappa),
+    // as strongly as the mind is locked; no clock (frames without one): their spontaneous rate only
+    if (C.clock.length) {
+      const ph = f.clockPhase, g = Number.isFinite(ph) ? c01(f.clockLock) : 0;
+      C.clock.forEach((i, q) => { net.ext[i] = 1 + (g > 0 ? CLOCK_HZ * g * Math.exp(kappa * (Math.cos(2 * Math.PI * (ph - prefC[q])) - 1)) : 0); });
+    }
     const on = Math.tanh(f.onset / 5);
     for (const i of C.rough) net.ext[i] = 1 + 60 * Math.tanh(4 * f.rough);
     for (const i of C.sub) net.ext[i] = 1 + 80 * Math.tanh(5 * f.sub);
@@ -158,7 +172,7 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
     // rates for the milieu
     let ni = 0; for (const i of C.inter) ni += net.spk[i];
     const kk = 1 - Math.exp(-DT / 0.25);
-    let nr = 0; for (let t = 0; t <= T.PROPRIO; t++) nr += S.spikesByType[t];
+    let nr = S.spikesByType[T.CLOCK]; for (let t = 0; t <= T.PROPRIO; t++) nr += S.spikesByType[t];
     interE += kk * (ni / (C.inter.length * DT) - interE); rateE += kk * (S.spikes / (N * DT) - rateE); netE += kk * ((S.spikes - nr) / (N * DT) - netE);
     // wiring: spikes of network cells times their arbor length (receptors' axons run on the sense organ's supply)
     let wl = 0; if (S.spikes > nr) { const spk = net.spk, arb = net.arbor, rc = net.recep; for (let i = 0; i < N; i++) if (spk[i] && !rc[i]) wl += arb[i]; }
@@ -179,7 +193,7 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
   if (gestation > 0) {
     const g0 = decode(dev.genome), keep = { etaS: G.etaS, etaI: G.etaI, etaIP: G.etaIP, etaH: G.etaH, pruneThr: G.pruneThr }, law = { ...net.LAW };
     G.etaS = g0.etaS; G.etaI = g0.etaI; G.etaIP = g0.etaIP; G.etaH = 0; G.pruneThr = 0; net.LAW.atrophy = false; net.LAW.sprout = false;
-    const F = gestationFrames(), view = { amp: null, onset: 0, rough: 0, sub: 0 }, n = Math.min(F.n, Math.round(gestation / DT));
+    const F = C.clock.length ? withClock(gestationFrames(), { bias: 0 }) : gestationFrames(), view = { amp: null, onset: 0, rough: 0, sub: 0 }, n = Math.min(F.n, Math.round(gestation / DT));
     for (let f = 0; f < n; f++) { tick(frameAt(F, f, view)); milieu.s.energy = 0.8; milieu.s.integrity = 0.9; milieu.s.alive = true; }
     Object.assign(G, keep); Object.assign(net.LAW, law); net.birth();
     milieu = createMilieu(G); phys = createPhysics(); impactOf2 = createImpactDetector(); lowBand = createLowBand(EAR_CF); act.fill(0); stiff.fill(0); raw.fill(0); fat.fill(0); slow.fill(DELTA); slowC.fill(DELTA); ring.fill(0); pending = []; done = null;
@@ -191,7 +205,7 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
     const n = chunk ? chunk.length : Math.round(dt * SR);
     for (let k = 0; k < n; k++) {
       ear.sample(chunk ? chunk[k] : 0);
-      if (++inSamples === FRAME) { inSamples = 0; last = ear.frame(); tick(last); }
+      if (++inSamples === FRAME) { inSamples = 0; last = ear.frame(); if (clk) { const c = clk.frame(last); last.clockPhase = c.phase; last.clockLock = c.lock; } tick(last); }
     }
     return state();
   }

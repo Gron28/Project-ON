@@ -13,7 +13,8 @@
 //      the first-born travel deepest, later ones stop shallower (inside-out, as in cortex). Cells then repel softly.
 //      Interoceptive and modulatory cells arise where the nucleus signal C is high (modulatory: where C and Q overlap).
 //      A share of interneurons (nOsc, biased deep or shallow by oscRad) become resonators: cells with an intrinsic
-//      oscillation that entrains to its input (network.mjs).
+//      oscillation that entrains to its input (network.mjs). Clock receptors (nClock, T.CLOCK) arise where C is high too:
+//      each reads ON's beat phase (clock.mjs) tuned to its own phase k / nClock (organism.mjs), a population time code.
 //   4. Fate. Each interneuron or interoceptive cell becomes inhibitory with probability fracI, biased by the local Q
 //      level (qFateI). Dale's law: a cell's sign is fixed. Interoceptors pick the milieu variable whose morphogen
 //      (C: energy, P: integrity, Q: stimulation) is strongest where they sit, and code deficit or sufficiency by Q.
@@ -29,9 +30,9 @@
 import { decode, lcg, mix, padGenome } from './genome.mjs';
 import { NE } from '../../being/ear.mjs';
 
-export const T = { EAR: 0, ONSET: 1, ROUGH: 2, SUB: 3, PROPRIO: 4, INTER: 5, INTERO: 6, MOD: 7, MOTOR: 8, CHROM: 9 };
-export const TYPE_NAMES = ['ear', 'onset', 'rough', 'sub-bass', 'proprio', 'inter', 'intero', 'modulatory', 'motor', 'chromatophore'];
-export const isReceptor = (t) => t <= T.PROPRIO;
+export const T = { EAR: 0, ONSET: 1, ROUGH: 2, SUB: 3, PROPRIO: 4, INTER: 5, INTERO: 6, MOD: 7, MOTOR: 8, CHROM: 9, CLOCK: 10 };
+export const TYPE_NAMES = ['ear', 'onset', 'rough', 'sub-bass', 'proprio', 'inter', 'intero', 'modulatory', 'motor', 'chromatophore', 'clock'];
+export const isReceptor = (t) => t <= T.PROPRIO || t === T.CLOCK;
 export const MILIEU_VARS = ['energy', 'integrity', 'stimulation'];
 export const KMAX = 64;                       // axon capacity: at most this many synapses per cell
 const LAM_M = 0.45, M_FLOOR = 0.05;           // motor trophic field: reach, and the growth cone's sensing floor
@@ -114,6 +115,18 @@ export function develop(genome, seed = 1) {
     const p = sampleBy((x) => (C(x) / cMax) * Math.min(1, Q(x) / Qmean), 0.15, 0.6);
     add({ type: T.MOD, pos: p, birthPos: surf(norm(p), 0.92), born: 0.3 + 0.3 * r(), rank: 0.5, isI: false });
   }
+  // clock receptors (nClock): induced where the nucleus signal C is high, like the interoceptors; each tuned to its own
+  // phase of the beat cycle, k / nClock. Their own random sequence and the last ids, so a genome without them develops
+  // exactly as before and one with them grows the same network plus their axons
+  if (G.nClock > 0) {
+    const rc = lcg(mix(seed, 31));
+    for (let k = 0; k < G.nClock; k++) {
+      let p = null;
+      for (let t = 0; t < 2000 && !p; t++) { const u = randUnit(rc), rr = 0.15 + 0.45 * Math.cbrt(rc()), x = surf(u, rr); if (rc() < (C(x) / cMax) ** 2) p = x; }
+      p = p || surf(randUnit(rc), 0.15);
+      add({ type: T.CLOCK, pos: p, born: 0.3 + 0.3 * rc(), rank: 0.5, pref: k / G.nClock });
+    }
+  }
   // soft repulsion among the migrated cells (spacing: a law of packing, not a layout)
   const mob = cells.filter((c) => c.type >= T.INTER && c.type <= T.MOD), d0 = 0.75 * Math.cbrt((4 / 3) * Math.PI * 0.6 / mob.length);
   for (let it = 0; it < 6; it++) for (let a = 0; a < mob.length; a++) for (let b = a + 1; b < mob.length; b++) {
@@ -184,7 +197,7 @@ export function develop(genome, seed = 1) {
   // ---- pack ---------------------------------------------------------------------------------------------------------------
   const type = Uint8Array.from(cells, (c) => c.type), isI = Uint8Array.from(cells, (c) => (c.isI ? 1 : 0));
   const birthPos = new Float32Array(3 * N); cells.forEach((c, i) => birthPos.set(c.birthPos || c.pos, 3 * i));
-  const extra = new Float32Array(N * 4);   // per type: ear unit | proprio polarity | intero variable, deficit | chrom hue
+  const extra = new Float32Array(N * 4);   // per type: ear unit | proprio polarity | intero variable, deficit | chrom hue | clock preferred phase
   const vec = new Float32Array(N * 6);     // motor normal and tangent
   const osc = new Float32Array(N * 2);     // resonators: natural rate (Hz, 0 = not a resonator), firing lead (s)
   cells.forEach((c, i) => {
@@ -192,6 +205,7 @@ export function develop(genome, seed = 1) {
     if (c.type === T.PROPRIO) extra[4 * i] = c.polarity;
     if (c.type === T.INTERO) { extra[4 * i] = c.variable; extra[4 * i + 1] = c.deficit ? 1 : 0; }
     if (c.type === T.CHROM) extra[4 * i] = c.hue;
+    if (c.type === T.CLOCK) extra[4 * i] = c.pref;
     if (c.type === T.MOTOR) { vec.set(c.normal, 6 * i); vec.set(c.tangent, 6 * i + 3); }
     if (c.osc) { osc[2 * i] = c.osc.hz; osc[2 * i + 1] = c.osc.lead; }
   });

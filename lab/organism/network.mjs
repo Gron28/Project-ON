@@ -141,7 +141,7 @@ export function createNetwork(dev, opt = {}) {
   // homeostatic laws run
   const LAW = { atrophy: true, sprout: true, ...(opt.laws || {}) };
   let slot = 0, n = 0;
-  const S = { energyFactor: 1, quiet: 1, sensoryIn: 0, spikes: 0, spikesByType: new Float32Array(10), gEmean: 0, gImean: 0, mod: 0 };
+  const S = { energyFactor: 1, quiet: 1, sensoryIn: 0, spikes: 0, spikesByType: new Float32Array(11), gEmean: 0, gImean: 0, mod: 0 };
 
   function step() {
     const eF = S.energyFactor, base = slot * N, mg = G.modGain * 0.3 / DELTA, kv = DT / TAU_M, hs = (n % H) * N, quiet = S.quiet;

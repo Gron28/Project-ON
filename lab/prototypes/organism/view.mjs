@@ -22,7 +22,7 @@ import { createRoles, STAGES } from './roles.mjs';
 
 const add = { transparent: true, blending: THREE.AdditiveBlending, depthWrite: false };
 const PAL = [0xe8a33d, 0x3fb8d0, 0xd95f8f, 0x8fd16a, 0x9d7cf0, 0xf07a4a, 0x4fd6a0, 0xe0d050, 0x5f8ff0, 0xd08ad8, 0xa0c04a, 0xf0a0a0];
-export const TYPE_COL = { [T.EAR]: 0xf0b048, [T.ONSET]: 0xffe070, [T.ROUGH]: 0xff6b6b, [T.SUB]: 0x4f9cff, [T.PROPRIO]: 0x8fd16a, [T.INTER]: 0xc9ced6, [T.INTERO]: 0xff8fb1, [T.MOD]: 0xc58cff, [T.MOTOR]: 0xff7a3d, [T.CHROM]: 0x3fd0c9 };
+export const TYPE_COL = { [T.EAR]: 0xf0b048, [T.ONSET]: 0xffe070, [T.ROUGH]: 0xff6b6b, [T.SUB]: 0x4f9cff, [T.PROPRIO]: 0x8fd16a, [T.INTER]: 0xc9ced6, [T.INTERO]: 0xff8fb1, [T.MOD]: 0xc58cff, [T.MOTOR]: 0xff7a3d, [T.CHROM]: 0x3fd0c9, [T.CLOCK]: 0x9ef0ff };
 const I_COL = 0x5a7dff;
 const c01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const ease = (x) => x * x * (3 - 2 * x);
@@ -514,7 +514,7 @@ export function viewKey(mode, colorBy = 'community') {
     gl('∙∙∙', 'pulses moving along it: signals now'), gl('62%', 'share of what the receiver gets'), gl('↩', 'faint arrows back: feedback'), gl('~80 ms before', 'when it fires, measured around hits and beats')].join('');
   const shapes = [gl('▲', 'sense'), gl('●', 'thinking cell'), gl('◆', 'need sensor'), gl('✦', 'feeling core'), gl('■', 'muscle'), gl('⬭', 'skin cell')].join('');
   if (mode === 'live') return shapes + gl('✧', 'bright = firing, sparks = a spike travelling a synapse') + gl('◯', 'violet wave = the feeling core’s signal', '#c58cff');
-  const colours = colorBy === 'type' ? [sw(TYPE_COL[T.EAR], 'ear'), sw(TYPE_COL[T.ONSET], 'onset'), sw(TYPE_COL[T.ROUGH], 'roughness'), sw(TYPE_COL[T.SUB], 'sub-bass'), sw(TYPE_COL[T.PROPRIO], 'body sense'), sw(TYPE_COL[T.INTER], 'thinking'), sw(I_COL, 'inhibitory'), sw(TYPE_COL[T.INTERO], 'need'), sw(TYPE_COL[T.MOD], 'feeling core'), sw(TYPE_COL[T.MOTOR], 'muscle'), sw(TYPE_COL[T.CHROM], 'skin')].join('')
+  const colours = colorBy === 'type' ? [sw(TYPE_COL[T.EAR], 'ear'), sw(TYPE_COL[T.ONSET], 'onset'), sw(TYPE_COL[T.ROUGH], 'roughness'), sw(TYPE_COL[T.SUB], 'sub-bass'), sw(TYPE_COL[T.PROPRIO], 'body sense'), sw(TYPE_COL[T.INTER], 'thinking'), sw(I_COL, 'inhibitory'), sw(TYPE_COL[T.INTERO], 'need'), sw(TYPE_COL[T.MOD], 'feeling core'), sw(TYPE_COL[T.MOTOR], 'muscle'), sw(TYPE_COL[T.CHROM], 'skin'), sw(TYPE_COL[T.CLOCK], 'beat clock')].join('')
     : colorBy === 'ei' ? sw(0xf0a040, 'excites') + sw(I_COL, 'inhibits') + sw(0xe8e6e0, 'sense')
     : colorBy === 'depth' ? '<span class="k">colour: synapses from the senses, blue 0 → red 6+, grey unreached</span>'
     : '<span class="k">colour: its areas (cells wired mostly to each other)</span>';
