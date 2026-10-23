@@ -60,12 +60,13 @@ export function areasOf(org) {
 export const fitGenome = (g) => Float64Array.from(Array.from(g).slice(0, NG), (x) => (Number.isFinite(+x) ? +x : 0.5));
 export const devSeeds = (k) => Array.from({ length: k }, (_, i) => mix(i + 1, 0xbe9c) % 1000003 + 1);
 
-/** development with plasticity frozen: every eta* rate (genes, present or future, and the intrinsic plasticity law) and
- *  pruning set to 0; gestation still runs with the genome's own homeostatic rates (organism.mjs) */
+/** development with plasticity frozen: every eta* rate (genes, present or future, and the intrinsic plasticity law),
+ *  the cerebellar law's rate and pruning set to 0; gestation still runs with the genome's own homeostatic rates (organism.mjs) */
 export function frozenDev(genome, seed) {
   const dev = develop(genome, seed), G = { ...dev.G };
   for (const k of Object.keys(G)) if (/^eta/i.test(k) && typeof G[k] === 'number') G[k] = 0;
   if ('pruneThr' in G) G.pruneThr = 0;
+  if ('cbGain' in G) G.cbGain = 0;                 // the cerebellar timing law is plasticity too
   dev.G = G; return dev;
 }
 

@@ -7,7 +7,7 @@
 // counts, the homeostatic set point and a narrow metabolic efficiency; how far hearing spreads over the skin; how many
 // interneurons become resonators and how they entrain; the eligibility span and the modulator's feel for outcomes; how
 // strongly axons follow the trophic factor the motor cells release; how many clock receptors read ON's beat phase and how
-// sharply each is tuned.
+// sharply each is tuned; how fast the cerebellar law corrects the brace's timing.
 // Development (develop.mjs) turns them into a body.
 
 /** seedable LCG (the repo's constants: Numerical Recipes, as in being/ear.mjs) */
@@ -49,16 +49,18 @@ export const GENES = [
   ['modFeel', 0, 3],                                                     // modulatory cells' drive by the impact outcome (reward prediction error)
   ['tropM', 0, 1.5],                                                     // axon tropism up the motor cells' trophic field (develop.mjs)
   ['nClock', 0, 16, true], ['clockKappa', 2, 20],                        // clock receptors reading ON's beat phase (clock.mjs) and their tuning sharpness
+  ['cbGain', 0, 0.03],                                                   // cerebellar timing-error law: rate of the signed brace-timing teaching (organism.mjs)
 ];
 export const NG = GENES.length;
 export const NG_LEGACY = 28;                     // genomes evolved before the hearing-field and resonator genes
 export const NG_TROPHIC = 38;                    // genomes evolved before the effector-derived trophic field
 export const NG_CLOCK = 39;                      // genomes evolved before the clock sense
+export const NG_CB = 41;                         // genomes evolved before the cerebellar timing-error law
 /** values (0..1) for the appended genes that reproduce the 28-gene organism: one ear placode (the original strip
  *  layout, see develop.mjs), no resonators, a 1 s eligibility trace, a modulator blind to impact outcomes; and (for 28-
  *  and 38-gene genomes) axons blind to the motor cells' trophic field; and (every genome evolved before the clock genes) no clock
- *  receptors */
-export const LEGACY_PAD = { earSpread: 0, nOsc: 0, oscHz: 0.5, oscSpread: 0, oscK: 0, oscEta: 0, oscLead: 0, oscRad: 0.5, tauElig: (1 - 0.3) / 1.7, modFeel: 0, tropM: 0, nClock: 0, clockKappa: 1 / 3 };
+ *  receptors; and (every genome evolved before it) no cerebellar timing-error law */
+export const LEGACY_PAD = { earSpread: 0, nOsc: 0, oscHz: 0.5, oscSpread: 0, oscK: 0, oscEta: 0, oscLead: 0, oscRad: 0.5, tauElig: (1 - 0.3) / 1.7, modFeel: 0, tropM: 0, nClock: 0, clockKappa: 1 / 3, cbGain: 0 };
 /** a full-length genome: a shorter (legacy) one is padded with LEGACY_PAD */
 export function padGenome(g) { return g.length >= NG ? g : Float64Array.from({ length: NG }, (_, i) => (i < g.length ? g[i] : LEGACY_PAD[GENES[i][0]])); }
 

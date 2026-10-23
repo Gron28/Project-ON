@@ -2,7 +2,7 @@
 // descriptors, rated on several development seeds and several train worlds. Node script (worker threads).
 //   .runtime/node-v24.21.0-win-x64/node.exe lab/organism/evolve.mjs [--minutes 20] [--workers 7] [--seeds 2] [--dur 12]
 //       [--desc motorDepth,interHz] [--resume] [--measure-only] [--no-baseline]
-//       [--bench-dur 24] [--out lab/results] [--prev lab/results/organism-best.json]
+//       [--bench-dur 24] [--out lab/results] [--prev lab/results/organism-best.json] [--seed-genomes seeds.json]
 //
 // Rating (rateGenome, one development seed at a time, `--seeds` seeds per genome): the organism lives the train worlds
 // (worlds.mjs TRAIN, groove variant, `--dur` s each) once as experience, then hears each of them again as groove and as
@@ -152,6 +152,9 @@ if (isCli) {
       console.log(`resumed: ${evals} evaluations, ${A.size} cells, ${(spentMs / 60000).toFixed(1)} min spent`);
     }
     const prevBest = fs.existsSync(prevFile) ? JSON.parse(fs.readFileSync(prevFile, 'utf8')) : null;   // seeds the first batch, and the held-out baseline
+    // --seed-genomes <file>: a JSON list of genomes (arrays, or objects with a `genome`) that seed the first batch instead:
+    // each as it is, then mutants around them in turn
+    const seedFile = arg('seed-genomes', null), seedList = seedFile ? JSON.parse(fs.readFileSync(path.resolve(seedFile), 'utf8')).map((x) => padGenome(fitGenome(x.genome || x))) : null;
     const workers = Array.from({ length: NW }, () => new Worker(__file, { workerData: { role: 'evolve' } }));
     const pending = new Map(); let nextId = 0, wi = 0;
     workers.forEach((w) => w.on('message', (m) => { const p = pending.get(m.id); pending.delete(m.id); p(m); }));
@@ -163,6 +166,7 @@ if (isCli) {
       // the first batch: the previous best; when it predates genes, half the batch is the previous best with those new genes
       // drawn at random (stepping stones into what it never had); the rest random genomes
       if (k < BATCH || A.size === 0) {
+        if (seedList) { if (k < seedList.length) return Float64Array.from(seedList[k]); const r = lcg(mix(BASE ^ 0x5eed, k)); return mutate(seedList[k % seedList.length], r, 0.3, 0.06); }
         if (!prevBest) return randomGenome(1000 + k);
         const p = padGenome(fitGenome(prevBest.genome)), n0 = Math.min(prevBest.genome.length, p.length);
         if (k === 0) return p;
