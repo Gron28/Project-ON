@@ -280,7 +280,7 @@ test('hub profile: hearing integration sits on the side of a one-sided ear, near
 });
 
 // a genome whose development gives resonators sensory input (random genome 3, development seed 3) with its lead gene set
-const RES = setGenes(randomGenome(3), { tropM: 0 });
+const RES = setGenes(randomGenome(3), { tropM: 0, cbGain: 0 });   // the resonator law alone: no motor trophic field, no cerebellar law
 
 test('omission response: after entraining to a steady pulse, sensory-driven resonators fire at the time of a missing beat', () => {
   const F = earFrames([{ mode: 'rhythm', pattern: 'pulse', bpm: 96, omit: 0.3, dur: 140 }], 3);

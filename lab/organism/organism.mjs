@@ -21,6 +21,15 @@
 // An impact comes from a side too: the direction of the sounds that struck (frame.pan, worlds.mjs); the brace it meets is
 // the motor cells' stiffness weighted by the same cardioid on their lateral position (brace.mjs: integrated against the
 // impact's brief force over its window, so the milieu learns its outcome when the window has passed).
+// Cerebellar timing law (gene cbGain; network.mjs teach): after each strike the body compares when its brace peaked (the
+// stiffness on the strike's side, searched within W = min(200 ms, half the interval since the previous strike) of the
+// detection; the highest local maximum, not a window edge) with when the impact's force peaked (BRACE.tauForce after the detection). A brace peaking too early is held
+// tension paid for nothing; too late lets the hit through. The error is broadcast as a climbing-fibre teaching signal to
+// the motor cells: excitatory inputs active CB_LAG before the force peak (when a contraction must begin to stiffen the
+// body by then: synaptic and membrane delay, the electromechanical delay, the rise of stiffness) are potentiated, inputs
+// active CB_LAG before the brace's actual peak are depressed. Late: earlier-phase inputs gain; early: later ones; on time
+// the two terms cancel. A strike met by no brace at all (the stiffness flat over the window) only potentiates. Off when
+// cbGain = 0 (every genome evolved before the law): the organism is then bit-identical to before.
 // Wiring economy (milieu.mjs costWire): every spike of a network cell is charged by its axon arbor's length (network.mjs).
 //
 //   const o = createOrganism({ genome, seed });  o.step(dt, audioChunk);  o.tick(earFrame)  (precomputed frames)
@@ -29,7 +38,7 @@
 import { createEar, SR, NE, DELTA, EAR_CF } from '../../being/ear.mjs';
 import { createPhysics } from '../../being/physics.mjs';
 import { develop, T, KMAX } from './develop.mjs';
-import { createNetwork, DT } from './network.mjs';
+import { createNetwork, DT, CB_R } from './network.mjs';
 import { createMilieu } from './milieu.mjs';
 import { decode } from './genome.mjs';
 import { BRACE, EMD, protection, createImpactDetector, createImpact, createLowBand, fatigueStep } from './brace.mjs';
@@ -40,6 +49,11 @@ export const FRAME = SR * DT;      // 192 audio samples per network step
 const CLOCK_HZ = 150;               // a clock receptor's peak rate at its preferred phase, at full lock
 const MOTOR_F = 0.5;               // force of one fully contracted motor cell (the groove's own push peaks near 2-3)
 const c01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+// cerebellar law: the delay from a presynaptic spike to the stiffness peak it causes (synapse and membrane ~8 ms, the
+// electromechanical delay, then the peak of the activation (tau tauAct) filtered by the rise (tau tauRise)); the search
+// window around a strike; the flat-brace threshold
+const CB_LAG = Math.round((0.008 + BRACE.emd + Math.log(BRACE.tauAct / BRACE.tauRise) * BRACE.tauAct * BRACE.tauRise / (BRACE.tauAct - BRACE.tauRise)) / DT);
+const CB_WIN = Math.round(0.2 / DT), CB_FLAT = 0.01, CB_SCALE = 0.1, CB_TARGET = Math.round(BRACE.tauForce / DT);
 // Gestation (developmental homeostatic plasticity; Turrigiano & Nelson 2004): before birth the new network hears
 // structure-free sound (the drums at random times, as through the womb: the same sounds as music, no rhythm) with only its
 // homeostatic laws on (synaptic scaling, inhibitory STDP, intrinsic plasticity; no Hebbian learning, no pruning, sprouting or atrophy) and the
@@ -78,6 +92,9 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
   const out = { force: [0, 0, 0], torque: [0, 0, 0], motor: 0, chrom: 0, stim: 0, interHz: 0, rateHz: 0, brace: 0, impact: 0, side: 0, wireHz: 0, stiff2: 0, fatigue: 0 };
   let sinceImpact = 1, inSamples = 0, time = 0, interE = 0, rateE = 0, netE = 0, wireE = 0, synMass = 0, trophic = 1;
   let impactOf2 = impactOf;
+  // cerebellar law (see the header): the stiffness facing each side over the last CB_R steps, strikes awaiting their verdict
+  const CBON = (G.cbGain ?? 0) > 0, bRing = CBON ? new Float32Array(2 * CB_R) : null; let cbQ = [], cbLast = -1e9, nt = 0;
+  const cb = { err: NaN, n: 0, sum: 0, flat: 0 };       // readouts: last timing error (ms, + late), strikes taught, net weight change, strikes met by no brace
   const rec = { motorSpikes: [], onsets: [], impacts: [] };   // optional recording for analysis (times in s)
   let recording = false;
 
@@ -147,10 +164,7 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
     out.motor = mot / Math.max(1, nm); out.chrom = chr / Math.max(1, C.chrom.length); out.brace = B / Math.max(1, nm); out.stiff2 = S2 / Math.max(1, nm); out.fatigue = FT / Math.max(1, nm);
     // the stiffness facing a side (-1 left .. 1 right): motor cells weighted by the cardioid on their lateral position
     const gs = motorGS, braceR = nm ? BR / gs : 0, braceL = nm ? (B - BR) / (nm - gs) : 0;
-    const braceAt = (side) => {
-      if (side === 0) return out.brace;
-      const kl = 0.5 * (1 - side) * (nm - gs), kr = 0.5 * (1 + side) * gs; return (kl * braceL + kr * braceR) / (kl + kr || 1);
-    };
+    const braceAt = (side) => braceOf(side, braceL, braceR, out.brace);
     // impact: a sensory event strikes the body from a side; its brief force meets the stiffness on that side over the
     // impact window (brace.mjs), and the milieu learns its outcome when the window has passed
     const a = impactOf2(f.onset, lowBand(f.amp)); let impact = null;
@@ -167,6 +181,7 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
       if (recording) rec.impacts.push({ t: done.t, a: done.a, p: done.p, A: done.A, side: done.side });
     }
     out.impact = a;
+    if (CBON) cerebellum(a, braceL, braceR);
     // only a strike reaches the body as a hit (hats are heard, not felt), and only its unbraced share
     phys.step(DT, { fx, fy, fz, tx, ty, tz, sub: f.sub, hit: a > 0 ? f.onset * (1 - protection(out.brace)) : 0 });
     // rates for the milieu
@@ -189,14 +204,45 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
     time += DT;
   }
 
+  function braceOf(side, bL, bR, all) {
+    const nm = C.motor.length, gs = motorGS;
+    if (side === 0) return all;
+    const kl = 0.5 * (1 - side) * (nm - gs), kr = 0.5 * (1 + side) * gs; return (kl * bL + kr * bR) / (kl + kr || 1);
+  }
+  /** the cerebellar law, once per tick (see the header) */
+  function cerebellum(a, bL, bR) {
+    const h = (nt % CB_R) * 2; bRing[h] = bL; bRing[h + 1] = bR;
+    if (a > 0) { const side = out.side; cbQ.push({ k: nt, side, w: Math.max(4, Math.min(CB_WIN, Math.floor((nt - cbLast) / 2))) }); cbLast = nt; }
+    while (cbQ.length && nt >= cbQ[0].k + cbQ[0].w) {
+      const q = cbQ.shift(), nm = C.motor.length, gs = motorGS; let km = -1, hi = -Infinity, lo = Infinity;
+      const at = (k) => { const j = (((k % CB_R) + CB_R) % CB_R) * 2, L = bRing[j], R = bRing[j + 1]; return braceOf(q.side, L, R, nm ? ((nm - gs) * L + gs * R) / nm : 0); };
+      // the brace's peak: the highest local maximum inside the window (a window edge is the tail or the onset of another
+      // contraction, not this strike's brace)
+      let prev = at(q.k - q.w - 1), cur = at(q.k - q.w);
+      for (let k = q.k - q.w; k <= q.k + q.w; k++) {
+        const next = k < nt ? at(k + 1) : -Infinity;
+        if (cur >= prev && cur > next && cur > hi) { hi = cur; km = k; }
+        if (cur < lo) lo = cur; prev = cur; cur = next;
+      }
+      const kT = q.k + CB_TARGET - CB_LAG, flat = km < 0 || !(hi - lo > CB_FLAT);
+      const lagT = nt - kT, lagB = flat ? -1 : nt - (km - CB_LAG);
+      cb.err = flat ? NaN : 1000 * (km - q.k - CB_TARGET) * DT; cb.n++; if (flat) cb.flat++;
+      // proportional near the target: an error of CB_SCALE or more teaches at the full rate
+      const g = flat ? G.cbGain : G.cbGain * Math.min(1, Math.abs(km - q.k - CB_TARGET) * DT / CB_SCALE);
+      cb.sum += net.teach(lagT, lagB, g);
+    }
+    nt++;
+  }
+
   // ---- gestation (see GESTATION) ----
   if (gestation > 0) {
-    const g0 = decode(dev.genome), keep = { etaS: G.etaS, etaI: G.etaI, etaIP: G.etaIP, etaH: G.etaH, pruneThr: G.pruneThr }, law = { ...net.LAW };
-    G.etaS = g0.etaS; G.etaI = g0.etaI; G.etaIP = g0.etaIP; G.etaH = 0; G.pruneThr = 0; net.LAW.atrophy = false; net.LAW.sprout = false;
+    const g0 = decode(dev.genome), keep = { etaS: G.etaS, etaI: G.etaI, etaIP: G.etaIP, etaH: G.etaH, pruneThr: G.pruneThr, cbGain: G.cbGain }, law = { ...net.LAW };
+    G.etaS = g0.etaS; G.etaI = g0.etaI; G.etaIP = g0.etaIP; G.etaH = 0; G.pruneThr = 0; G.cbGain = 0; net.LAW.atrophy = false; net.LAW.sprout = false;
     const F = C.clock.length ? withClock(gestationFrames(), { bias: 0 }) : gestationFrames(), view = { amp: null, onset: 0, rough: 0, sub: 0 }, n = Math.min(F.n, Math.round(gestation / DT));
     for (let f = 0; f < n; f++) { tick(frameAt(F, f, view)); milieu.s.energy = 0.8; milieu.s.integrity = 0.9; milieu.s.alive = true; }
     Object.assign(G, keep); Object.assign(net.LAW, law); net.birth();
     milieu = createMilieu(G); phys = createPhysics(); impactOf2 = createImpactDetector(); lowBand = createLowBand(EAR_CF); act.fill(0); stiff.fill(0); raw.fill(0); fat.fill(0); slow.fill(DELTA); slowC.fill(DELTA); ring.fill(0); pending = []; done = null;
+    cbQ = []; cbLast = -1e9; if (bRing) bRing.fill(0);
     sinceImpact = 1; time = 0; interE = 0; rateE = 0; netE = 0; wireE = 0;
   }
   let last = null;
@@ -234,7 +280,8 @@ export function createOrganism({ genome, seed = 1, dev = null, laws = null, gest
     readouts() {
       const m = milieu.s, r = net.resonators();
       return { brace: out.brace, protection: protection(out.brace), impact: out.impact, lastImpact: m.lastImpact, rpe: m.rpe, anticipation: m.predFrac, events: m.events, anticIncome: m.anticIncome, impactLoss: m.impactLoss,
-        resonators: { cells: r.cells, hz: r.hz, phase: r.phase, sensory: Uint8Array.from(r.cells, (i) => (net.fanS[i] > 0.05 ? 1 : 0)) }, earSpread: G.earSpread };
+        resonators: { cells: r.cells, hz: r.hz, phase: r.phase, sensory: Uint8Array.from(r.cells, (i) => (net.fanS[i] > 0.05 ? 1 : 0)) }, earSpread: G.earSpread,
+        cerebellum: { on: CBON, gain: G.cbGain ?? 0, errMs: cb.err, taught: cb.n, flat: cb.flat, dw: cb.sum } };
     },
     record(on = true) { recording = on; if (on) { rec.motorSpikes.length = 0; rec.onsets.length = 0; rec.impacts.length = 0; } },
     poke(s = 1) { phys.impulse(s * (Math.random() - 0.5) * 2, s * (Math.random() - 0.5) * 2, s * (Math.random() - 0.5) * 2); },

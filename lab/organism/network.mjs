@@ -43,6 +43,12 @@
 // and the branch it lies on; a cell's arbor is the sum over its branches of the path to the farthest live synapse (a
 // branch retracts behind its last synapse when pruning removes it; a sprouted synapse lies where its neighbour did).
 // A spike runs down the whole arbor, so the milieu charges each spike by the arbor's length (organism.mjs, milieu.mjs).
+// Cerebellar timing law (Marr 1969, Albus 1971, Ito 2001: a climbing fibre carries a signed error that rewrites the
+// parallel-fibre synapses active at the right time), on when the gene cbGain > 0: each cell's presynaptic STDP trace x (tau
+// 20 ms) is kept for the last CB_R steps, and teach(lagT, lagB, gain) moves every excitatory synapse onto a motor cell by
+// gain x (x_pre around lagT steps ago - x_pre around lagB steps ago; each averaged over +-12 ms): what was active when a contraction should have begun gains, what
+// actually drove the brace loses (with no brace to compare, only the first term acts). organism.mjs sets the two times from each strike's brace timing, so the change is signed
+// (late: earlier inputs gain; early: later ones) and vanishes when the brace is on time: the law brakes itself.
 // Anticipation (read by the milieu at each impact, not used by any rule): at a sensory event, the inhibition that was
 // ALREADY on the cells receiving the senses 20-60 ms before it (a ring of past conductances), above each cell's own
 // quiet level (its mean inhibition over the stretches >= 200 ms after any impact, so the responses to impacts do not set
@@ -56,6 +62,7 @@ const D = 20, SLOW = 25, H = 16;                  // H: steps of conductance his
 const TAU_M = 0.02, VE = 4.3, VI = -0.33, THETA = 1, DELTA = 0.25, RHO0 = 20, REFR = 2;
 const DEC_E = Math.exp(-DT / 0.005), DEC_I = Math.exp(-DT / 0.01), DEC_X = Math.exp(-DT / 0.02);
 const W_MAX_E = 1.5, W_MAX_I = 4, A_PLUS = 1, A_MINUS = 1.05, W_E0 = 0.3;
+export const CB_R = 160, CB_H = 3;                // steps of presynaptic traces kept for the cerebellar law (640 ms); half-width of its read (12 ms)
 const BURST = 3, W_LO = 2 * Math.PI * 0.6, W_HI = 2 * Math.PI * 4;
 
 // exp on [-40, 8] from a table with linear interpolation (relative error < 4e-5); Math.exp was a third of the step
@@ -135,6 +142,8 @@ export function createNetwork(dev, opt = {}) {
   const K_SF = 1 - Math.exp(-DT / 0.02), pace = new Uint8Array(N);   // pace: the pacemaker spike is due this step   // last input pulse (s), edge detector
   { const r0 = lcg32(dev.seed); for (const i of OSC) { omega[i] = 2 * Math.PI * dev.osc[2 * i]; phi[i] = 2 * Math.PI * r0(); } }
   const oscK = G.oscK ?? 0, oscEta = G.oscEta ?? 0, DEC_GB = DT / 0.5;
+  // cerebellar timing law (see the header): presynaptic traces of the last CB_R steps, only when the law is on
+  const CB = (G.cbGain ?? 0) > 0, xh = CB ? new Float32Array(CB_R * N) : null, isMotor = Uint8Array.from(type, (t) => (t === T.MOTOR ? 1 : 0));
   const DEC_A = Math.exp(-DT / G.tauAdapt), DEC_RB = Math.exp(-DT / 5), DEC_RF = Math.exp(-DT / 0.1);
   const alphaI = 2 * G.rTarget * 0.02;
   // structural laws that can be switched off: for lesion studies, and during gestation (organism.mjs), when only the
@@ -175,6 +184,7 @@ export function createNetwork(dev, opt = {}) {
       rbar[i] = rbar[i] * DEC_RB + fired * (1 - DEC_RB) * HZ;
       rf[i] = rf[i] * DEC_RF + fired * (1 - DEC_RF) * HZ;
     }
+    if (xh) xh.set(x, (n % CB_R) * N);
     // deliver spikes and pre-side plasticity
     for (let j = 0; j < N; j++) {
       if (!spk[j]) continue;
@@ -275,6 +285,23 @@ export function createNetwork(dev, opt = {}) {
     }
     return den > 0 ? num / den : 0;
   }
+  /** the cerebellar law (see the header): lagT, lagB steps before the last step (0: the last step; lagB < 0: no drive term) */
+  function teach(lagT, lagB, gain) {
+    if (!xh || !(gain > 0) || lagT < CB_H || lagT >= CB_R - CB_H || lagB >= CB_R - CB_H || (lagB >= 0 && lagB < CB_H)) return 0;
+    const at = (l) => (((n - 1 - l) % CB_R) + CB_R) % CB_R * N;
+    // a presynaptic cell's activity around a time: its trace averaged over +-CB_H steps
+    const act = (l, pre) => { let a = 0; for (let j = -CB_H; j <= CB_H; j++) a += xh[at(l + j) + pre]; return a / (2 * CB_H + 1); };
+    let sum = 0;
+    for (let i = 0; i < N; i++) {
+      if (!isMotor[i] || dead[i]) continue;
+      for (let k = inStart[i], e = inStart[i + 1]; k < e; k++) {
+        const s0 = inList[k], pre = (s0 / KMAX) | 0; if (isI[pre]) continue;
+        const d = gain * (act(lagT, pre) - (lagB >= 0 ? act(lagB, pre) : 0)); if (d === 0) continue;
+        const nw = w[s0] + d; w[s0] = nw < 0 ? 0 : nw > W_MAX_E ? W_MAX_E : nw; sum += d;
+      }
+    }
+    return sum;
+  }
   /** resonators' state, for the view and the analysis: rate (Hz) and phase per resonator */
   function resonators() { return { cells: OSC, hz: Float32Array.from(OSC, (i) => omega[i] / (2 * Math.PI)), phase: Float32Array.from(OSC, (i) => phi[i] / (2 * Math.PI)) }; }
 
@@ -304,5 +331,5 @@ export function createNetwork(dev, opt = {}) {
   /** birth: the weights a synapse is born with are the ones it has at the end of gestation (pruning compares with them) */
   function birth() { w0.set(w); }
 
-  return { N, step, birth, LAW, th, ext, spk, rf, rbar, v, gE, gI, modc, dead, w, w0, tgt, nOut, delay, S, stats, edges, lesion, serialize, restore, recep, isI, type, anticipation, resonators, OSC, phi, omega, fanS, fanL, fanR, arbor, latX, get t() { return n * DT; } };
+  return { N, step, birth, LAW, th, ext, spk, rf, rbar, v, gE, gI, modc, dead, w, w0, tgt, nOut, delay, S, stats, edges, lesion, serialize, restore, recep, isI, type, anticipation, teach, resonators, OSC, phi, omega, fanS, fanL, fanR, arbor, latX, get t() { return n * DT; } };
 }
