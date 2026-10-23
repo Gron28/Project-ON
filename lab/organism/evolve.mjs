@@ -146,6 +146,7 @@ if (isCli) {
     const descNames = arg('desc', null)?.split(',') || defaultDescriptors(), axes = descNames.map((d) => descriptorAxis(d));
     const opt = { dur, structure: descNames.includes('modularity') }, BATCH = 2 * NW, BASE = 20261022;
     let A = createArchive(axes), history = [], evals = 0, spentMs = 0, simS = 0, cpuMs = 0;
+    fs.mkdirSync(outDir, { recursive: true });                      // the checkpoint is written after the first batch
     if (has('resume') && fs.existsSync(ckFile)) {
       const ck = JSON.parse(fs.readFileSync(ckFile, 'utf8'));
       A = archiveFrom(ck.archive); history = ck.history; evals = ck.evals; spentMs = ck.spentMs; simS = ck.simS; cpuMs = ck.cpuMs;
