@@ -1,0 +1,89 @@
+// being/cellab/rules.mjs - the automata ON grows on and in its body, and how its feeling and the song's character choose
+// them. Pure module (node --test: tests/cellab.test.mjs).
+//
+// The surface rules are CelLab / WebCA rules by Rudy Rucker and John Walker (Fourmilab, https://www.fourmilab.ch/cellab/),
+// which they placed in the public domain ("All of these programs are in the public domain and may be used in any way
+// without any restrictions whatsoever"). 'faithful' means the update is the CelLab rule definition line for line (8-bit
+// state, neighbours seen through their bit-0 plane, the same evaluator semantics); 'adaptation' means the idea is kept but
+// the mechanism changed to live on a closed sphere. The inside rules are not in CelLab; they are volumetric relatives.
+// Ported from the lab gallery (lab/prototypes/cellab/).
+
+export const CREDIT = 'Rules and palettes after CelLab / WebCA by Rudy Rucker and John Walker (fourmilab.ch/cellab), public domain.';
+
+// index = the rule's number in the surface step shader (being/cellab/gpu.mjs); relief = how deep it carves (body units)
+export const RULES_2D = [
+  { id: 'rainzha', name: 'RainZha', tag: 'faithful', palette: 'default', steps: 18, dens: 0.5, relief: 0.03 },
+  { id: 'zhabo', name: 'Zhabotinsky', tag: 'faithful', palette: 'on-gold', steps: 14, dens: 0.5, relief: 0.026 },
+  { id: 'brain', name: "Brian's Brain", tag: 'faithful', palette: 'on-ember', steps: 16, dens: 0.35, relief: 0.03 },
+  { id: 'faders', name: 'Faders', tag: 'faithful', palette: 'faders', steps: 20, dens: 0.6, relief: 0.03 },
+  { id: 'rug', name: 'Rug', tag: 'faithful', palette: 'rainbow', steps: 10, dens: 1, relief: 0.022, seedR: 2.5 },
+  { id: 'hodge', name: 'Hodge', tag: 'faithful', palette: 'autocad', steps: 12, dens: 1, relief: 0.03 },
+  { id: 'venus', name: 'Venus', tag: 'faithful', palette: 'aurora', steps: 12, dens: 1, relief: 0.022 },
+  { id: 'life', name: 'Life', tag: 'faithful', palette: 'brailife', steps: 12, dens: 0.35, relief: 0.03 },
+  { id: 'perfume', name: 'Perfume', tag: 'adaptation', palette: 'on-violet', steps: 24, dens: 0.6, relief: 0.036, seedR: 2 },
+  { id: 'pond', name: 'Pond', tag: 'adaptation', palette: 'on-ice', steps: 20, dens: 0.45, relief: 0.036, seedR: 1.6 },
+];
+
+// index = the rule's number in the volume step shader; params = uP (see gpu.mjs)
+export const LIFE3D = { S: [4, 5, 6, 7], B: [6, 7, 8], states: 10 };   // Pyroclastic 4-7/6-8/10: lives on its own, beats add to it
+const mask = (a) => a.reduce((x, c) => (x | (1 << c)) >>> 0, 0);
+export const RULES_3D = [
+  { id: 'scroll3d', name: 'Scroll waves', tag: '3D', palette: 'on-ice', steps: 14, dens: 0.5, params: [22, 1, 10, 0] },
+  { id: 'brain3d', name: "Brian's Brain 3D", tag: '3D', palette: 'on-ember', steps: 14, dens: 0.4, params: [4, 6, 5, 0] },
+  { id: 'life3d', name: 'Life 3D', tag: '3D', palette: 'on-moss', steps: 10, dens: 0.12, params: [mask(LIFE3D.S), mask(LIFE3D.B), LIFE3D.states, 0] },
+  { id: 'rug3d', name: 'Rug 3D', tag: '3D', palette: 'on-violet', steps: 8, dens: 1, params: [0, 0, 0, 0] },
+];
+export const INDEX_2D = Object.fromEntries(RULES_2D.map((r, i) => [r.id, i]));
+export const INDEX_3D = Object.fromEntries(RULES_3D.map((r, i) => [r.id, i]));
+export const rule2d = (id) => RULES_2D[INDEX_2D[id] ?? 0];
+export const rule3d = (id) => RULES_3D[INDEX_3D[id] ?? 0];
+
+export const MOODS = ['calm', 'flowing', 'rough', 'wild'];
+// what each mood grows, in the order a song's sections walk through them
+export const MOOD_RULES = {
+  surface: { calm: ['rug', 'pond'], flowing: ['hodge', 'zhabo', 'rainzha'], rough: ['brain', 'faders'], wild: ['life', 'perfume', 'venus'] },
+  inside: { calm: ['rug3d'], flowing: ['scroll3d'], rough: ['brain3d'], wild: ['life3d'] },
+};
+// The mood is a score per mood: bias + sum of weight x input, inputs 0..1 (the mind's arousal, then the song's absolute
+// character from the analyzer, 0.4 when unknown). calm: low arousal, sparse and smooth; flowing: tonal, smooth, regular or
+// sung; rough: rough and noisy, not tonal; wild: high arousal, dense and changing.
+export const MOOD_WEIGHTS = {
+  calm: { bias: 0.55, arousal: -1.1, roughness: -0.3, density: -0.3, tonality: 0.15 },
+  flowing: { bias: 0.1, arousal: 0.15, roughness: -0.55, noisiness: -0.25, tonality: 0.5, regularity: 0.1, vocal: 0.15 },
+  rough: { bias: -0.2, arousal: 0.25, roughness: 0.85, noisiness: 0.55, tonality: -0.3 },
+  wild: { bias: -0.5, arousal: 1.05, density: 0.4, change: 0.35, intricacy: 0.2 },
+};
+const num = (x, d = 0.4) => (Number.isFinite(x) ? x : d);
+export function moodScores(arousal, char) {
+  const c = char || {}, o = {};
+  for (const m of MOODS) {
+    const w = MOOD_WEIGHTS[m]; let s = w.bias;
+    for (const [k, v] of Object.entries(w)) if (k !== 'bias') s += v * (k === 'arousal' ? num(arousal, 0.3) : num(c[k]));
+    o[m] = s;
+  }
+  return o;
+}
+export function moodOf(arousal, char) { const s = moodScores(arousal, char); return MOODS.reduce((a, b) => (s[b] > s[a] ? b : a), MOODS[0]); }
+
+// a small stable hash, so a song and a section always pick the same rule
+export function mix32(a, b = 0) { let h = (Math.imul(a >>> 0, 0x9E3779B1) ^ Math.imul((b >>> 0) + 0x7F4A7C15, 0x85EBCA77)) >>> 0; h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D) >>> 0; h ^= h >>> 12; return h >>> 0; }
+/** the surface rule a mood grows for this song at this section (sections walk through the mood's list from a song's own start) */
+export function surfaceRuleFor(mood, songSeed, section = 0) {
+  const list = MOOD_RULES.surface[mood] || MOOD_RULES.surface.flowing;
+  return list[(mix32(songSeed, 0x51) + section) % list.length];
+}
+export const insideRuleFor = (mood) => (MOOD_RULES.inside[mood] || MOOD_RULES.inside.flowing)[0];
+
+/** how often this song's surfacings belong to the automaton rather than the grown form (0.3..0.8): regular, dense,
+ *  intricate music leans to it, very tonal music to the grown form */
+export function shareFor(char) {
+  const c = char || {};
+  const s = 0.35 + 0.35 * num(c.regularity) + 0.2 * num(c.intricacy) + 0.15 * num(c.density) - 0.25 * num(c.tonality);
+  return Math.min(0.8, Math.max(0.3, s));
+}
+/** a song's remembered automaton (memory meta.cellab), or null when it is not one */
+export function validCellab(m) {
+  if (!m || typeof m !== 'object') return null;
+  if (!(m.rule in INDEX_2D) || !(m.rule3d in INDEX_3D) || !MOODS.includes(m.mood)) return null;
+  return { rule: m.rule, rule3d: m.rule3d, mood: m.mood, share: Number.isFinite(m.share) ? Math.min(0.8, Math.max(0.3, m.share)) : 0.5 };
+}

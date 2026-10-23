@@ -149,6 +149,7 @@ import { createSkyRing } from './page/sky-ring.mjs';
 import { createImmersive } from './page/immersive.mjs';
 import { createGlitch } from './page/glitch.mjs';
 import { createJumpScan } from './page/jumps.mjs';
+import { createCellab } from './page/cellab.mjs';
 
 const pet = window.pet || new Proxy({}, {
   get: (_, prop) => {
@@ -199,7 +200,9 @@ const U = {
   ...EXT.uniforms,   // the local folder's own (EXT)
   uMid: { value: [0, 0, 0, 0] }, uMw: { value: [1, 0, 0, 0] }, uMatMix: { value: 0 }, uMatScale: { value: 2.2 },
   uWR: { value: [new THREE.Vector4(0, 1, 0, .6), new THREE.Vector4(.3, .95, 0, .7)] }, uWRA: { value: 0 }, uSer: { value: Array.from({ length: 48 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uSerA: { value: [0, 0, 0] }, uSerB: { value: Array.from({ length: 3 }, () => new THREE.Vector4(0, 0, 0, 0)) },
-  uGl: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, .05, 0)) }, uGlR: { value: [0, 0, 0, 0, 0, 0] }, uGlisten: { value: 0 }, uBeatPulse: { value: 0 }, uRegP: { value: new Array(8).fill(0) }, uRegA: { value: 0 }
+  uGl: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, .05, 0)) }, uGlR: { value: [0, 0, 0, 0, 0, 0] }, uGlisten: { value: 0 }, uBeatPulse: { value: 0 }, uRegP: { value: new Array(8).fill(0) }, uRegA: { value: 0 },
+  // the CelLab automata (being/page/cellab.mjs): the surface's palette + height atlas, its amount, depth, cells a face, hue; the inside's half-resolution light and amount
+  uCa: { value: null }, uCaA: { value: 0 }, uCaD: { value: .03 }, uCaN: { value: 128 }, uCaHueC: { value: new THREE.Color(1, 1, 1) }, uCaHue: { value: .45 }, uCv: { value: null }, uCvA: { value: 0 }
 };
 
 /* ---------- one shader: a liquid-metal mass with lobes and falling drops, ray-marched around an analytic core of light ---------- */
@@ -1412,7 +1415,7 @@ function devFrame(now) {
     proposals: PROP.on, fx: { ...FX }, glitch: { ...GLX }, rise: window.__rise(), journey: window.__journey(), ...EXT.snap?.(),
     look: { light: U.uLight.value.toArray().map((x) => num(x)), metal: U.uMetal.value.toArray().map((x) => num(x)), glow: num(U.uGlow.value), stainAmt: num(U.uStainA.value) },
     tune: { user: { ...ML.user }, live: Object.fromEntries(Object.entries(T).map(([k, v]) => [k, num(v)])) }, dials: { rhythm: DIALS.rhythm, sync: DIALS.sync },
-    dev: DEV, seed: SEED, log: blog.slice(0, 8), events: DEV_EV.slice(-30), orgDrive: ORGD.on || ORGD.k > 0 ? orgSnap() : null,
+    dev: DEV, seed: SEED, log: blog.slice(0, 8), events: DEV_EV.slice(-30), orgDrive: ORGD.on || ORGD.k > 0 ? orgSnap() : null, cellab: CELLAB ? CELLAB.snap() : null,
   };
   if (now - (devFrame.picAt || 0) > 2500) { devFrame.picAt = now; try { snap.skinPng = songPng(); } catch {} snap.uniNames = Object.keys(U).filter((k) => typeof U[k].value === 'number'); }   // the grown skin, unrolled
   if (ORG.on) { if (ORG.last) { snap.organism = ORG.last; ORG.last = null; } beingWorker.postMessage({ type: 'org-pull', full: ORG.full }); ORG.full = false; }   // the worker answers before the next snapshot
@@ -1448,6 +1451,7 @@ function devCommand(c) {
     case 'fx': if (c.name in FX) { FX[c.name] = !!c.v; try { localStorage.setItem('on-fx', JSON.stringify(FX)); } catch {} } break;
     case 'voice': if (['off', 'whisper', 'sing'].includes(c.v)) { voice.mode = c.v; try { localStorage.setItem('being-voice', c.v); } catch {} } break;
     case 'section': morphSection(); skinFlush(.8, 'dashboard'); break;
+    case 'cellab': CELLAB?.command(c); break;
     case 'songGenome': { const r = Math.random; const ch = Object.fromEntries(CHAR_KEYS.map((k) => [k, r()])); window.__morphForce(ch, (r() * 1e9) >>> 0, Number.isFinite(c.v) ? c.v : 1); break; }
     case 'dial': if (c.key === 'rhythm' && Number.isFinite(c.v)) { document.getElementById('rhythm').value = Math.round(c.v * 100); document.getElementById('rhythm').oninput(); }
       else if (c.key === 'sync' && Number.isFinite(c.v)) DIALS.setSync(c.v); break;
@@ -2015,9 +2019,9 @@ const SLEEP = { z: 0, bp: 0 };   // 0 awake .. 1 asleep (silence)
 const MAXIM = createMaxim();   // how much room for more than one style: opens at peaks, tires if held (restraint.mjs)
 const REST = { M: .15, win: { surf: 'morph', app: 'lobes', inner: 'nuc' }, cand: {}, candT: {}, g: {}, saved: new Map(), sal: {} };
 const LAYERS = {
-  surf: { morph: ['uMorphA', 1.0, .9] /* the home surface, even while its form is hidden: plain, smooth metal */, skin: ['uSkinA', .8, 0], spikes: ['uSpikes', .08, 0], chaos: ['uChaos', 1, 0], grain: ['uGrain', .8, 0], frac: ['uFrac', .8, 0], intr: ['uIntr', .8, 0] },
+  surf: { morph: ['uMorphA', 1.0, .9] /* the home surface, even while its form is hidden: plain, smooth metal */, skin: ['uSkinA', .8, 0], spikes: ['uSpikes', .08, 0], chaos: ['uChaos', 1, 0], grain: ['uGrain', .8, 0], frac: ['uFrac', .8, 0], intr: ['uIntr', .8, 0], cellab: ['uCaA', .8, 0] },
   app: { lobes: ['uL', .35, .15], tendrils: ['uT', .12, 0], sats: ['uS', .25, 0], drops: ['uD', .15, 0] },
-  inner: { nuc: ['uNuc', .7, .1], tissue: ['uTissueA', .6, 0] },
+  inner: { nuc: ['uNuc', .7, .1], tissue: ['uTissueA', .6, 0], cavol: ['uCvA', .6, 0] },
 };
 const ORNAMENTS = ['uRingA', 'uRing2A', 'uSparks', 'uRays', 'uHalo', 'uFilm'];
 function matShape() {   // the materials lend the body their form: fire and Mars boil, earth and Saturn facet, water, air and quicksilver flow
@@ -2044,7 +2048,8 @@ function restApply(dt) {
   for (const [group, layers] of Object.entries(LAYERS)) {
     let best = null, bestS = -1;
     for (const [name, [key, ref, bias]] of Object.entries(layers)) {
-      const effBias = name === 'morph' ? .15 + .75 * MORPH.show : bias;
+      const caLead = CELLAB ? CELLAB.lead : 0;   // a surfacing that belongs to the automaton: it, not the grown form, is the home surface
+      const effBias = name === 'morph' ? (.15 + .75 * MORPH.show) * (1 - .8 * caLead) : name === 'cellab' ? (.15 + .75 * MORPH.show) * caLead : name === 'cavol' ? .6 * (CELLAB ? CELLAB.CA.v : 0) : bias;   // lit at a peak, the inside leads the inner light
       const v = salienceOf(key, ref) + effBias;
       REST.sal[name] = v;
       if (v > bestS) { bestS = v; best = name; }
@@ -2090,6 +2095,12 @@ window.__probeShift = () => [U.uShift.value.x, U.uShift.value.y];   // lab
 window.__probeU = (k) => (U[k].value).toFixed(3);   // lab
 window.__behave = () => ({ SLEEP, REST, MAT, BEAD, SHOW, LATM, MORPH, SKIN, B, S, MEM, U, mind, pressure, timing, DIALS, an });   // lab: live organs
 window.__probeW = () => { const g = MORPH.cur; return { sec: MORPH.sec, wmax: +Math.max(...g.cppn.W.map(Math.abs)).toFixed(2), wrms: +Math.sqrt(g.cppn.W.reduce((a, x) => a + x * x, 0) / g.cppn.W.length).toFixed(2), freq: g.freq, crisp: g.crisp }; };
+/* ---------- the CelLab automata (being/page/cellab.mjs): a living-skin family on the surface, and the inside at peaks ---------- */
+let CELLAB = null;
+try { CELLAB = createCellab({ THREE, renderer, U, SEED, keyHash, MW, MH, gpuTime, c01, sm, skinFlush,
+  get mind() { return mind; }, get MEM() { return MEM; }, get MORPH() { return MORPH; }, get SKIN() { return SKIN; }, get SLEEP() { return SLEEP; }, get REST() { return REST; },
+  get S() { return S; }, get SHOW() { return SHOW; }, get an() { return an; }, get QUAL() { return QUAL; }, get B() { return B; } }); }
+catch (e) { CELLAB = null; console.error('cellab:', e && e.message); renderer.resetState(); }
 window.__rest = () => ({ M: +REST.M.toFixed(2), win: { ...REST.win }, g: Object.fromEntries(Object.entries(REST.g).map(([k, v]) => [k, +v.toFixed(2)])) });
 function beingBody(dt, t) {
   if (!GENOME.sh.length) growGenome(SEED);
@@ -2267,7 +2278,7 @@ renderer.setAnimationLoop(ts => {
   U.uChaos.value = Math.min(2, Math.pow(X, 1.3) * T.turb * (1 - .5 * Math.min(1, Q.flow)));   // flowing music stays glassy
   U.uVar.value = (.015 + .1 * X) * T.wobble; U.uWob.value = T.wobble * (1 + .6 * Q.flow); U.uTurbSpeed.value = T.turbSpeed * (.7 + .9 * Q.den); U.uTurbDetail.value = T.turbDetail * (.6 + .8 * Q.den) * (1 - .25 * Math.min(1, Q.flow));
   U.uGrain.value = Q.grain; U.uFrac.value = Q.frac; U.uIntr.value = Q.intr; U.uSplit.value = S.split * Math.min(1, Q.frac * 2);
-  U.uDisp.value = Math.min(.14, U.uSkinA.value * .03 + U.uMorphA.value * U.uMorphD.value * 1.2 + Q.grain * .013 + Q.frac * .05 + Q.intr * .011 + U.uSpikes.value + Math.min(2, U.uChaos.value) * .06);   // for the march step
+  U.uDisp.value = Math.min(.14, U.uSkinA.value * .03 + U.uMorphA.value * U.uMorphD.value * 1.2 + U.uCaA.value * U.uCaD.value * 1.2 + Q.grain * .013 + Q.frac * .05 + Q.intr * .011 + U.uSpikes.value + Math.min(2, U.uChaos.value) * .06);   // for the march step
   U.uZoom.value = 1 / T.zoom; U.uEnv.value = T.reflect * COS.env;
   // the light: lead sets radius and brightness; a high voice makes it sing; tension makes it tremble
   const sing = (st.voice > .35 ? (st.voice - .35) * 1.5 : 0) * T.vibrato, wob = 1 + sing * .07 * Math.sin(t * 34), trem = S.tension * .014 * Math.sin(t * 91) * Math.sin(t * 57);
@@ -2344,6 +2355,7 @@ renderer.setAnimationLoop(ts => {
   S.look.lerp(S.lookTo, 1 - Math.exp(-dt * 3)); U.uLook.value.copy(S.look);
   if (look.hud && f0 - hudT > 66) { hudT = f0; updateHud(f0, st); }
   mlFrame(dt, f0, kickV, snareV, hatV, st);
+  CELLAB?.frame(dt);
   devFrame(f0);
   restApply(dt);
   dreamFrame(dt);
@@ -2362,6 +2374,7 @@ renderer.setAnimationLoop(ts => {
   const half = SLEEP.z > .98 && !window.__noHalf;
   if ((S.awake > .05 || ++skip % 3 === 0) && (!half || (++halfSkip & 1) === 0)) {
     if (half) { const d = FB.uDecay.value; FB.uGain.value *= 1 + d; FB.uDecay.value = d * d; }
+    CELLAB?.render(dt);
     gpuTime('body', renderBeing);
   }
   if (window.__jumpWatch) jumpScan();
