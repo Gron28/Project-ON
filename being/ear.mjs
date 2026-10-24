@@ -34,7 +34,7 @@ export function createEar({ freezeMu = null, tauMu = 2.5, gain = 1, kappa = 1 } 
   const rs = new Int32Array([1234567]);
   // 1 kHz derived signals
   const DEC = 48; let decN = 0;
-  const Z = new Float64Array(8); Z[0] = -10;   // 0 logESlow, 1 onsetAcc, 2 roughAcc, 3 subLP, 4 subEnv, 5 levelEnv
+  const Z = new Float64Array(9); Z[0] = -10;   // 0 logESlow, 1 onsetAcc, 2 roughAcc, 3 subLP, 4 subEnv, 5 levelEnv; 6-8 tap()'s onset, rough, count
   const envFast = new Float64Array(NE), envSlow = new Float64Array(NE), roughB = new Float64Array(NE); let roughN = 0;
   const RF = 1 - Math.exp(-2 * Math.PI * 150 / 1000), RS = 1 - Math.exp(-2 * Math.PI * 30 / 1000);
   const SUB_K = 1 - Math.exp(-2 * Math.PI * 100 / SR);
@@ -72,13 +72,14 @@ export function createEar({ freezeMu = null, tauMu = 2.5, gain = 1, kappa = 1 } 
         E += env[k] * env[k];
         envFast[k] += RF * (env[k] - envFast[k]); envSlow[k] += RS * (env[k] - envSlow[k]);
         roughB[k] += 0.05 * (Math.abs(envFast[k] - envSlow[k]) - roughB[k]);
-        if (envSlow[k] > 2 * DELTA) { Z[2] += roughB[k] / envSlow[k]; roughN++; }
+        if (envSlow[k] > 2 * DELTA) { Z[2] += roughB[k] / envSlow[k]; roughN++; Z[7] += roughB[k] / envSlow[k]; Z[8]++; }
       }
       const l = Math.log(E);
       const logESlow = Z[0] + 0.012 * (l - Z[0]); Z[0] = logESlow;
       // onsets only count above the ear's own humming, so the being does not startle at itself in silence
       const o = E > NE * (3 * DELTA) * (3 * DELTA) ? Math.max(0, l - logESlow - 0.15) : 0;
       if (o > Z[1]) Z[1] = o;
+      if (o > Z[6]) Z[6] = o;
     }
   }
   /** a snapshot of what the ear hears since the last call (onset and roughness are accumulated, then reset) */
@@ -90,5 +91,9 @@ export function createEar({ freezeMu = null, tauMu = 2.5, gain = 1, kappa = 1 } 
     Z[1] = 0;
     return out;
   }
-  return { sample, frame, env, mu, zr, zi, CF: EAR_CF };
+  /** a second listener's frame (lab/organism, 4 ms): the same signals as frame(), with onset and roughness accumulated
+   *  apart, so reading it leaves frame() unchanged; amp is the live envelope (read it before the next sample) */
+  const tapF = { amp: env, onset: 0, rough: 0, sub: 0 };
+  function tap() { tapF.onset = Z[6]; tapF.rough = Z[8] ? Z[7] / Z[8] : 0; tapF.sub = Z[4]; Z[6] = 0; Z[7] = 0; Z[8] = 0; return tapF; }
+  return { sample, frame, tap, env, mu, zr, zi, CF: EAR_CF };
 }

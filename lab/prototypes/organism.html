@@ -1,0 +1,387 @@
+<!-- open: node tools/serve.mjs, then http://127.0.0.1:4242/lab/prototypes/organism.html (ES modules do not load over file://) -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self'">
+<title>Organism Lab</title>
+<!-- lab: ON as an organism (lab/organism/). A genome grows a nervous system in the body by laws (morphogens, migration,
+     axon guidance, synapse formation); it lives on the real ear (being/ear.mjs) and body (being/physics.mjs), learns by
+     local rules and keeps its essential variables (energy, integrity, stimulation) in bounds. Areas are found, not drawn. -->
+<script type="importmap">{ "imports": { "three": "../../node_modules/three/build/three.module.js", "three/addons/": "../../node_modules/three/examples/jsm/" } }</script>
+<style>
+  :root { --bg: #06080b; --panel: #0c1015; --line: #1b222b; --ink: #e8e6e0; --ink2: #a3a9b2; --mute: #6c737d; --acc: #3987e5; --warn: #e66767; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 12px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; overflow: hidden; }
+  #app { display: grid; grid-template-columns: 262px 1fr 336px; height: 100%; }
+  aside { background: var(--panel); overflow-y: auto; padding: 10px 12px 16px; border-right: 1px solid var(--line); }
+  aside.right { border-right: 0; border-left: 1px solid var(--line); }
+  h1 { font-size: 13px; margin: 2px 0 2px; font-weight: 600; } h2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--mute); margin: 14px 0 6px; font-weight: 600; }
+  p.k { color: var(--mute); margin: 0 0 6px; }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  button { background: #151b23; color: var(--ink); border: 1px solid #242d38; border-radius: 5px; padding: 5px 6px; font: inherit; cursor: pointer; text-align: left; }
+  button:hover { border-color: #3a4757; } button.on { border-color: var(--acc); background: #12233a; } button.one { border-style: dashed; } button.warn { border-color: #5a2b2b; }
+  label.row { display: grid; grid-template-columns: 84px 1fr 40px; align-items: center; gap: 6px; margin: 3px 0; color: var(--ink2); }
+  label.row output { color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--acc); }
+  select, input[type=number] { background: #151b23; color: var(--ink); border: 1px solid #242d38; border-radius: 5px; padding: 4px; font: inherit; }
+  label.cut { display: flex; gap: 6px; align-items: center; color: var(--ink2); margin: 2px 0; cursor: pointer; }
+  #main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #what { margin: 0; padding: 7px 12px; color: var(--ink2); font-size: 11.5px; line-height: 1.45; border-bottom: 1px solid var(--line); } #what b { color: var(--ink); font-weight: 600; }
+  #view { position: relative; overflow: hidden; flex: 1; min-height: 0; }
+  #view.diag #bodyBox { display: none; }
+  #view canvas { display: block; }
+  .labels { position: absolute; inset: 0; z-index: 1; }
+  .labels .area { font-size: 10.5px; letter-spacing: .02em; pointer-events: none; white-space: nowrap; background: #06080bd9; border: 1px solid #222a33; border-radius: 4px; padding: 1px 5px; }
+  #bar { position: absolute; z-index: 3; top: 8px; left: 10px; right: 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; pointer-events: none; }
+  #bar > * { pointer-events: auto; }
+  #clock { color: var(--ink2); font-variant-numeric: tabular-nums; margin-left: 4px; }
+  #bodyBox { position: absolute; z-index: 2; left: 10px; bottom: 10px; width: 210px; height: 210px; border: 1px solid var(--line); border-radius: 8px; background: #080b0fcc; }
+  #bodyBox .cap { position: absolute; left: 8px; top: 6px; color: var(--ink2); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+  #legend { color: var(--mute); font-size: 10.5px; padding: 5px 12px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 3px 14px; }
+  #legend .k { white-space: nowrap; } #legend .k i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; } #legend .k b { font-weight: 600; }
+  #lapseCap { position: absolute; z-index: 2; top: 46px; left: 50%; transform: translateX(-50%); color: #fff; font-size: 15px; font-weight: 300; letter-spacing: .05em; pointer-events: none; text-shadow: 0 0 6px #000; }
+  #tip { position: fixed; z-index: 9; background: #0b0e12f0; border: 1px solid #2a3440; border-radius: 6px; padding: 6px 8px; white-space: pre; font-size: 11px; color: var(--ink); pointer-events: none; max-width: 420px; }
+  .trace { margin: 0 0 8px; } .trace canvas { width: 100%; height: 58px; display: block; background: #090c10; border-radius: 4px; }
+  .thead { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-bottom: 3px; color: var(--ink2); font-size: 10.5px; }
+  .thead b { color: var(--ink); font-weight: 600; margin-right: 2px; }
+  .key i { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 4px; border-radius: 1px; }
+  table.m { width: 100%; border-collapse: collapse; } table.m td { padding: 2px 0; border-bottom: 1px solid #141a21; color: var(--ink2); } table.m td.v { color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+  #hist { display: flex; gap: 2px; align-items: flex-end; height: 40px; margin: 6px 0 2px; } #hist div { flex: 1; background: #3d6fa8; border-radius: 2px 2px 0 0; min-height: 1px; }
+  #histx { display: flex; gap: 2px; color: var(--mute); font-size: 9.5px; } #histx span { flex: 1; text-align: center; }
+  .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+  #keys { color: var(--ink2); font-size: 10.5px; line-height: 1.7; }
+  #modeSw { display: inline-flex; border: 1px solid #242d38; border-radius: 6px; overflow: hidden; margin-right: 6px; }
+  #modeSw button { border: 0; border-radius: 0; padding: 5px 12px; background: #11161d; color: var(--ink2); }
+  #modeSw button + button { border-left: 1px solid #242d38; }
+  #modeSw button.on { background: #1a3150; color: var(--ink); }
+  .labels .gl { font-size: 10px; line-height: 1.35; pointer-events: none; white-space: nowrap; text-align: center; color: var(--ink2); background: #06080bc0; border-radius: 4px; padding: 2px 5px; }
+  .labels .gl b { font-weight: 600; } .labels .gl .n { color: var(--mute); } .labels .gl canvas { width: 72px; height: 16px; vertical-align: middle; } .labels .gl .ln { color: var(--mute); }
+  .labels .gl.flow { text-align: left; white-space: normal; background: none; padding: 0; line-height: 1.25; }
+  .labels .gl.flow .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .labels .gl.flow .t b { font-size: 11.5px; } .labels .gl.flow .n { font-size: 9.5px; }
+  .labels .gl.flow .ln { font-size: 10px; color: var(--ink2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .labels .gl.stage { text-align: left; white-space: normal; background: none; padding: 0; }
+  .labels .gl.stage b { font-size: 11px; color: var(--ink); text-transform: uppercase; letter-spacing: .06em; } .labels .gl.stage .ln { font-size: 10px; }
+  .labels .gl.pct { font-size: 9.5px; padding: 0 3px; color: var(--ink); background: #06080bd0; }
+  #radial canvas { width: 100%; display: block; background: #090c10; border-radius: 4px; }
+  #vit2 td.s { width: 74px; } #vit2 td.s canvas { width: 70px; height: 16px; display: block; }
+  @media (max-width: 1000px) { html, body { overflow: auto; } #app { grid-template-columns: 1fr; grid-template-rows: auto auto auto; height: auto; } #main { order: -1; } #view { flex: none; height: 70vh; } aside { border: 0; } }
+</style></head>
+<body>
+<div id="app">
+  <aside>
+    <h1>Organism lab</h1>
+    <p class="k">A genome grows this nervous system by laws; it hears with ON's ear and lives in ON's body. Hover a cell.</p>
+    <h2>Organism</h2>
+    <div class="btns">
+      <button id="newOrg">Develop a new one</button>
+      <button id="bestOrg">Load evolved best</button>
+      <button id="lapse">Time-lapse growth</button>
+      <button id="poke" class="one">Poke the body</button>
+    </div>
+    <label class="row">seed <input type="number" id="seed" min="1" style="width:100%"><output></output></label>
+    <p class="k" id="orgInfo"></p>
+    <h2>Source</h2>
+    <div class="btns">
+      <button id="srcSynth" class="on">Synthetic</button>
+      <button id="srcFile">Audio file…</button>
+      <button id="srcMic">Microphone</button>
+      <label class="cut" style="padding-left:4px"><input type="checkbox" id="audible"> audible</label>
+    </div>
+    <input type="file" id="file" accept="audio/*" hidden>
+    <h2>Stimuli</h2>
+    <div class="btns" id="modes">
+      <button data-mode="groove">Groove</button>
+      <button data-mode="scatter">Scattered drums</button>
+      <button data-mode="click">Click track</button>
+      <button data-mode="tone">Sustained tone</button>
+      <button data-mode="build">Build-up and drop</button>
+      <button data-mode="poly">Polyrhythm 3:2</button>
+      <button data-mode="rough">40 Hz rough noise</button>
+      <button data-mode="noise">White noise</button>
+      <button data-mode="silence" class="on">Silence</button>
+      <button class="one" id="burst">Startle burst</button>
+    </div>
+    <label class="row">tempo <input type="range" id="bpm" min="60" max="180" step="1" value="120"><output></output></label>
+    <label class="row">syncopation <input type="range" id="sync" min="0" max="1" step=".05" value=".25"><output></output></label>
+    <label class="row">level <input type="range" id="level" min="0" max="1" step=".01" value=".8"><output></output></label>
+    <h2>View</h2>
+    <label class="row">colour by <select id="colorBy" style="grid-column: span 2"><option value="community">area (found)</option><option value="type">kind of cell</option><option value="depth">depth from the senses</option><option value="ei">excitatory / inhibitory</option></select></label>
+    <label class="row">hide weakest <input type="range" id="thr" min="0" max=".97" step=".01" value=".55"><output></output></label>
+    <label class="cut"><input type="checkbox" id="showEdges" checked> synapses</label>
+    <label class="cut"><input type="checkbox" id="spin" checked> slow turn</label>
+    <div id="keys"></div>
+    <h2>Lesion</h2>
+    <div class="btns"><select id="lesionSel"></select><button id="cut" class="warn">Cut this area</button></div>
+    <p class="k" id="lesionInfo">Kills every cell of the area and its synapses; the rest lives on.</p>
+  </aside>
+  <main id="main">
+  <p id="what"></p>
+  <div id="view">
+    <div id="bar">
+      <span id="modeSw" role="tablist" aria-label="view"><button data-v="anatomy" class="on" title="cells where development put them (key 1)">Anatomy</button><button data-v="live" title="activity flowing through the body (key 2)">Live</button><button data-v="diagram" title="how signals flow: senses, areas named by what they do, feeling core, muscles and skin (key 3)">Diagram</button></span>
+      <button id="pause">Pause</button>
+      <select id="speed"><option value=".5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option></select>
+      <button id="areas">Find areas again</button>
+      <span id="clock"></span>
+    </div>
+    <div id="lapseCap"></div>
+    <div id="bodyBox"><span class="cap">body · chromatophores</span></div>
+  </div>
+  <div id="legend"></div>
+  </main>
+  <aside class="right">
+    <h2 style="margin-top:2px">Vital signs · last 20 s</h2>
+    <div id="traces"></div>
+    <h2>Timing and learning</h2>
+    <table class="m" id="vit2"></table>
+    <h2>Radial depth profile</h2>
+    <div id="radial"></div>
+    <h2>What emerged</h2>
+    <table class="m" id="metrics"></table>
+    <div id="hist"></div><div id="histx"></div>
+    <p class="k">cells per depth (synaptic hops from the senses)</p>
+  </aside>
+</div>
+<div id="tip" hidden></div>
+<script type="module">
+import { createOrganism, FRAME } from '../organism/organism.mjs';
+import { randomGenome } from '../organism/genome.mjs';
+import { TYPE_NAMES, T } from '../organism/develop.mjs';
+import { createSource } from '../organism/environment.mjs';
+import { louvain, graphOf, depth, reciprocity, vectorStrength } from '../organism/analysis.mjs';
+import * as AN from '../organism/analysis.mjs';
+import { NG, defaultGenome } from '../organism/genome.mjs';
+import { createRadial } from './organism/radial.mjs';
+import { createTraces } from './nervous-system/traces.mjs';
+import { createView, communityColor, TYPE_COL, VIEW_WHAT, viewKey } from './organism/view.mjs';
+import { createBody } from './organism/body.mjs';
+
+const $ = (id) => document.getElementById(id);
+const errors = []; addEventListener('error', (e) => errors.push(String(e.message))); addEventListener('unhandledrejection', (e) => errors.push(String(e.reason)));
+const SR = 48000;
+const src = createSource(7);
+let org = null, seed = (Math.random() * 1e6 | 0) + 1, origin = 'random genome', partition = null;
+const view = createView($('view'), $('tip')), body = createBody($('bodyBox')), radial = createRadial($('radial'));
+
+// ---- organisms --------------------------------------------------------------------------------------------------------------
+function use(o, from) {
+  org = o; origin = from; org.record(true);
+  view.setOrganism(org); body.setOrganism(org); traces.clear(); findAreas();
+  const d = org.dev, n = (t) => d.type.reduce((s, x) => s + (x === t ? 1 : 0), 0);
+  $('orgInfo').textContent = `${from}, seed ${d.seed}: ${d.N} cells (${n(T.INTER)} inter, ${d.isI.reduce((s, x) => s + x, 0)} inhibitory), ${d.syn.pre.length} synapses at birth`;
+  $('seed').value = d.seed;
+  hearing = hearingField(d); vitHist.clear(); renderVitals(true);
+}
+/** share of the skin within 20 degrees of an ear, onset or roughness receptor (the hearing field) */
+let hearing = { cover: 0 };
+function hearingField(d) {
+  const dirs = []; for (let i = 0; i < d.N; i++) if (d.type[i] <= T.ROUGH) { const l = Math.hypot(d.pos[3 * i], d.pos[3 * i + 1], d.pos[3 * i + 2]) || 1; dirs.push([d.pos[3 * i] / l, d.pos[3 * i + 1] / l, d.pos[3 * i + 2] / l]); }
+  const c0 = Math.cos(20 * Math.PI / 180), K = 1500; let hit = 0;
+  for (let k = 0; k < K; k++) { const y = 1 - (2 * (k + 0.5)) / K, s = Math.sqrt(1 - y * y), a = k * 2.399963, u = [s * Math.cos(a), y, s * Math.sin(a)]; if (dirs.some((v) => v[0] * u[0] + v[1] * u[1] + v[2] * u[2] > c0)) hit++; }
+  return { cover: hit / K, gene: d.G.earSpread };
+}
+function newOrganism(s) { seed = s; use(createOrganism({ genome: randomGenome(s), seed: s }), 'random genome'); }
+async function loadBest() {
+  try {
+    const r = await fetch('../results/organism-best.json'); if (!r.ok) throw new Error('run lab/organism/evolve.mjs first (' + r.status + ')');
+    const b = await r.json(); use(createOrganism({ genome: padGenome(b.genome), seed: b.seed }), `evolved best (generation ${b.gen})${b.genome.length < NG ? `, ${NG - b.genome.length} newer genes at their old behaviour` : ''}`);
+  } catch (e) { errors.push('best: ' + e.message); $('orgInfo').textContent = 'No evolved genome: ' + e.message; }
+}
+/** a genome saved before genes were appended gets them at the values that keep the old behaviour where one exists
+ *  (one ear placode, no resonators, eligibility ~1 s, modulators deaf to outcomes), else the middle of the range */
+function padGenome(g) {
+  const out = defaultGenome(); out.set(g.slice(0, NG));
+  const old = { 28: 0, 29: 0, 36: (1 - 0.3) / 1.7, 37: 0 };
+  for (let i = g.length; i < NG; i++) if (i in old) out[i] = old[i];
+  return out;
+}
+$('newOrg').onclick = () => newOrganism((Math.random() * 1e6 | 0) + 1);
+$('seed').onchange = () => newOrganism(Math.max(1, +$('seed').value | 0));
+$('bestOrg').onclick = loadBest;
+$('lapse').onclick = () => view.startLapse(16);
+$('poke').onclick = () => org && org.poke(2);
+
+// ---- areas (communities) and what emerged ---------------------------------------------------------------------------------------
+function findAreas() {
+  const g = graphOf(org), L = louvain(g), D = depth(org);
+  partition = { L, D, R: reciprocity(g, 1, 2) };
+  view.setPartition(L.member, D.d);
+  let prof = null; try { if (typeof AN.radialProfile === 'function') prof = AN.radialProfile(org); } catch (e) { errors.push('radialProfile: ' + e.message); }
+  radial.set(org, D.d, L.member, prof, (c) => '#' + communityColor(c).getHexString());
+  const sel = $('lesionSel'); sel.innerHTML = '';
+  const size = new Map(); L.member.forEach((c) => size.set(c, (size.get(c) || 0) + 1));
+  [...size].filter(([, n]) => n >= 8).sort((a, b) => a[0] - b[0]).forEach(([c, n]) => { const o = document.createElement('option'); o.value = c; o.textContent = `area ${c + 1} (${n})`; sel.appendChild(o); });
+  renderMetrics();
+}
+$('areas').onclick = findAreas;
+$('cut').onclick = () => {
+  if (!partition) return; const c = +$('lesionSel').value, cells = []; partition.L.member.forEach((m, i) => { if (m === c) cells.push(i); });
+  org.net.lesion(cells); $('lesionInfo').textContent = `Cut area ${c + 1}: ${cells.length} cells killed at ${org.time.toFixed(1)} s.`; findAreas();
+};
+let vsNow = { vs: NaN, n: 0 };
+function renderMetrics() {
+  if (!partition || !org) return;
+  const { L, D, R } = partition, st = org.net.stats, e = org.net.edges(), formed = st.born + st.sprouted;
+  const rows = [
+    ['cells / synapses now', `${org.dev.N} / ${e.m}`], ['synapses per cell', (e.m / org.dev.N).toFixed(1)],
+    ['areas found (≥ 8 cells)', `${[...new Set(L.member)].filter((c) => L.member.filter((x) => x === c).length >= 8).length} of ${L.count}`],
+    ['modularity Q', L.Q.toFixed(3)], ['sensor → motor depth (hops)', Number.isFinite(D.motorDepth) ? D.motorDepth.toFixed(2) : 'none reached'],
+    ['motors reached from senses', Math.round(100 * D.motorReached) + '%'],
+    ['reciprocity (vs random)', `${(100 * R.r).toFixed(1)}% (${(100 * R.random).toFixed(1)}%, ×${R.ratio.toFixed(1)})`],
+    ['pruned / sprouted', `${Math.round(100 * st.pruned / formed)}% / ${st.sprouted}`],
+    ['motor lock to the beat (VS)', src.bpm && source === 'synth' ? `${Number.isFinite(vsNow.vs) ? vsNow.vs.toFixed(2) : '-'} (${vsNow.n} spikes, ${src.bpm} bpm)` : 'play a rhythm'],
+  ];
+  $('metrics').innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td class="v">${v}</td></tr>`).join('');
+  const h = D.hist, mx = Math.max(1, ...h);
+  $('hist').innerHTML = h.map((x) => `<div style="height:${100 * x / mx}%" title="${x}"></div>`).join(''); $('histx').innerHTML = h.map((_, i) => `<span>${i}</span>`).join('');
+}
+function renderKeys() {
+  const m = $('colorBy').value;
+  if (m === 'type') $('keys').innerHTML = [T.EAR, T.ONSET, T.ROUGH, T.SUB, T.PROPRIO, T.INTER, T.INTERO, T.MOD, T.MOTOR, T.CHROM, T.CLOCK].map((t) => `<span class="sw" style="background:#${TYPE_COL[t].toString(16).padStart(6, '0')}"></span>${TYPE_NAMES[t]}`).join(' · ') + ' · <span class="sw" style="background:#5a7dff"></span>inhibitory inter';
+  else if (m === 'ei') $('keys').innerHTML = '<span class="sw" style="background:#f0a040"></span>excitatory · <span class="sw" style="background:#5a7dff"></span>inhibitory · <span class="sw" style="background:#e8e6e0"></span>receptor';
+  else if (m === 'depth') $('keys').innerHTML = 'blue: the senses (0 hops) → red: 6+ hops · grey: unreachable';
+  else $('keys').innerHTML = Array.from({ length: 8 }, (_, c) => `<span class="sw" style="background:#${communityColor(c).getHexString()}"></span>${c + 1}`).join(' ') + ' · grey: small';
+}
+$('colorBy').onchange = () => { view.setColorBy($('colorBy').value); renderKeys(); explain(); };
+// ---- view modes -------------------------------------------------------------------------------------------------------------
+let viewMode = 'anatomy';
+const explain = () => { $('what').innerHTML = `<b>What you’re seeing.</b> ${VIEW_WHAT[viewMode]}`; $('legend').innerHTML = viewKey(viewMode, $('colorBy').value); };
+function setView(v) { viewMode = v; view.setMode(v); $('view').classList.toggle('diag', v === 'diagram'); document.querySelectorAll('#modeSw button').forEach((b) => b.classList.toggle('on', b.dataset.v === v)); explain(); }
+document.querySelectorAll('#modeSw button').forEach((b) => (b.onclick = () => setView(b.dataset.v)));
+addEventListener('keydown', (e) => { if (e.target.closest && e.target.closest('input, select, textarea')) return; const v = { 1: 'anatomy', 2: 'live', 3: 'diagram' }[e.key]; if (v) setView(v); });
+setView('anatomy');
+
+// ---- timing and learning: shown when the organism reports them (feature-detected) ------------------------------------------
+const KNOWN = new Set(['t', 'alive', 'energy', 'integrity', 'need', 'viability', 'valence', 'arousal', 'rateHz', 'interHz', 'predFrac', 'predShare', 'strain', 'motor', 'chrom', 'gE', 'gI', 'brace', 'protection', 'impact', 'rpe', 'events', 'anticIncome', 'impactLoss']);
+const NICE = { omission: 'omission response', omissionResponse: 'omission response', omit: 'omission response', alignErr: 'alignment error (ms)', alignmentError: 'alignment error (ms)', alignMs: 'alignment error (ms)', elig: 'eligibility (mean)', eligibility: 'eligibility (mean)', eligMean: 'eligibility (mean)' };
+const vitHist = new Map();
+function vitalRows() {
+  const s = org.state(), rows = [];
+  rows.push(['hearing field', `${Math.round(100 * hearing.cover)}% of skin` + (Number.isFinite(hearing.gene) ? ` · earSpread ${hearing.gene.toFixed(2)}` : ''), NaN]);
+  rows.push(['brace / protection', `${(s.brace ?? 0).toFixed(2)} / ${(s.protection ?? 0).toFixed(2)}`, s.brace ?? NaN]);
+  rows.push(['reward prediction error', (s.rpe ?? 0).toFixed(2), s.rpe ?? NaN]);
+  for (const [k, v] of Object.entries(s)) {
+    if (KNOWN.has(k)) continue;
+    if (typeof v === 'number') rows.push([NICE[k] || k, Number.isFinite(v) ? (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(3)) : '-', v]);
+    else if (v && typeof v === 'object' && !Array.isArray(v) && !ArrayBuffer.isView(v)) for (const [k2, v2] of Object.entries(v)) if (typeof v2 === 'number') rows.push([(NICE[k] || k) + ' · ' + k2, Number.isFinite(v2) ? v2.toFixed(3) : '-', v2]);
+  }
+  if (typeof org.net.resonators === 'function' && org.net.OSC && org.net.OSC.length) { const r = org.net.resonators(); const m = r.hz.reduce((a, b) => a + b, 0) / r.hz.length; rows.push(['resonators · mean rate', `${r.cells.length} · ${m.toFixed(2)} Hz`, m]); }
+  return rows;
+}
+let lastVit = 0;
+function renderVitals(force) {
+  if (!org) return; const now = performance.now(); if (!force && now - lastVit < 400) return; lastVit = now;
+  let rows; try { rows = vitalRows(); } catch (e) { errors.push('vitals: ' + e.message); return; }
+  const tb = $('vit2');
+  if (tb.rows.length !== rows.length || rows.some((r, k) => tb.rows[k].cells[0].textContent !== r[0])) tb.innerHTML = rows.map(([k]) => `<tr><td>${k}</td><td class="s"><canvas width="140" height="32"></canvas></td><td class="v"></td></tr>`).join('');
+  rows.forEach(([k, txt, v], q) => {
+    const tr = tb.rows[q]; tr.cells[2].textContent = txt;
+    let h = vitHist.get(k); if (!h) vitHist.set(k, (h = [])); if (Number.isFinite(v)) { h.push(v); if (h.length > 60) h.shift(); }
+    const cv = tr.cells[1].firstChild, g = cv.getContext('2d'); g.clearRect(0, 0, 140, 32); if (h.length < 2) return;
+    const lo = Math.min(...h), hi = Math.max(...h), span = hi - lo || 1; g.strokeStyle = '#3987e5'; g.lineWidth = 3; g.beginPath();
+    h.forEach((x, i) => { const X = (140 * i) / 59, Y = 29 - 26 * (x - lo) / span; if (i) g.lineTo(X, Y); else g.moveTo(X, Y); }); g.stroke();
+  });
+}
+const showVal = (el) => { const o = el.parentElement.querySelector('output'); if (o) o.textContent = el.value; };
+$('thr').oninput = () => { showVal($('thr')); view.setThreshold(+$('thr').value); };
+$('showEdges').onchange = () => view.setEdges($('showEdges').checked);
+$('spin').onchange = () => { view.controls.autoRotate = $('spin').checked; };
+showVal($('thr')); view.setThreshold(+$('thr').value); renderKeys();
+
+// ---- sound in and out --------------------------------------------------------------------------------------------------------
+let ctx = null, io = null, source = 'synth', fileBuf = null, filePos = 0, micStream = null, micNode = null;
+const micQ = []; let micN = 0;
+async function ensureAudio() {
+  if (ctx) { if (ctx.state === 'suspended') await ctx.resume(); return; }
+  ctx = new AudioContext({ sampleRate: SR });
+  await ctx.audioWorklet.addModule('nervous-system/io-worklet.js');
+  io = new AudioWorkletNode(ctx, 'ns-io', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+  io.port.onmessage = (e) => { micQ.push(e.data); micN += e.data.length; while (micN > SR) micN -= micQ.shift().length; };
+  io.connect(ctx.destination);
+}
+function setSource(s) {
+  source = s; for (const [id, k] of [['srcSynth', 'synth'], ['srcFile', 'file'], ['srcMic', 'mic']]) $(id).classList.toggle('on', s === k);
+  if (s !== 'mic' && micStream) { micStream.getTracks().forEach((t) => t.stop()); micNode.disconnect(); micStream = null; io.port.postMessage({ type: 'capture', on: false }); micQ.length = 0; micN = 0; }
+  if (io) io.port.postMessage({ type: 'flush' });
+}
+$('srcSynth').onclick = async () => { await ensureAudio(); setSource('synth'); };
+$('srcFile').onclick = async () => { await ensureAudio(); $('file').click(); };
+$('file').onchange = async () => {
+  const f = $('file').files[0]; if (!f) return;
+  const ab = await ctx.decodeAudioData(await f.arrayBuffer()), n = ab.length, m = new Float32Array(n);
+  for (let c = 0; c < ab.numberOfChannels; c++) { const d = ab.getChannelData(c); for (let i = 0; i < n; i++) m[i] += d[i] / ab.numberOfChannels; }
+  fileBuf = m; filePos = 0; setSource('file'); $('srcFile').textContent = f.name.slice(0, 22);
+};
+$('srcMic').onclick = async () => {
+  try { await ensureAudio(); micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); micNode = ctx.createMediaStreamSource(micStream); micNode.connect(io); io.port.postMessage({ type: 'capture', on: true }); setSource('mic'); }
+  catch (e) { errors.push('microphone: ' + e.message); setSource('synth'); }
+};
+const modeBtns = [...document.querySelectorAll('#modes button[data-mode]')];
+function play(mode) { src.setMode(mode); modeBtns.forEach((b) => b.classList.toggle('on', b.dataset.mode === mode)); if (source !== 'synth') setSource('synth'); }
+modeBtns.forEach((b) => (b.onclick = () => play(b.dataset.mode)));
+$('burst').onclick = () => src.st.burst();
+for (const id of ['bpm', 'sync', 'level']) { const el = $(id); el.oninput = () => { showVal(el); src.st.o[id] = +el.value; }; el.oninput(); }
+
+// ---- traces ---------------------------------------------------------------------------------------------------------------------
+const C = { a: '#3987e5', b: '#d95926', c: '#199e70', d: '#c98500', e: '#c58cff' };
+const S = () => org.state();
+const traces = createTraces($('traces'), [
+  { title: 'Essential variables', min: 0, max: 1, grid: [0.5], series: [
+    { name: 'energy', color: C.d, get: () => S().energy }, { name: 'integrity', color: C.c, get: () => S().integrity }, { name: 'stimulation need', color: C.b, get: () => S().need }, { name: 'viability', color: '#e8e6e0', get: () => S().viability }] },
+  { title: 'Feeling (readouts)', min: -1, max: 1, grid: [0], series: [
+    { name: 'valence = dV/dt', color: C.a, get: () => S().valence }, { name: 'arousal = modulator', color: C.e, get: () => S().arousal }] },
+  { title: 'Firing (Hz)', min: 0, max: 30, grid: [5, 25], series: [
+    { name: 'interneurons', color: C.c, get: () => S().interHz }, { name: 'all cells', color: '#8d939c', get: () => S().rateHz }] },
+  { title: 'E/I conductance on E cells', min: 0, max: 2, grid: [1], series: [
+    { name: 'gE', color: C.d, get: () => S().gE }, { name: 'gI', color: C.a, get: () => S().gI }] },
+  { title: 'Prediction', min: -0.5, max: 1, grid: [0], series: [
+    { name: 'input met by timed inhibition', color: C.e, get: () => S().predFrac }, { name: 'share of income', color: C.d, get: () => S().predShare }] },
+  { title: 'Body', min: 0, max: 0.6, grid: [0.06], series: [
+    { name: 'strain', color: C.b, get: () => S().strain }, { name: 'motor', color: C.c, get: () => S().motor }, { name: 'skin', color: '#3fd0c9', get: () => S().chrom }] },
+]);
+
+// ---- the loop ---------------------------------------------------------------------------------------------------------------------
+let paused = false, speed = 1, lastT = performance.now(), zacc = 0, lastMetrics = 0, lastAreas = 0;
+$('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? 'Play' : 'Pause'; if (io) io.port.postMessage({ type: 'flush' }); };
+$('speed').onchange = () => { speed = +$('speed').value; };
+function take(n) {
+  const x = new Float32Array(n);
+  if (source === 'synth') src.fill(x);
+  else if (source === 'file' && fileBuf) for (let i = 0; i < n; i++) { x[i] = fileBuf[filePos++]; if (filePos >= fileBuf.length) filePos = 0; }
+  else if (source === 'mic') { let o = 0; while (o < n && micQ.length) { const c = micQ[0], k = Math.min(c.length, n - o); x.set(c.subarray(0, k), o); o += k; micN -= k; if (k === c.length) micQ.shift(); else micQ[0] = c.subarray(k); } }
+  return x;
+}
+function frame(now) {
+  const dtw = Math.min(0.1, Math.max(0, (now - lastT) / 1000)); lastT = now;
+  try {
+    if (org && !paused && !view.lapsing) {
+      zacc += dtw * speed * SR; const n = zacc | 0; zacc -= n;
+      const x = take(n), audible = $('audible').checked && io && speed === 1 && source !== 'mic';
+      // one network step per FRAME samples, so each spike and impact gets its time (the Diagram's roles: view.observe)
+      const ev = { cells: [], times: [], impacts: [], beats: [], exact: true }, spk = org.net.spk, N = org.dev.N;
+      for (let o = 0; o < x.length; o += FRAME) {
+        const t0 = org.time; org.step(0, x.subarray(o, Math.min(x.length, o + FRAME)));
+        if (org.time !== t0) { for (let i = 0; i < N; i++) if (spk[i]) { ev.cells.push(i); ev.times.push(org.time); } if (org.out.impact > 0) ev.impacts.push({ t: org.time }); }
+      }
+      if (source === 'synth' && src.bpm) ev.beats.push({ t: org.time, ph: (org.time * src.bpm / 60) % 1 });
+      view.observe(ev);
+      if (audible) for (let o = 0; o < x.length; o += 2400) { const out = x.slice(o, Math.min(x.length, o + 2400)); io.port.postMessage({ type: 'play', data: out }, [out.buffer]); }
+      traces.sample(org.time);
+      const r = org.rec, keep = org.time - 20; while (r.motorSpikes.length && r.motorSpikes[0] < keep) r.motorSpikes.shift(); r.onsets.length = 0;
+    }
+    if (org) { traces.draw(org.time); renderVitals(false); }
+    if (org && org.time - lastMetrics > 2) { lastMetrics = org.time; vsNow = src.bpm && source === 'synth' ? vectorStrength(org.rec.motorSpikes, 60 / src.bpm) : { vs: NaN, n: 0 }; renderMetrics(); }
+    if (org && org.time - lastAreas > 30) { lastAreas = org.time; findAreas(); }
+    view.frame(dtw); body.frame(paused ? 0 : dtw);
+    $('lapseCap').textContent = view.lapsing ? 'development: cells are born at the surface and migrate inward (first-born deepest); axons follow the morphogens; synapses form where they pass' : '';
+    if (org) { const s = org.state(); $('clock').textContent = `${org.time.toFixed(1)} s · ${source === 'synth' ? src.mode : source} · ${s.alive ? 'alive' : 'DEAD'}`; }
+  } catch (e) { errors.push(String(e && e.stack || e)); console.error(e); }
+  requestAnimationFrame(frame);
+}
+newOrganism(seed);
+requestAnimationFrame(frame);
+window.__org = { get org() { return org; }, src, play, errors, view, newOrganism, loadBest, findAreas, lapse: (s) => view.startLapse(s), pause: (p = true) => { paused = p; }, speed: (s) => { speed = s; },
+  viewMode: (v) => setView(v), radial,
+  colorBy: (m) => { $('colorBy').value = m; $('colorBy').onchange(); }, cut: (c) => { $('lesionSel').value = c; $('cut').onclick(); } };
+</script>
+</body></html>

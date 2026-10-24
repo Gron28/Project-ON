@@ -31,7 +31,7 @@ export const N = MATERIALS.length;
 export const SLOTS = 4;
 
 // each gem's kin: the stones, metals and elements whose strength together lights it (the gem at GEM_ID[i] has KIN[i])
-const KIN = [[8, 15, 16], [8, 14, 17, 18], [15, 14, 19, 20], [18, 21, 22, 11], [20, 21, 23, 7], [16, 17, 19, 22, 23, 24, 25, 26],
+export const KIN = [[8, 15, 16], [8, 14, 17, 18], [15, 14, 19, 20], [18, 21, 22, 11], [20, 21, 23, 7], [16, 17, 19, 22, 23, 24, 25, 26],
   [11, 24, 12, 27, 28], [7, 26, 12, 13, 6], [25, 27, 13, 10, 9], [28, 6, 10, 9]];
 
 const c01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);

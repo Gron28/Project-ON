@@ -1,0 +1,102 @@
+<!doctype html>
+<!--
+  lab/prototypes/cellab.html - a gallery of cellular automata as living textures for ON's body, on the surface (2D, a
+  cube-sphere) and inside it (3D, a ray-marched volume), driven by a stand-in mind. Open with `node tools/serve.mjs`,
+  then http://127.0.0.1:4242/lab/prototypes/cellab.html (?mode=3d&rule=brain3d&input=build&ui=0).
+
+  The 2D rules and the palettes are from CelLab / WebCA by Rudy Rucker and John Walker (Fourmilab,
+  https://www.fourmilab.ch/cellab/), which they placed in the public domain: "All of these programs are in the public
+  domain and may be used in any way without any restrictions whatsoever."
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CelLab Body Gallery</title>
+<style>
+  :root { --bg: #0a0a0c; --panel: rgba(18, 18, 22, 0.86); --line: #2a2a31; --ink: #e8e6e1; --ink2: #9c988f; --acc: #d8b56a; --ok: #7fc59b; --ad: #e0a35c; --td: #8fb3ff; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #panel { position: fixed; top: 12px; right: 12px; width: 268px; max-height: calc(100% - 24px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; backdrop-filter: blur(6px); }
+  #panel h1 { font-size: 13px; margin: 0 0 8px; letter-spacing: .04em; color: var(--acc); font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .row > label { width: 74px; color: var(--ink2); flex: none; }
+  .row select, .row input[type=range] { flex: 1; min-width: 0; }
+  select, button { background: #1d1d23; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover { border-color: #444; }
+  .seg { display: flex; gap: 0; flex: 1; }
+  .seg button { flex: 1; border-radius: 0; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; }
+  .seg button:last-child { border-radius: 0 6px 6px 0; }
+  .seg button.on { background: var(--acc); color: #111; border-color: var(--acc); }
+  .val { width: 34px; text-align: right; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+  #strip { width: 100%; height: 10px; image-rendering: pixelated; border-radius: 3px; display: block; margin: 2px 0 6px; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+  .meter { display: flex; align-items: center; gap: 8px; margin: 3px 0; color: var(--ink2); }
+  .meter span { width: 54px; }
+  .meter .track { flex: 1; height: 5px; background: #222; border-radius: 3px; overflow: hidden; }
+  .meter .fill { height: 100%; background: var(--acc); width: 0; }
+  #stats { position: fixed; top: 12px; left: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-variant-numeric: tabular-nums; color: var(--ink2); }
+  #stats b { color: var(--ink); font-weight: 500; }
+  #caption { position: fixed; left: 16px; bottom: 16px; max-width: min(560px, calc(100% - 320px)); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  #cap-name { font-size: 17px; font-weight: 600; margin-right: 8px; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid; vertical-align: 2px; }
+  .tag.ok { color: var(--ok); } .tag.ad { color: var(--ad); } .tag.td { color: var(--td); }
+  #cap-text { margin: 6px 0 2px; }
+  #cap-note { color: var(--ink2); font-size: 12px; }
+  #credit { color: var(--ink2); font-size: 11px; margin-top: 6px; }
+  #credit a { color: var(--ink2); }
+  body.bare #panel, body.bare #stats { display: none; }
+  body.bare #caption { max-width: calc(100% - 32px); }
+  @media (max-width: 700px) { #panel { width: auto; left: 12px; max-height: 45%; top: auto; bottom: 12px; } #caption { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="stats">fps <b id="st-fps">-</b> · gpu <b id="st-gpu">-</b> ms · cpu <b id="st-cpu">-</b> ms · steps/s <b id="st-steps">-</b> · bpm <b id="st-bpm">-</b> · mood <b id="st-mood">-</b></div>
+<div id="panel">
+  <h1>CelLab on the body</h1>
+  <div class="row"><label>View</label><div class="seg"><button data-mode="2d">2D surface</button><button data-mode="3d">3D inside</button></div></div>
+  <div class="row"><label>Rule</label><select id="rule"></select></div>
+  <div class="row" id="variant-row"><label>Variant</label><select id="variant"></select></div>
+  <div class="row"><label>Palette</label><select id="palette"></select></div>
+  <canvas id="strip" width="256" height="1"></canvas>
+  <hr>
+  <div class="row"><label>Mood</label><select id="mood"><option value="auto">from the mind</option><option value="calm">calm</option><option value="flowing">flowing</option><option value="rough">rough</option><option value="wild">wild</option></select></div>
+  <div class="row"><label></label><label style="width:auto;color:var(--ink)"><input type="checkbox" id="follow"> mood picks the rule</label></div>
+  <div class="row"><label>Hears</label><select id="input">
+    <option value="groove">groove</option><option value="build">build-up and drop</option><option value="poly">3 against 2</option><option value="rough">rough noise</option>
+    <option value="tone">a steady tone</option><option value="click">click track</option><option value="silence">silence</option><option value="file">a file...</option><option value="mic">microphone</option>
+  </select></div>
+  <div class="row"><label></label><label style="width:auto;color:var(--ink)"><input type="checkbox" id="drive" checked> the mind drives it</label></div>
+  <input type="file" id="file" accept="audio/*" hidden>
+  <div class="meter"><span>arousal</span><div class="track"><div class="fill" id="m-arousal"></div></div></div>
+  <div class="meter"><span>rough</span><div class="track"><div class="fill" id="m-rough"></div></div></div>
+  <div class="meter"><span>lock</span><div class="track"><div class="fill" id="m-lock"></div></div></div>
+  <div class="meter"><span>pulse</span><div class="track"><div class="fill" id="m-pulse"></div></div></div>
+  <hr>
+  <div class="row"><label>Step rate</label><input type="range" id="rate" min="0.1" max="3" step="0.05"><span class="val" id="rate-v"></span></div>
+  <div class="row"><label>Seeds</label><input type="range" id="seeds" min="0" max="4" step="0.25"><span class="val" id="seeds-v"></span></div>
+  <div class="row"><label>Smooth</label><input type="range" id="smooth" min="0" max="0.9" step="0.05"><span class="val" id="smooth-v"></span></div>
+  <div class="row"><label>Glow</label><input type="range" id="glow" min="0" max="2" step="0.05"><span class="val" id="glow-v"></span></div>
+  <div class="row" id="relief-row"><label>Relief</label><input type="range" id="relief" min="0" max="3" step="0.05"><span class="val" id="relief-v"></span></div>
+  <div class="row" id="tint-row"><label>Metal tint</label><input type="range" id="tint" min="0" max="1" step="0.05"><span class="val" id="tint-v"></span></div>
+  <div class="row" id="density-row"><label>Density</label><input type="range" id="density" min="0.1" max="3" step="0.05"><span class="val" id="density-v"></span></div>
+  <div class="row" id="shell-row"><label>Skin</label><input type="range" id="shell" min="0" max="1.5" step="0.05"><span class="val" id="shell-v"></span></div>
+  <div class="btns">
+    <button id="reset" title="r">Reset</button><button id="pause" title="space">Pause</button>
+    <button id="drop" title="d">Drop seeds</button><button id="random">Randomize</button>
+    <button id="sound" style="grid-column: span 2">Sound on</button>
+  </div>
+</div>
+<div id="caption">
+  <div><span id="cap-name"></span><span class="tag" id="cap-tag"></span></div>
+  <div id="cap-text"></div>
+  <div id="cap-note"></div>
+  <div id="credit">2D rules and palettes after <a href="https://www.fourmilab.ch/cellab/" target="_blank" rel="noopener">CelLab</a> by Rudy Rucker and John Walker (public domain).</div>
+</div>
+<script type="module" src="cellab/app.mjs"></script>
+</body>
+</html>

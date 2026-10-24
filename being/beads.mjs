@@ -145,6 +145,12 @@ export function createBeads(THREE, renderer, { bodyFragment, U, W = 128, H = 128
       vec3 spec = mix( uStainM, uStainN, vSp );
       vec3 tis = mo.b > .45 ? uStainN : mo.g > .45 ? uStainM : mix( uLight, uStainC * 4., .35 );
       vec3 hue = normalize( mix( mix( tis, spec, ringed ), uLight, .35 ) + 1e-3 ) * 1.2;
+      // the automaton's cells (being/page/cellab.mjs): each bead takes the colour of the cell under it, live cells shine
+      vec4 caB = uCaA > .01 ? caLook( normalize( vHome ) ) : vec4( 0., 0., 0., .35 );
+      if ( uCaA > .01 ) {   // the body's own stain (shaders.mjs): the palette leaning to the being's hue
+        vec3 pc = caB.rgb * caB.rgb; vec3 stain = mix( pc, uCaHueC * ( .25 + 1.3 * dot( pc, vec3( .3, .5, .2 ) ) ), uCaHue );
+        hue = mix( hue, normalize( stain + 1e-3 ) * 1.2, .7 * min( uCaA, 1. ) );
+      }
       float big = step( .86, vSeed ) + step( .98, vSeed );   // the size hierarchy is a brightness hierarchy now
       // twinkle: each light on its own slow clock, a few fast ones; the felt beat makes a share of them flare
       float tw = .62 + .38 * sin( uBTime * ( 1.3 + 4.7 * vSp ) + vSeed * 40. );
@@ -159,6 +165,7 @@ export function createBeads(THREE, renderer, { bodyFragment, U, W = 128, H = 128
       float lum = .12 + .88 * pow( fract( vSeed * 7.31 + .17 ), 5. ) + .6 * big;
       float I = ( core * 1.5 + glow + halo + star ) * lum * tw * face * vLp * ( .55 + .45 * mo.r ) * .55 * vGain * 2.2;
       I *= 1. + .8 * mo.b * step( .45, mo.b );   // nuclei shine
+      I *= mix( 1., .3 + 1.6 * caB.a, min( uCaA, 1. ) );   // resting cells dim, live ones flare
       // the wave front burns brighter while it melts back into the liquid
       I *= 1. + vFront * ( .6 + 1.4 * uBMelt );
       vec3 col = mix( hue, vec3( 1., .97, .92 ), core * .85 ) * I * ( .5 + .5 * uGlow ) * 1.1;

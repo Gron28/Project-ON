@@ -1,5 +1,6 @@
 // being/page/shaders.mjs - the page's GLSL: the body, its aura, the final composite and the unrolled memory picture
 import { SKIN_GLSL } from '../skin/lenia.mjs';
+import { CA_GLSL } from '../cellab/gpu.mjs';
 
 /* the remembered skin's procedural vocabulary, shared by the body shader and the memory pictures */
 export const SONG_GLSL = /* glsl */`
@@ -56,6 +57,7 @@ export const bodyFragment = ({ EXT, NOTES, ND, NT, TP, NS }) => `
   uniform sampler2D uSongTex; uniform sampler2D uSongGlow; uniform float uSongAmt; uniform float uSongRot;
   uniform float uProp; uniform float uAro; uniform float uEcho; uniform vec4 uPWa; uniform vec4 uPWb; uniform vec4 uPWc; uniform vec4 uCast;${EXT.shader.decl}
   uniform sampler2D uSongGene; uniform vec3 uDnaOff; uniform float uMid[ 4 ]; uniform float uMw[ 4 ]; uniform float uMatMix; uniform float uMatScale; uniform vec4 uWR[ 2 ]; uniform float uWRA; uniform vec4 uSer[ 48 ]; uniform float uSerA[ 3 ]; uniform vec4 uSerB[ 3 ]; uniform vec4 uGl[ 6 ]; uniform float uGlR[ 6 ]; uniform float uGlisten; uniform float uBeatPulse; uniform float uRegP[ 8 ]; uniform float uRegA; uniform sampler2D uTissue; uniform float uTissueA; uniform samplerCube uMorph; uniform float uMorphA; uniform float uMorphD; uniform float uHide; uniform vec3 uStainM, uStainN, uStainC, uStainO; uniform float uStainA;
+  uniform sampler2D uCa; uniform float uCaA; uniform float uCaD; uniform float uCaN; uniform vec3 uCaHueC; uniform float uCaHue; uniform sampler2D uCv; uniform float uCvA;   // the CelLab automata (being/cellab): on the surface, and inside (a half-resolution pass)
   vec2 songUV( vec3 d ) { vec2 uv = vec2( atan( d.z, d.x ) * .15915494 + .5 + uSongRot, asin( clamp( d.y, -1., 1. ) ) * .31830989 + .5 );
     uv += .006 * vec2( sin( uv.y * 31. + uTime * .9 ), sin( uv.x * 27. - uTime * .7 ) );   // the remembered skin boils a little
     return vec2( fract( uv.x ), clamp( uv.y, 0., 1. ) ); }
@@ -96,6 +98,7 @@ ${SONG_GLSL}
     return uThick + uVar * ( a + b );
   }
 ${SKIN_GLSL}
+${CA_GLSL}
   float hash3( vec3 g ) { return fract( sin( dot( g, vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 ); }
   // ---- the proposed materials (lab, uProp): how they move the body's mass, always radial from the nucleus ----
   float pNoise( vec3 x ) { vec3 i = floor( x ), f = fract( x ); f = f * f * ( 3. - 2. * f );
@@ -395,6 +398,7 @@ ${SKIN_GLSL}
       if ( uMorphA > .01 ) disp += ( textureLod( uMorph, normalize( p ), 1. ).r - .5 ) * 2. * uMorphD * uMorphA * smoothstep( .15, 0., d );   // the song's grown form (morph.mjs)
       if ( uIllum > .01 ) disp -= jRelief( normalize( p ) ) * .004 * smoothstep( .15, 0., d );   // the journey's engraving, cut into the metal
       if ( uSkinA > .01 ) { vec3 sn = normalize( p ), sk = skinSample( uSkin, sn ); disp += ( sk.r - .3 ) * .035 * uSkinA * smoothstep( .15, 0., d ) * ( 1. - smoothstep( .85, .99, abs( sn.y ) ) ); }   // fades at the poles, where the texture pinches   // the living skin raises the metal where it grows
+      if ( uCaA > .01 ) disp += ( caLook( normalize( p ) ).a - .35 ) * uCaD * uCaA * smoothstep( .15, 0., d );   // the automaton carves the metal: live cells raised, resting ones sunk
       d -= clamp( disp, - .12, .12 ) * smoothstep( - .012, .012, shellTh( p ) );   // displacement never refills the holes where the metal has parted
     }
     if ( uRise > .001 ) d = riseBody( p, d );   // rising: the body gives way to a fractal or pure geometry
@@ -926,6 +930,12 @@ ${SKIN_GLSL}
       vec3 songC0 = vec3( .5 ), sg = vec3( 0. ); vec4 gn = vec4( .5 ); vec2 pat = vec2( .5, 0. );
       // the living skin's height (r) and growth edges (g): materials catch light on the forms it carves, nothing is painted on
       if ( uSkinA > .01 ) { vec3 skv = skinSample( uSkin, sn ) * ( 1. - smoothstep( .85, .99, abs( sn.y ) ) ); pat = vec2( skv.r, skv.g ); }
+      vec4 caS = vec4( 0. ); float caE = 0.;
+      if ( uCaA > .01 ) {   // the automaton's height and its fronts (the height's slope) become the pattern the materials shade
+        vec3 e1 = normalize( cross( abs( sn.y ) < .95 ? vec3( 0., 1., 0. ) : vec3( 1., 0., 0. ), sn ) ), e2 = cross( sn, e1 ); float ce = 1.6 / uCaN;
+        caS = caLook( sn ); caE = clamp( length( vec2( caLook( normalize( sn + e1 * ce ) ).a - caLook( normalize( sn - e1 * ce ) ).a, caLook( normalize( sn + e2 * ce ) ).a - caLook( normalize( sn - e2 * ce ) ).a ) ) * 1.6, 0., 1. );
+        pat = mix( pat, vec2( caS.a, caE ), clamp( uCaA, 0., 1. ) * .85 );
+      }
       float morphAO = 1.; vec4 moS = vec4( .5, 0., 0., .5 );
       if ( uMorphA > .01 ) {
         float mLod = clamp( log2( t / ( uRes.y * uScale * 1.6 * .0041 ) ), 0., 3. );   // texels per screen pixel: a small body samples a coarser mip
@@ -1026,11 +1036,22 @@ ${SKIN_GLSL}
         vec3 sn = normalize( p ), sk = skinSample( uSkin, sn ) * ( 1. - smoothstep( .85, .99, abs( sn.y ) ) );
         col = mix( col, col * ( .5 + .5 * ( 1. - sk.r ) ), .5 * min( uSkinA, 1. ) * pk ) + uLight * sk.g * .55 * min( uSkinA, 1. ) * uGlow * pk;
       }
+      if ( uCaA > .01 ) {   // the automaton: resting cells sink in shadow, live cells stain the metal in its palette leaning to the being's hue (a multiply: the material's reflections stay), its fronts catch the core's light
+        float k = min( uCaA, 1. ) * pk; vec3 pc = caS.rgb * caS.rgb; float pl = dot( pc, vec3( .3, .5, .2 ) );
+        vec3 stain = mix( pc, uCaHueC * ( .25 + 1.3 * pl ), uCaHue );
+        col *= mix( 1., .45 + .55 * caS.a, .6 * k );
+        col = mix( col, col * ( .35 + 1.9 * stain ), .75 * k * smoothstep( .05, .6, caS.a ) );
+        col += ( uLight * caE * .5 + stain * caS.a * .14 ) * uGlow * k;
+      }
       if ( uTissueA > .01 ) {   // its nervous tissue firing: faint flashes under the surface
         vec3 tz = skinSample( uTissue, normalize( p ) );
         col += uTissueC * tz.g * .3 * uTissueA * ( .4 + uGlow ) * pk;
       }
       if ( uSongAmt > .01 ) col += mix( uLight, songC0 * 1.6 + .15, .6 ) * songG * ( .9 + 1.2 * uSongAmt ) * ( .5 + .5 * fres ) * ( .6 + .8 * pat.x );   // where it recognises the sound, it glows
+      if ( uCvA > .01 ) {   // the automaton inside, seen where the metal is thin or clear (air), and as a soft glow through it
+        vec4 cv = textureLod( uCv, gl_FragCoord.xy / uRes, 0. ); float see = clamp( thin * 1.4 + sss * .8 + ( 1. - matA ) * .9 + .45 * pow( 1. - ndv, 2. ), 0., 1. );
+        col += cv.rgb * min( uCvA, 1. ) * ( .3 + .7 * see ) * 1.6 * ( 1. + .6 * uImm ); matA = max( matA, cv.a * min( uCvA, 1. ) * see );
+      }
       alpha = matA; col *= hideK; alpha *= hideK;
       if ( uEther > .01 ) {   // ether: the surface keeps only its silhouette and edges; the rest is light
         float rim = pow( 1. - ndv, 2.5 );
@@ -1062,6 +1083,10 @@ ${SKIN_GLSL}
           col = mix( lightCol * .35, body * ( 1.3 + uCoreI ) + rim * uLight * 1.5, uNuc );
         } else col = lightCol * mix( 1., .35, uNuc );   // the light dims around the nucleus so its form reads
       }
+    }
+    if ( ! hit && uCvA > .01 ) {   // through a hole, between the beads: the inside itself, in front of the core's light
+      vec4 cv = textureLod( uCv, gl_FragCoord.xy / uRes, 0. ); float k = min( uCvA, 1. );
+      col = col * ( 1. - .6 * cv.a * k ) + cv.rgb * k * ( 1. + .4 * uImm ); alpha = max( alpha, cv.a * k );
     }
     float hx = max( dCore - uCoreR, 0. ), hk = 6.5 - uHalo * 3.2 - uKick * 2.2;
     vec3 htint = vec3( 1. - .2 * uCool, 1. - .04 * uCool, 1. + .18 * uCool );   // brighter sound: a cooler halo

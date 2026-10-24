@@ -4,7 +4,7 @@
 
 const SR = 48000, TAU = Math.PI * 2;
 
-function oneShots() {
+export function oneShots() {
   let s = 12345; const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) | 0; return (s >>> 0) / 4294967296 * 2 - 1; };
   const mk = (sec, f) => { const n = Math.round(sec * SR), b = new Float32Array(n); for (let i = 0; i < n; i++) b[i] = f(i / SR, i); return b; };
   // kick: a falling sine (120 -> 45 Hz) with a fast decay and a click on top
