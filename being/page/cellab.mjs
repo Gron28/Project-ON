@@ -10,10 +10,24 @@
 // inner-light kind ('cavol'). Off in the light performance mode.
 // Growth is seeded on the felt beats where the sound lands on the song map (as the Lenia skin is), plus raindrops; sleep
 // freezes it. Lab: window.__cellab.
+// Correspondences with the rest of ON (each one a path the being already has, not a new sound-to-shape mapping):
+//   materials: the four shown lean the mood and choose the rule and palette (rules.mjs MAT_LEAN), so the sky reaches the
+//     automata through the stones and metals it leans; its automaton surfacing amplifies that material's own particles
+//     (particleGain(): Brian's Brain and Faders feed fire's embers and sparks, Perfume air's motes, Rug and Life earth's dust,
+//     Zhabotinsky and Venus the star-dust).
+//   timing: heard drum hits seed it as the tissue's closed loop is fed (hit()): predicted hits in one ordered place,
+//     surprises scattered (director.mjs hitSeeds()).
+//   the nervous tissue: where its sheet flashes hardest (being/tissue.mjs, the tissue texture's firing channel), a seed
+//     grows on the skin above it, as a cuttlefish's neurons open its chromatophores (tissueSeeds()).
+//   moments (moment()): a startle bursts seeds; love lights the inside a little and seeds where the song lands; 'not this'
+//     and a new form start it again from a fresh soup.
+//   beads: the body turned to beads is made of cells, so the automaton surfaces with them and each bead shines with the
+//     cell under it (being/beads.mjs).
 
 import { createCellabGPU, volumeFragment } from '../cellab/gpu.mjs';
 import { createCellabDirector } from '../cellab/director.mjs';
-import { RULES_2D, RULES_3D, INDEX_2D, INDEX_3D, rule2d, rule3d, CREDIT, moodScores } from '../cellab/rules.mjs';
+import { RULES_2D, RULES_3D, INDEX_2D, INDEX_3D, rule2d, rule3d, CREDIT, moodScores, leadMaterial, LEAD_MIN } from '../cellab/rules.mjs';
+import { MATERIALS } from '../materials.mjs';
 import { PALETTES, paletteRGBA, isGradient, gradientRGBA, GRADIENTS } from '../cellab/palettes.mjs';
 
 export const CELLAB_N = 96, CELLAB_G = 48;   // 96 cells a face: on a body ~150-400 px across, a CelLab front is a few pixels wide, so its forms read
@@ -30,11 +44,12 @@ export function createCellab(ctx) {
   const CA = {
     on: { surface: true, inside: true }, palette: 'auto', key: null, sec: -1, beat: null, shown: false, lead: 0, leadT: 0,
     wantS: 0, wantV: 0, v: 0, acc2: 0, acc3: 0, seeds2: [], seeds3: [], v2: -1, v3: -1, pal2: null, pal3: null, fade2: 0, fade3: 0,
-    showS: 0, showV: 0, drop: 0, vol: null, volMat: null, volScene: null, volIdle: 1e9, perfOK: true, steps2: 0, steps3: 0, keep: 0.35,
+    showS: 0, showV: 0, drop: 0, t: 0, hitAt: -1e9, bloom: 0, tisAt: 0, tisRef: 20, auto2: null, auto3: null, vol: null, volMat: null, volScene: null, volIdle: 1e9, perfOK: true, steps2: 0, steps3: 0, keep: 0.35,
   };
   try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) { CA.on.surface = s.surface !== false; CA.on.inside = s.inside !== false; if (typeof s.palette === 'string') CA.palette = s.palette; D.force('surface', s.rule); D.force('inside', s.rule3d); } } catch {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ surface: CA.on.surface, inside: CA.on.inside, palette: CA.palette, rule: D.st.force, rule3d: D.st.force3d })); } catch {} };
-  const palName = (meta) => (CA.palette === 'auto' || !(CA.palette in PALETTES || isGradient(CA.palette)) ? meta.palette : CA.palette);
+  const palName = (meta, auto) => (CA.palette === 'auto' || !(CA.palette in PALETTES || isGradient(CA.palette)) ? auto || meta.palette : CA.palette);
+  const mats = () => ({ ids: U.uMid.value, w: U.uMw.value });
   const palOf = (name) => (isGradient(name) ? [gradientRGBA(name), 1] : [paletteRGBA(name), 0]);
   const hueC = new THREE.Color(), tmpC = new THREE.Color();
 
@@ -66,7 +81,8 @@ export function createCellab(ctx) {
     // the song: its remembered automaton, or one chosen now and remembered once it knows the song a little
     if (MEM.meta && MEM.key !== CA.key) { CA.key = MEM.key; D.song(MEM.meta.cellab, keyHash(MEM.key), char); CA.sec = -1; }
     if (MEM.meta && MEM.song && !MEM.meta.cellab && MEM.song.experience > 20) MEM.meta.cellab = D.remember();
-    D.feel(dt, arousal, char, U.uCaA.value > 0.05 || CA.v > 0.05);
+    CA.t += dt;
+    D.feel(dt, arousal, char, U.uCaA.value > 0.05 || CA.v > 0.05, mats());
     const sec = an.state.structure ? an.state.structure.section | 0 : 0;
     if (CA.sec >= 0 && sec !== CA.sec) D.section();
     CA.sec = sec;
@@ -77,7 +93,9 @@ export function createCellab(ctx) {
     const leadT = CA.showS > 0 ? 1 : D.st.lead ? 1 : 0;
     CA.lead += (leadT - CA.lead) * (CA.pin ? 1 : 1 - Math.exp(-dt / 0.8));   // CA.pin (lab, slow renderers): no easing
     const awake = 1 - SLEEP.z;
-    CA.wantS = CA.on.surface ? Math.max(MORPH.show * (0.18 + 0.82 * CA.lead), CA.showS > 0 ? 1 : 0) * awake : 0;
+    // turned to beads, the body is made of cells: the automaton surfaces with them
+    const bead = Math.min(1, Math.max(0, ctx.beadsA || 0));
+    CA.wantS = CA.on.surface ? Math.max(MORPH.show * (0.18 + 0.82 * CA.lead), CA.showS > 0 ? 1 : 0, 0.9 * bead) * awake : 0;
     U.uCaA.value += (CA.wantS - U.uCaA.value) * (CA.pin ? 1 : 1 - Math.exp(-dt / (CA.wantS > U.uCaA.value ? 0.6 : 1.2)));
     if (U.uCaA.value < 1e-3 && CA.wantS === 0) U.uCaA.value = 0;
     U.uCaD.value = rule2d(D.surfaceRule).relief * 0.8;
@@ -88,7 +106,8 @@ export function createCellab(ctx) {
     CA.perfOK = !(QUAL.auto === false && QUAL.res < 0.9) && QUAL.k >= 0.7;
     if (S.drop > 0.9 && CA.drop <= 0.9) { push(CA.seeds2, D.burstSeeds('surface', 1)); push(CA.seeds3, D.burstSeeds('inside', 1)); }   // the drop rains seeds
     CA.drop = S.drop;
-    const peak = Math.max(c01((REST.M - 0.3) / 0.5), sm(0.85, 1, S.drop), 0.8 * sm(0.6, 1, B.chill), CA.showV > 0 ? 1 : 0);
+    CA.bloom *= Math.exp(-dt / 2.5);   // love: a short glow from inside
+    const peak = Math.max(c01((REST.M - 0.3) / 0.5), sm(0.85, 1, S.drop), 0.8 * sm(0.6, 1, B.chill), CA.showV > 0 ? 1 : 0, 0.55 * CA.bloom);
     CA.wantV = CA.on.inside && CA.perfOK ? peak * awake : 0;
     CA.v += (CA.wantV - CA.v) * (CA.pin ? 1 : 1 - Math.exp(-dt / (CA.wantV > CA.v ? 0.6 : 2.5)));
     if (CA.v < 1e-3 && CA.wantV === 0) CA.v = 0;
@@ -102,22 +121,67 @@ export function createCellab(ctx) {
     if (SHOW.count !== CA.beat) {
       const fresh = CA.beat !== null; CA.beat = SHOW.count;
       if (fresh && mind.lock > 0.3 && S.awake > 0.3 && awake > 0.5) {
-        if (CA.on.surface) push(CA.seeds2, D.beatSeeds('surface', arousal, bmuDir()));
+        if (CA.on.surface) push(CA.seeds2, D.beatSeeds('surface', arousal, bmuDir(), CA.t - CA.hitAt > 2));
         if (volLive) push(CA.seeds3, D.beatSeeds('inside', arousal));
       }
     }
+    if (CA.on.surface && awake > 0.5 && CA.t - CA.tisAt > 0.25 && ctx.tissue) { CA.tisAt = CA.t; tissueSeeds(ctx.tissue); }
+  }
+
+  // the nervous sheet (128 x 64, being/tissue.mjs, in the skin's own longitude-latitude layout): its hardest-firing 8 x 8
+  // patch, when it stands well above the running level of such patches, seeds the skin above it
+  function tissueSeeds(tex) {
+    let best = 0, bi = 0, bj = 0;
+    for (let bj0 = 0; bj0 < 8; bj0++) for (let bi0 = 0; bi0 < 16; bi0++) {
+      let sum = 0;
+      for (let y = bj0 * 8; y < bj0 * 8 + 8; y++) for (let x = bi0 * 8, o = (y * 128 + x) * 4 + 1; x < bi0 * 8 + 8; x++, o += 4) sum += tex[o];
+      if (sum > best) { best = sum; bi = bi0; bj = bj0; }
+    }
+    const m = best / 64, ref = CA.tisRef; CA.tisRef += (m - ref) * 0.05;
+    if (m < 40 || m < 1.6 * ref || bj === 0 || bj === 7) return;   // not the poles, where the layout pinches
+    const a = ((bi * 8 + 4) / 128 - 0.5) * 2 * Math.PI, l = ((bj * 8 + 4) / 64 - 0.5) * Math.PI;
+    push(CA.seeds2, [{ x: Math.cos(a) * Math.cos(l), y: Math.sin(l), z: Math.sin(a) * Math.cos(l), r: 0.05 * (rule2d(D.surfaceRule).seedR || 1) * Math.min(2, m / 80) }]);
+  }
+
+  /** a heard drum hit (being/index.html handleEvents): predicted or a surprise, as the tissue's closed loop is fed */
+  function hit(type, s, predicted) {
+    const { SLEEP, mind } = ctx;
+    if (SLEEP.z > 0.5) return;
+    CA.hitAt = CA.t;
+    if (CA.on.surface) push(CA.seeds2, D.hitSeeds('surface', type, s, predicted, bmuDir()));
+    if (CA.on.inside && CA.v > 0.002 && type !== 'hat') push(CA.seeds3, D.hitSeeds('inside', type, s, predicted && mind.lock > 0.3));
+  }
+  /** moments: 'startle' (a 0..1), 'love', 'not', 'reform' */
+  function moment(kind, a = 1) {
+    if (kind === 'startle') { push(CA.seeds2, D.burstSeeds('surface', a)); if (CA.v > 0.002) push(CA.seeds3, D.burstSeeds('inside', a)); }
+    else if (kind === 'love') { CA.bloom = 1; const b = bmuDir(); if (b) push(CA.seeds2, D.hitSeeds('surface', 'kick', 1, true, b)); }
+    else if (kind === 'not') { CA.bloom = 0; CA.showV = 0; D.renew('surface'); }
+    else if (kind === 'reform') { D.renew('surface'); D.renew('inside'); }
+  }
+  // what the automaton amplifies, by particle kind (particles.mjs KINDS): only while it surfaces, and only as a multiplier
+  // on what the materials already give off, so it never sheds what the body is not made of
+  const GAIN = { brain: [0, 1.5, 6, 1.5], faders: [0, 1, 6, 1.5], perfume: [2, 1.5, 8, 1.5], rug: [3, 1.5], life: [3, 1], zhabo: [4, 1.5], venus: [4, 1] };
+  const gains = new Float32Array(10);
+  function particleGain() {
+    gains.fill(1);
+    const g = GAIN[D.surfaceRule], a = U.uCaA.value;
+    if (g && a > 0.01) for (let i = 0; i < g.length; i += 2) gains[g[i]] = 1 + g[i + 1] * a;
+    return gains;
   }
 
   function applySurface() {
-    const meta = rule2d(D.surfaceRule), pn = palName(meta);
-    const fresh = CA.v2 !== D.st.v2;
+    const meta = rule2d(D.surfaceRule), fresh = CA.v2 !== D.st.v2;
+    if (fresh || !CA.auto2) CA.auto2 = D.palette('surface');   // chosen with the rule, so the colour never jumps while it shows
+    const pn = palName(meta, CA.auto2);
     if (fresh || CA.pal2 !== pn) { const [rgba, mode] = palOf(pn); surf.setPalette(rgba, mode); CA.pal2 = pn; }
     if (fresh) { CA.v2 = D.st.v2; surf.step({ rule: INDEX_2D[meta.id], init: true, dens: meta.dens }); CA.fade2 = 1; CA.pre2 = 120; }   // a fresh soup is pre-rolled (8 steps a frame) so it surfaces already grown
     return meta;
   }
   function applyInside() {
-    const meta = rule3d(D.insideRule), pn = palName(meta), vol = CA.vol;
+    const meta = rule3d(D.insideRule), vol = CA.vol;
     const fresh = CA.v3 !== D.st.v3 || CA.volIdle > 6;
+    if (fresh || !CA.auto3) CA.auto3 = D.palette('inside');
+    const pn = palName(meta, CA.auto3);
     if (fresh || CA.pal3 !== pn) { const [rgba, mode] = palOf(pn); vol.setPalette(rgba, mode); CA.pal3 = pn; }
     if (fresh) { CA.v3 = D.st.v3; vol.setParams(meta.params); vol.step({ rule: INDEX_3D[meta.id], init: true, dens: meta.dens }); CA.fade3 = 1; CA.pre3 = 30; }
     CA.volIdle = 0;
@@ -176,10 +240,11 @@ export function createCellab(ctx) {
     save();
   }
   const num = (x, d = 3) => (Number.isFinite(x) ? +x.toFixed(d) : 0);
+  const leadOf = () => { const l = leadMaterial(mats()); return l ? { id: l.id, name: MATERIALS[l.id], w: num(l.w), rule: l.lean.rule, leads: l.w >= LEAD_MIN } : null; };
   function snap() {
     const r2 = rule2d(D.surfaceRule), r3 = rule3d(D.insideRule);
     return {
-      on: { ...CA.on }, palette: CA.palette, mood: D.st.mood, moods: Object.fromEntries(Object.entries(moodScores(ctx.mind.arousal, ctx.an.state.character)).map(([k, v]) => [k, num(v)])),
+      on: { ...CA.on }, palette: CA.palette, mood: D.st.mood, lead: leadOf(), moods: Object.fromEntries(Object.entries(moodScores(ctx.mind.arousal, ctx.an.state.character, mats())).map(([k, v]) => [k, num(v)])),
       surface: { rule: r2.id, name: r2.name, tag: r2.tag, forced: !!D.st.force, a: num(U.uCaA.value), lead: num(CA.lead), share: num(D.st.share), steps: num(D.rate('surface', ctx.mind.arousal, ctx.SLEEP.z), 1), palette: CA.pal2 || r2.palette },
       inside: { rule: r3.id, name: r3.name, forced: !!D.st.force3d, a: num(U.uCvA.value), want: num(CA.wantV), gated: !CA.perfOK, steps: num(D.rate('inside', ctx.mind.arousal, ctx.SLEEP.z), 1), palette: CA.pal3 || r3.palette },
       known: D.st.known, section: D.st.section, rules: RULES_2D.map((r) => [r.id, r.name]), rules3d: RULES_3D.map((r) => [r.id, r.name]), palettes: [...GRADIENTS, ...Object.keys(PALETTES)], credit: CREDIT,
@@ -187,7 +252,7 @@ export function createCellab(ctx) {
   }
   window.__cellab = {
     CA, D, snap, set: (o) => { command(o || {}); return snap(); }, show: (which = 'surface', secs = 10) => command({ show: which, secs }),
-    pin: (v = true) => { CA.pin = !!v; return CA.pin; },
+    pin: (v = true) => { CA.pin = !!v; return CA.pin; }, hit: (type = 'kick', s = 1, predicted = true) => hit(type, s, predicted), moment: (k, a) => moment(k, a), gains: () => Array.from(particleGain()),
     probeInside: () => {   // lab: the inside pass's brightest light and opacity (half-float readback)
       if (!CA.cvRT) return null; const w = CA.cvRT.width, h = CA.cvRT.height, px = new Uint16Array(w * h * 4);
       renderer.readRenderTargetPixels(CA.cvRT, 0, 0, w, h, px); let L = 0, A = 0; const f = THREE.DataUtils.fromHalfFloat;
@@ -197,5 +262,5 @@ export function createCellab(ctx) {
     stats: () => ({ steps2: CA.steps2, steps3: CA.steps3, a: num(U.uCaA.value), v: num(U.uCvA.value), lead: num(CA.lead) }),
     readState: () => { const s = surf.readState(); renderer.resetState(); return s; },
   };
-  return { CA, D, frame, render, command, snap, get lead() { return CA.lead; } };
+  return { CA, D, frame, render, command, snap, hit, moment, particleGain, get lead() { return CA.lead; } };
 }

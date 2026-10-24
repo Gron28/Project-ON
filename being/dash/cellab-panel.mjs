@@ -1,5 +1,5 @@
 // being/dash/cellab-panel.mjs - the dashboard's 'Living patterns (CelLab)' panel: the automaton on ON's surface and the one
-// inside it (being/page/cellab.mjs, snap.cellab): which rules grow now and why (the mood), switches for each, a rule or
+// inside it (being/page/cellab.mjs, snap.cellab): which rules grow now and why (the mood and the leading material), switches for each, a rule or
 // 'auto' for each, the palette, and a moment to show them now (dev-cmd { k: 'cellab', ... }).
 // Rules and palettes after CelLab / WebCA by Rudy Rucker and John Walker (fourmilab.ch/cellab), public domain.
 
@@ -37,13 +37,14 @@ export function install(CLB, { h, panel, fmt, cmd }) {
     if (document.activeElement !== selI) selI.value = c.inside.forced ? c.inside.rule : 'auto';
     if (document.activeElement !== selP) selP.value = c.palette;
     swS.checked = c.on.surface; swI.checked = c.on.inside;
-    const key = JSON.stringify([c.surface.name, c.inside.name, c.mood, c.surface.a, c.inside.a, c.surface.lead, c.inside.gated]);
+    const key = JSON.stringify([c.surface.name, c.inside.name, c.mood, c.surface.a, c.inside.a, c.surface.lead, c.inside.gated, c.lead, c.surface.palette]);
     if (key === last) return; last = key;
     kv.replaceChildren(...[
       [c.surface.name, 'surface rule'], [fmt(c.surface.a), 'shown'], [fmt(c.surface.lead), 'leads this surfacing'], [fmt(c.surface.steps, 1), 'steps / s'],
       [c.inside.name, 'inside rule'], [c.inside.gated ? 'off (light mode)' : fmt(c.inside.a), 'inside shown'], [fmt(c.surface.share), 'song share'], [c.known ? 'remembered' : 'new', 'this song'],
     ].map(([v, k]) => h('div', {}, h('b', { class: 'num' }, String(v)), h('small', {}, k))));
-    moodEl.textContent = `mood: ${c.mood} · ` + Object.entries(c.moods).map(([m, s]) => `${m} ${fmt(s)}`).join(' · ') + ` · section ${c.section}`;
+    const ml = c.lead ? `grown from ${c.lead.name} (${fmt(c.lead.w)}${c.lead.leads ? `, its own: ${c.lead.rule}` : ', too faint to choose'}) · palette ${c.surface.palette} · ` : 'no material leans it · ';
+    moodEl.textContent = ml + `mood: ${c.mood} · ` + Object.entries(c.moods).map(([m, s]) => `${m} ${fmt(s)}`).join(' · ') + ` · section ${c.section}`;
   }
   CLB.build = build; CLB.feed = feed;
 }

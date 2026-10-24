@@ -579,9 +579,9 @@ function beingEvents(evs) {
       const a = e.amount; B.flinch = Math.max(B.flinch, a); V.kick = Math.max(V.kick, a); if (a > .45) S.ring = 0;
       for (let k = 0, n = Math.round(a * 7); k < n; k++) spawnDrop(.045 + .045 * a);
       S.jit.x += (Math.random() - .5) * a * .5; S.jit.y += (Math.random() - .5) * a * .5; S.jit.z += (Math.random() - .5) * a * .5;
-      beingWorker.postMessage({ type: 'kick', amount: a });
+      beingWorker.postMessage({ type: 'kick', amount: a }); CELLAB?.moment('startle', a);
       blog.unshift('startled ' + a.toFixed(2));
-    } else if (e.type === 'reform') { materialGate('a new form'); reseed(true); growGenome((SEED + (performance.now() | 0)) >>> 0); blog.unshift('bored: grew a new form'); say('bored · it grows a new form'); }
+    } else if (e.type === 'reform') { CELLAB?.moment('reform'); materialGate('a new form'); reseed(true); growGenome((SEED + (performance.now() | 0)) >>> 0); blog.unshift('bored: grew a new form'); say('bored · it grows a new form'); }
     else if (e.type === 'chill') { voiceKeep('chills', 1); B.chill = 1; blog.unshift('chills'); materialGate('chills'); flourish('star', 1); }
     else if (e.type === 'recoil') { B.recoil = 1; blog.unshift('disappointed'); }
   }
@@ -689,7 +689,7 @@ reseed(true);
 // a new form, visibly: the old one sinks and smooths, the skin's genome and the vibration modes are regrown, the material
 // turns over, and it re-emerges with a small overshoot (the same motion as a hatch, shorter, and the same being)
 function newForm(silent) {
-  reseed(true); growGenome((SEED + (performance.now() | 0)) >>> 0); morphSection(); materialGate('a new form', 1); skinFlush(1, 'a new form');
+  reseed(true); growGenome((SEED + (performance.now() | 0)) >>> 0); morphSection(); materialGate('a new form', 1); skinFlush(1, 'a new form'); CELLAB?.moment('reform');
   FORM.t = 0; if (!silent) { say('a new form'); blog.unshift('a new form'); }
 }
 const FORM = { t: -1 };
@@ -1091,6 +1091,7 @@ function handleEvents(evs, now) {
         if (Number.isFinite(e.time)) LASTHIT[e.type] = Math.max(LASTHIT[e.type], e.time);
         const ex = timing.observe(e.type, e.strength || .6, gridAt(e.time), 250 / Math.max(.3, mind.pulseHz)) * SHOW.gate;
         if (ex < .5) drumHit(e.type, s * (1 - ex), live);
+        if (live) CELLAB?.hit(e.type, s, ex > .5);   // the automata are fed as the tissue is: predicted hits in one place, surprises scattered
         // closed loop (tissue.mjs, lab E11): while it is trying to be on time, a hit it predicted reaches its tissue as the
         // same stamp every time, a hit that surprised it as noise
         if (SHOW.gate > .15 && live) beingWorker.postMessage(ex > .5 ? { type: 'feedback', kind: 'pattern', band: e.type === 'kick' ? 0 : e.type === 'snare' ? 1 : 2, amount: Math.min(1, .4 + .6 * s) } : { type: 'feedback', kind: 'noise', amount: Math.min(1, .4 + .6 * s) });
@@ -1339,8 +1340,8 @@ function reactFrame(dt) {
   if (n > .003) { U.uScale.value *= 1 - .13 * n; U.uGlow.value *= 1 - .6 * n; U.uCoreI.value *= 1 - .5 * n; U.uChaos.value += .22 * n; }
 }
 function feedback(sign) {
-  if (sign > 0) { voiceKeep('love', 1.2); flourish('glint', .8); REACT.love = 1; S.ring = 0; B.chill = Math.max(B.chill, .35); skinFlush(.9, 'loved'); MAT.m.moment(.5); }
-  else { REACT.no = 1; B.flinch = Math.max(B.flinch, .6); V.kick = Math.max(V.kick, .6); materialGate('not this', 1); }
+  if (sign > 0) { voiceKeep('love', 1.2); flourish('glint', .8); REACT.love = 1; S.ring = 0; B.chill = Math.max(B.chill, .35); skinFlush(.9, 'loved'); MAT.m.moment(.5); CELLAB?.moment('love'); }
+  else { REACT.no = 1; CELLAB?.moment('not'); B.flinch = Math.max(B.flinch, .6); V.kick = Math.max(V.kick, .6); materialGate('not this', 1); }
   mind.inject(sign); blog.unshift(sign > 0 ? "loved: reward dopamine" : "not this: punishment dopamine");
   if (!taste) { say('still waking up…'); return; }
   taste.feedback(sign, { title: ML.title });   // it records its own contribution (the current suggestion or exploration), never the whole look
@@ -1889,7 +1890,8 @@ function flourishFrame(dt, t) {
   const wFire = wp[6] + .45 * (wp[17] + wp[21] + wp[25] + wp[33]), wAir = wp[8] + .45 * (wp[19] + wp[23] + wp[27] + wp[29] + wp[36]), wEarth = wp[9] + .45 * (wp[18] + wp[22] + wp[26] + wp[38]);
   const wMars = wp[12] + .45 * (wp[17] + wp[24] + wp[33]), wSun = wp[13] + .45 * (wp[21] + wp[34]), wSat = wp[10] + .45 * (wp[26] + wp[27] + wp[31]);
   const wStar = wp[13] + .6 * wp[16] + .5 * wp[15] + .6 * wp[14] + .45 * (wp[19] + wp[20] + wp[21] + wp[22] + wp[23] + wp[27] + wp[28] + wp[29] + wp[30] + wp[32] + wp[34] + wp[35] + wp[37]);
-  const rates = [70 * (wFire + .5 * wMars + .4 * wSun) * (.4 + A), 0, 130 * wAir, 30 * (wEarth + .6 * wSat), 20 * wStar, 0, 0, 0, 110 * wAir * (.5 + A)].map((x) => x * awake);
+  const caG = CELLAB ? CELLAB.particleGain() : null;   // the automaton surfacing amplifies its own material's particles
+  const rates = [70 * (wFire + .5 * wMars + .4 * wSun) * (.4 + A), 0, 130 * wAir, 30 * (wEarth + .6 * wSat), 20 * wStar, 0, 0, 0, 110 * wAir * (.5 + A)].map((x, k) => x * awake * (caG ? caG[k] : 1));
   const kick = U.uKick.value; if (kick > .7 && FLO.kick <= .7 && (wFire + wMars) > .2) particles.burst('spark', Math.round(10 * (wFire + wMars)), U.uShellR.value); FLO.kick = kick;
   particles.step(dt, rates, U.uShellR.value, t, { field: FIELD, beat: U.uBeatPulse.value, kick: U.uKick.value, arousal: mind.arousal });
   FLO.g.step(dt);
@@ -2099,7 +2101,8 @@ window.__probeW = () => { const g = MORPH.cur; return { sec: MORPH.sec, wmax: +M
 let CELLAB = null;
 try { CELLAB = createCellab({ THREE, renderer, U, SEED, keyHash, MW, MH, gpuTime, c01, sm, skinFlush,
   get mind() { return mind; }, get MEM() { return MEM; }, get MORPH() { return MORPH; }, get SKIN() { return SKIN; }, get SLEEP() { return SLEEP; }, get REST() { return REST; },
-  get S() { return S; }, get SHOW() { return SHOW; }, get an() { return an; }, get QUAL() { return QUAL; }, get B() { return B; } }); }
+  get S() { return S; }, get SHOW() { return SHOW; }, get an() { return an; }, get QUAL() { return QUAL; }, get B() { return B; },
+  get beadsA() { return beads.mesh.visible ? beads.uniforms.uBA.value : 0; }, get tissue() { return tissueTex.image.data; } }); }
 catch (e) { CELLAB = null; console.error('cellab:', e && e.message); renderer.resetState(); }
 window.__rest = () => ({ M: +REST.M.toFixed(2), win: { ...REST.win }, g: Object.fromEntries(Object.entries(REST.g).map(([k, v]) => [k, +v.toFixed(2)])) });
 function beingBody(dt, t) {
