@@ -143,7 +143,7 @@ function createWindow() {
   });
   if (pet) {
     win.setIgnoreMouseEvents(true, { forward: true });   // clicks pass through until the cursor is over the creature
-    win.on('moved', () => { if (immersive) return; const b = win.getBounds(); settings.x = b.x; settings.y = b.y; save(); });
+    win.on('moved', () => { send('quality', quality()); if (immersive) return; const b = win.getBounds(); settings.x = b.x; settings.y = b.y; save(); });   // (another display may refresh at another rate)
   }
   // "system audio": answer getDisplayMedia with the screen plus Windows loopback audio, no picker
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
@@ -157,7 +157,7 @@ function createWindow() {
       sendMotion();
       wc.send('ml', settings.ml);
       wc.send('retro', { pix: settings.pix, lev: settings.lev, dith: settings.dith });
-      wc.send('quality', { res: settings.quality, auto: settings.adaptive });
+      wc.send('quality', quality());
       EXTM?.pageLoaded?.(wc);
       if (process.env.BEING_READY_FILE) { try { fs.writeFileSync(process.env.BEING_READY_FILE, 'ready'); } catch {} }
       if (!settings.onboarded && settings.pet) setTimeout(openSettings, 1200);   // first run: one small card
@@ -373,6 +373,8 @@ function openSettings() {
 const fromSettings = (e) => settingsWin && !settingsWin.isDestroyed() && e.sender === settingsWin.webContents;
 // render cost in one choice: auto lowers the resolution itself when frames run long
 const PERFORMANCE = { auto: { quality: 1, adaptive: true }, sharp: { quality: 1, adaptive: false }, light: { quality: .6, adaptive: false } };
+// what the page's governor needs: the resolution ceiling, whether it adapts, and the refresh rate of the display it is on
+const quality = () => { let hz = 0; try { if (win && !win.isDestroyed()) hz = screen.getDisplayMatching(win.getBounds()).displayFrequency || 0; } catch {} return { res: settings.quality, auto: settings.adaptive, hz }; };
 const performanceNow = () => (settings.adaptive !== false ? 'auto' : (settings.quality ?? 1) >= .9 ? 'sharp' : 'light');
 function setRetro(key, value) {   // the pixelated / PS1 look (dashboard, Look)
   if (!['pix', 'lev', 'dith'].includes(key) || !Number.isFinite(value)) return false;
@@ -402,7 +404,7 @@ ipcMain.handle('settings-set', (e, key, value) => {
     if (value) { const exe = process.execPath, ico = path.join(__dirname, '.setup', 'being.ico'); fs.mkdirSync(path.dirname(STARTUP), { recursive: true }); return shell.writeShortcutLink(STARTUP, { target: exe, args: `"${__dirname}"`, cwd: __dirname, icon: fs.existsSync(ico) ? ico : exe, iconIndex: 0, description: 'ON' }); }
     try { fs.rmSync(STARTUP, { force: true }); } catch {} return true;
   }
-  if (key === 'performance' && PERFORMANCE[value]) { const p = PERFORMANCE[value]; settings.quality = p.quality; settings.adaptive = p.adaptive; save(); send('quality', { res: settings.quality, auto: settings.adaptive }); return true; }
+  if (key === 'performance' && PERFORMANCE[value]) { const p = PERFORMANCE[value]; settings.quality = p.quality; settings.adaptive = p.adaptive; save(); send('quality', quality()); return true; }
   if (key === 'ml:all' && typeof value === 'boolean') { for (const k of Object.keys(settings.ml)) settings.ml[k] = value; save(); send('ml', settings.ml); return true;   // the four local models together
   }
   if (typeof key === 'string' && key.startsWith('ml:') && typeof value === 'boolean' && Object.hasOwn(settings.ml, key.slice(3))) {

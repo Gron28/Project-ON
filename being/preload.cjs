@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld('pet', {
   onRetro: (fn) => onState('retro', fn),               // { pix: block size in px (1 off), lev: levels a channel (0 off), dith: 0..1 }: the pixelated / PS1 look
   mlLayers: () => { try { return ipcRenderer.sendSync('ml-get'); } catch { return null; } },   // which local models run: { style, feel, world, beat }, read once at start
   onMl: (fn) => onState('ml', fn),
-  onQuality: (fn) => onState('quality', fn),           // { res: 0.4..1, auto }: render resolution scale, and whether it lowers itself when frames run long
+  onQuality: (fn) => onState('quality', fn),           // { res: 0.4..1, auto, hz }: render resolution scale, whether it adapts when frames run long, the display's refresh rate
   // the local folder's own channels (being/local/page.mjs <-> being/local/main.cjs), each prefixed 'ext:'
   ext: { on: (ch, fn) => on('ext:' + String(ch), fn), send: (ch, v) => ipcRenderer.send('ext:' + String(ch), v) },
   // whether the page should look for being/local/page.mjs: asked of main when sandboxed (no fs here); unsandboxed lab harnesses

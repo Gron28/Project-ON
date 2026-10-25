@@ -150,6 +150,8 @@ import { createImmersive } from './page/immersive.mjs';
 import { createGlitch } from './page/glitch.mjs';
 import { createJumpScan } from './page/jumps.mjs';
 import { createCellab } from './page/cellab.mjs';
+import { createGovernor, governorStep, createUpscale } from './page/quality.mjs';
+import { installQualityLab } from './page/quality-lab.mjs';
 
 const pet = window.pet || new Proxy({}, {
   get: (_, prop) => {
@@ -233,18 +235,24 @@ function renderBeing() {
   FB.uPrev.value = fbA.texture; FB.uScene.value = sceneRT.texture;
   renderer.setRenderTarget(fbB); renderer.render(fbScene, camera);
   const t = fbA; fbA = fbB; fbB = t;
-  CO.uFb.value = fbA.texture; CO.uScene.value = sceneRT.texture;
+  CO.uFb.value = fbA.texture; CO.uScene.value = QUAL.up ? UP.render(sceneRT) : sceneRT.texture;   // a smaller body is upscaled to the window
   renderer.setRenderTarget(null); renderer.render(coScene, camera);
 }
-// render resolution: the Settings slider (QUAL.res) is the ceiling; with 'auto' the governor lowers QUAL.k when frames run long and raises it back when there is room
+// render resolution: the Settings slider (QUAL.res) is the ceiling; with 'auto' the governor (being/page/quality.mjs) eases unseen
+// work first and lowers QUAL.k last when frames run long, and climbs back when there is room. QUAL.k scales only the body and
+// its aura; the window itself (the final picture) stays at full resolution and the body is upscaled into it (UP)
 // retro / PS1 look (Settings): RETRO.pix = block size in window pixels (1 off), lev = levels a channel (0 off), dith 0..1
 const RETRO = { pix: 1, lev: 0, dith: 0 };
-const retroApply = () => { CO.uPix.value = Math.max(1, RETRO.pix * U.uRes.value.x / Math.max(1, innerWidth)); CO.uLev.value = RETRO.lev; CO.uDith.value = RETRO.dith; CO.uRes.value.copy(U.uRes.value); };
-const QUAL = { res: 1, auto: true, k: 1, slow: 0, fast: 0, last: 0 };
-window.__qual = QUAL;   // lab: the resolution governor's state
-const resize = () => { renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5) * T.res * QUAL.k); renderer.setSize(innerWidth, innerHeight, false); renderer.getDrawingBufferSize(U.uRes.value);
-  const w = U.uRes.value.x, h = U.uRes.value.y; sceneRT.setSize(w, h); fbA.setSize(w >> 1, h >> 1); fbB.setSize(w >> 1, h >> 1); FB.uAspect.value = w / h; retroApply(); };
+const retroApply = () => { CO.uPix.value = Math.max(1, RETRO.pix * CO.uRes.value.x / Math.max(1, innerWidth)); CO.uLev.value = RETRO.lev; CO.uDith.value = RETRO.dith; };
+const QUAL = createGovernor();
+window.__qual = QUAL;   // lab: the governor's state (k: body resolution, cap: every other refresh, bake: the skin's bake interval)
+const UP = createUpscale(THREE, renderer);
+const resize = () => { renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5) * T.res); renderer.setSize(innerWidth, innerHeight, false); renderer.getDrawingBufferSize(CO.uRes.value);
+  const W = CO.uRes.value.x, H = CO.uRes.value.y, w = Math.max(2, Math.round(W * QUAL.k)), h = Math.max(2, Math.round(H * QUAL.k));
+  QUAL.up = w !== W || h !== H; if (QUAL.up) UP.setSize(W, H);
+  U.uRes.value.set(w, h); sceneRT.setSize(w, h); fbA.setSize(w >> 1, h >> 1); fbB.setSize(w >> 1, h >> 1); FB.uAspect.value = w / h; retroApply(); };
 addEventListener('resize', resize); resize();
+installQualityLab({ THREE, renderer, U, CO, QUAL, UP, resize, scene, camera, coScene, sceneRT, T });   // lab: window.__qualLab (being/page/quality-lab.mjs)
 
 /* ---------- the analysis engine and audio in ---------- */
 const SR = 48000, an = createAnalyzer({ sampleRate: SR });
@@ -834,7 +842,7 @@ function orgSnap() {   // the dashboard's drive meter
 window.__orgDrive = () => ({ on: ORGD.on, s: ORGD.s, k: +ORGD.k.toFixed(3), A: ORGD.A, R: ORGD.R, ageMs: ORGD.d ? Math.round(performance.now() - ORGD.at) : null, received: ORGD.n, rate: ORGD.rate, last: ORGD.d, lo: ORGD.lo, hi: ORGD.hi,
   mapped: { ...ORGD.v, reg: Array.from(ORGD.v.reg), modes: Array.from(ORGD.v.modes), pos: Array.from(ORGD.v.pos), omega: Array.from(ORGD.v.omega), D: ORGD.D, colour: '#' + ORGD.col.getHexString(), colW: ORGD.colW, metalW: ORGD.metalW, glow: ORGD.glow } });   // lab
 pet.onRetro?.(v => { RETRO.pix = Math.min(24, Math.max(1, +v?.pix || 1)); RETRO.lev = +v?.lev >= 2 ? Math.min(64, +v.lev) : 0; RETRO.dith = Math.min(1, Math.max(0, +v?.dith || 0)); retroApply(); });
-pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
+pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.hz = +v?.hz || 0; QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
 const HATCH = { t: -1, swapped: false, A: 1.4, B: 2.8 };
 let LAST_TRACK = null;
 async function hatchSwap() {   // at the darkest point: everything that is the being changes hands
@@ -1938,8 +1946,9 @@ function morphTick(dt, t) {
   }
   MORPH.motion.set(MORPH.flow, SHOW.phase, earFrame ? earFrame.sub : 0, mind.arousal);
   // the form moves slowly: baking every other frame (every fourth while it rests) is enough, and saves ~1-3 ms of GPU
-  // the bake is deferred: drawn right before the body only while the body samples it (uMorphA > .01), see the frame loop
-  if (!window.__noBake && ++MORPH.frame % (SLEEP.z > .98 ? 8 : 2) === 0) morph.bake(t, MORPH.motion, { defer: true });
+  // the bake is deferred: drawn right before the body only while the body samples it (uMorphA > .01), see the frame loop;
+  // the governor can stretch the shown pace to every third frame (QUAL.bake)
+  if (!window.__noBake && ++MORPH.frame % (SLEEP.z > .98 ? 8 : QUAL.bake) === 0) morph.bake(t, MORPH.motion, { defer: true });
   // the body rests as clear, smooth metal: the grown form surfaces only at moments (a section, the drop, chills,
   // recognition), easing in over ~1.2 s and fading over ~4 s, so its relief and cavities never pop
   const show = sm(.3, .85, SKIN.expr);
@@ -2318,12 +2327,8 @@ renderer.setAnimationLoop(ts => {
   S.enL += (S.en - S.enL) * (1 - Math.exp(-dt / 12));
   const contrast = (st.level - S.lvAvg) * cu.dynamics * .35; S.lvAvg += (st.level - S.lvAvg) * (1 - Math.exp(-dt / 5));
   BOUNCE.k += ((BOUNCE.on ? 1 : 0) - BOUNCE.k) * (1 - Math.exp(-dt / .3));
-  { const now = performance.now(), ft = now - QUAL.last; QUAL.last = now;   // governor: wall-clock frame time (asleep, the page draws every other frame, so only judge awake)
-    if (QUAL.auto && SLEEP.z < .5 && ft > 0 && ft < 1000) {
-      if (ft > 24) { QUAL.slow += ft; QUAL.fast = 0; } else if (ft < 14) { QUAL.fast += ft; QUAL.slow = Math.max(0, QUAL.slow - ft); } else { QUAL.slow = Math.max(0, QUAL.slow - ft); QUAL.fast = 0; }
-      if (QUAL.slow > 2000 && QUAL.k > .5) { QUAL.k = Math.max(.5, QUAL.k - .1); QUAL.slow = 0; resize(); }
-      else if (QUAL.fast > 8000 && QUAL.k < QUAL.res) { QUAL.k = Math.min(QUAL.res, QUAL.k + .05); QUAL.fast = 0; resize(); }
-    } else if (!QUAL.auto && QUAL.k !== QUAL.res) { QUAL.k = QUAL.res; resize(); } }
+  { const now = performance.now(), ft = now - QUAL.last; QUAL.last = now;   // governor (being/page/quality.mjs); asleep, the page draws every other frame, so it only judges awake
+    if ((SLEEP.z < .5 || !QUAL.auto) && governorStep(QUAL, ft, lastFrameMs, now, beingClock.t) === 'res') resize(); }
   const rawScale = ((.80 + .12 * loudF + .2 * loudF * X + BOUNCE.k * (1 - ORGD.R) * (S.grid * pulseBeat * (.05 + .06 * S.down) * lockF + (1 - S.grid * Math.min(1, lockF)) * kickV * .04) * S.awake * (.3 + 1.3 * X) * T.pulse + S.drop * .06 + (swell + contrast) * S.awake) * T.size);
   // a soft ceiling: above 1 the size compresses smoothly toward 1.18 (beats still show), so it never outgrows the window
   const quiet = c01(S.quiet / 4);
@@ -2377,9 +2382,9 @@ renderer.setAnimationLoop(ts => {
   hatchFrame(dt); formFrame(dt); reactFrame(dt);
   beadsFrame(dt);
   gpuPoll();
-  // fast asleep (silence: shell whole, breathing at ~0.2 Hz, everything dimmed): draw every other frame. The aura runs two of its passes in one
+  // fast asleep (silence: shell whole, breathing at ~0.2 Hz, everything dimmed), or capped by the governor on a fast display: draw every other frame. The aura runs two of its passes in one
   // (x -> d*d*x + (1+d)*g*scene is exactly two applications of x -> d*x + g*scene), so its trails fade at the same rate
-  const half = SLEEP.z > .98 && !window.__noHalf;
+  const half = (SLEEP.z > .98 || QUAL.cap > 0) && !window.__noHalf;
   if ((S.awake > .05 || ++skip % 3 === 0) && (!half || (++halfSkip & 1) === 0)) {
     if (half) { const d = FB.uDecay.value; FB.uGain.value *= 1 + d; FB.uDecay.value = d * d; }
     if (U.uMorphA.value > .009 || window.__bakeAlways) gpuTime('bake', morph.ensure);   // the grown form is sampled (body, beads) only above .01: hidden, it is not baked
