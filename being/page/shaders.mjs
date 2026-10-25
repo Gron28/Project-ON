@@ -57,7 +57,7 @@ export const bodyFragment = ({ EXT, NOTES, ND, NT, TP, NS }) => `
   uniform sampler2D uSongTex; uniform sampler2D uSongGlow; uniform float uSongAmt; uniform float uSongRot;
   uniform float uProp; uniform float uAro; uniform float uEcho; uniform vec4 uPWa; uniform vec4 uPWb; uniform vec4 uPWc; uniform vec4 uCast;${EXT.shader.decl}
   uniform sampler2D uSongGene; uniform vec3 uDnaOff; uniform float uMid[ 4 ]; uniform float uMw[ 4 ]; uniform float uMatMix; uniform float uMatScale; uniform vec4 uWR[ 2 ]; uniform float uWRA; uniform vec4 uSer[ 48 ]; uniform float uSerA[ 3 ]; uniform vec4 uSerB[ 3 ]; uniform vec4 uGl[ 6 ]; uniform float uGlR[ 6 ]; uniform float uGlisten; uniform float uBeatPulse; uniform float uRegP[ 8 ]; uniform float uRegA; uniform sampler2D uTissue; uniform float uTissueA; uniform samplerCube uMorph; uniform float uMorphA; uniform float uMorphD; uniform float uHide; uniform vec3 uStainM, uStainN, uStainC, uStainO; uniform float uStainA;
-  uniform sampler2D uCa; uniform float uCaA; uniform float uCaD; uniform float uCaN; uniform vec3 uCaHueC; uniform float uCaHue; uniform sampler2D uCv; uniform float uCvA;   // the CelLab automata (being/cellab): on the surface, and inside (a half-resolution pass)
+  uniform sampler2D uCa; uniform float uCaA; uniform float uCaD; uniform float uCaN; uniform vec3 uCaHueC; uniform float uCaHue; uniform sampler2D uCv; uniform float uCvA; uniform float uBound;   // the CelLab automata (being/cellab): on the surface, and inside (a half-resolution pass)
   vec2 songUV( vec3 d ) { vec2 uv = vec2( atan( d.z, d.x ) * .15915494 + .5 + uSongRot, asin( clamp( d.y, -1., 1. ) ) * .31830989 + .5 );
     uv += .006 * vec2( sin( uv.y * 31. + uTime * .9 ), sin( uv.x * 27. - uTime * .7 ) );   // the remembered skin boils a little
     return vec2( fract( uv.x ), clamp( uv.y, 0., 1. ) ); }
@@ -911,8 +911,9 @@ ${CA_GLSL}
     vec3 col = vec3( 0. ); float alpha = 0.;
     float bb = dot( ro, rd ), hb = bb * bb - dot( ro, ro ) + 1.45 * 1.45;
     bool hit = false; float t = 0., rGlow = 0., rGlowT = 0.;
-    if ( hb > 0. && uHide < .5 ) {   // beads: the liquid shell is gone, the core still shines
-      t = max( - bb - sqrt( hb ), 0. ); float tEnd = uRise > .2 ? - bb + sqrt( hb ) : min( - bb + sqrt( hb ), tCore );   // risen, the form may pass through the core
+    float hB = bb * bb - dot( ro, ro ) + uBound * uBound;   // uBound (bodyBound() in the page): rays that miss it cannot hit, and none hits past its far side
+    if ( hb > 0. && hB > 0. && uHide < .5 ) {   // beads: the liquid shell is gone, the core still shines
+      t = max( - bb - sqrt( hb ), 0. ); float tEnd = min( uRise > .2 ? - bb + sqrt( hb ) : min( - bb + sqrt( hb ), tCore ), - bb + sqrt( hB ) );   // risen, the form may pass through the core
       int nMax = 64 + int( 96. * uRise );
       for ( int i = 0; i < 160; i++ ) {
         if ( i >= nMax ) break;

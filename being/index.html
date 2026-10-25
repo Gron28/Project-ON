@@ -141,6 +141,7 @@ import { lexicon } from './lexicon.mjs';
 import { createInputGain } from './input-gain.mjs';
 import { createPhysics } from './physics.mjs';
 import { bodyFragment, AURA_FRAG, COMPOSITE_FRAG, UNWRAP_FRAG } from './page/shaders.mjs';
+import { bodyBound } from './page/body-bound.mjs';
 import { createGpuTiming } from './page/gpu-timing.mjs';
 import { createInput, WORKLET } from './page/input.mjs';
 import { createHud } from './page/hud.mjs';
@@ -204,7 +205,8 @@ const U = {
   uWR: { value: [new THREE.Vector4(0, 1, 0, .6), new THREE.Vector4(.3, .95, 0, .7)] }, uWRA: { value: 0 }, uSer: { value: Array.from({ length: 48 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uSerA: { value: [0, 0, 0] }, uSerB: { value: Array.from({ length: 3 }, () => new THREE.Vector4(0, 0, 0, 0)) },
   uGl: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, .05, 0)) }, uGlR: { value: [0, 0, 0, 0, 0, 0] }, uGlisten: { value: 0 }, uBeatPulse: { value: 0 }, uRegP: { value: new Array(8).fill(0) }, uRegA: { value: 0 },
   // the CelLab automata (being/page/cellab.mjs): the surface's palette + height atlas, its amount, depth, cells a face, hue; the inside's half-resolution light and amount
-  uCa: { value: null }, uCaA: { value: 0 }, uCaD: { value: .03 }, uCaN: { value: 128 }, uCaHueC: { value: new THREE.Color(1, 1, 1) }, uCaHue: { value: .45 }, uCv: { value: null }, uCvA: { value: 0 }
+  uCa: { value: null }, uCaA: { value: 0 }, uCaD: { value: .03 }, uCaN: { value: 128 }, uCaHueC: { value: new THREE.Color(1, 1, 1) }, uCaHue: { value: .45 }, uCv: { value: null }, uCvA: { value: 0 },
+  uBound: { value: 1.45 }   // a sphere round all the body can draw: rays that miss it skip the march (bodyBound(), set before each draw)
 };
 
 /* ---------- one shader: a liquid-metal mass with lobes and falling drops, ray-marched around an analytic core of light ---------- */
@@ -231,6 +233,7 @@ const coScene = new THREE.Scene(); coScene.add(new THREE.Mesh(new THREE.PlaneGeo
 /* lab: GPU time per pass, only while window.__gpuT is set (being/page/gpu-timing.mjs) */
 const { GT, gpuTime, gpuPoll } = createGpuTiming(renderer);
 function renderBeing() {
+  U.uBound.value = bodyBound(U);
   renderer.setRenderTarget(sceneRT); renderer.render(scene, camera);
   FB.uPrev.value = fbA.texture; FB.uScene.value = sceneRT.texture;
   renderer.setRenderTarget(fbB); renderer.render(fbScene, camera);
