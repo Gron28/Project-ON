@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- lab: the look passes' optimisations against the code they replace (scratch/perf/look-passes/base/, copied from the branch
+     point), on identical inputs in one WebGL context. Driven by scratch/look-equiv.cjs. -->
+<html><head><meta charset="utf-8">
+<script type="importmap">{ "imports": { "three": "../node_modules/three/build/three.module.js" } }</script>
+</head><body style="margin:0;background:#000">
+<script type="module">
+import * as THREE from 'three';
+const cv = document.createElement('canvas'); cv.width = cv.height = 256; document.body.appendChild(cv);
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: false, preserveDrawingBuffer: true });
+const BASE = './perf/look-passes/base/';
+const half = THREE.DataUtils.fromHalfFloat;
+// deterministic Math.random for modules that use it
+function seedRandom(s) { let a = s >>> 0; Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function cmp(a, b) {
+  let max = 0, n = 0, se = 0;
+  for (let i = 0; i < a.length; i++) { const d = Math.abs(a[i] - b[i]); if (d > 0) n++; if (d > max) max = d; se += d * d; }
+  const mse = se / a.length; return { max: +max.toPrecision(3), differing: n, of: a.length, psnr: mse ? +(10 * Math.log10(1 / mse)).toFixed(1) : Infinity };
+}
+const readHalf = (rt) => { const px = new Uint16Array(rt.width * rt.height * 4); renderer.readRenderTargetPixels(rt, 0, 0, rt.width, rt.height, px); return Float32Array.from(px, half); };
+const readFloat = (rt) => { const px = new Float32Array(rt.width * rt.height * 4); renderer.readRenderTargetPixels(rt, 0, 0, rt.width, rt.height, px); return px; };
+
+// ---- Lenia: zero-weight kernel pairs skipped ----
+window.leniaEquiv = async (patterns = ['cells', 'coral', 'worms', 'spots', 'waves', 'static'], ticks = 240) => {
+  const [A, B] = await Promise.all([import(window.__selfA ? BASE + 'skin/lenia.mjs?a' : '../being/skin/lenia.mjs'), import(BASE + 'skin/lenia.mjs')]);   // __selfA: base against itself (the harness's own noise floor)
+  const out = {};
+  for (const p of patterns) {
+    const ra = renderer.readRenderTargetPixelsAsync; renderer.readRenderTargetPixelsAsync = undefined;   // synchronous statistics (they steer seeding): deterministic
+    const sa = A.createSkin(renderer, THREE, {}), sb = B.createSkin(renderer, THREE, {});
+    renderer.readRenderTargetPixelsAsync = ra;
+    for (const s of [sa, sb]) { s.setParams({ pattern: p, growth: .6, speed: .5, contrast: .6 }, true); s.reseed(7); }
+    for (let i = 0; i < ticks; i++) {
+      const f = { energy: .5 + .4 * Math.sin(i * .05), kick: i % 30 < 3 ? 1 : 0, snare: i % 60 > 30 && i % 60 < 33 ? 1 : 0, hat: 0, bass: .5, intensity: .6 };
+      for (const s of [sa, sb]) { s.feed(f); s.step(1 / 60); }
+
+    }
+    out[p] = cmp(readHalf(sa.target), readHalf(sb.target));
+    sa.dispose(); sb.dispose();
+  }
+  return out;
+};
+
+// ---- the morph bake: deferred (ensure before sampling) against a bake every call ----
+const faceRT = new THREE.WebGLRenderTarget(384 * 6, 384, { type: THREE.FloatType, depthBuffer: false });
+const FU = { uC: { value: null }, uLod: { value: 0 } };
+const faceScene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+faceScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms: FU, depthTest: false, depthWrite: false,
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+  fragmentShader: `precision highp float; varying vec2 vUv; uniform samplerCube uC; uniform float uLod;
+    vec3 faceDir( vec2 st, int f ) { vec2 c = st * 2. - 1.;
+      if ( f == 0 ) return normalize( vec3( 1., - c.y, - c.x ) ); if ( f == 1 ) return normalize( vec3( - 1., - c.y, c.x ) );
+      if ( f == 2 ) return normalize( vec3( c.x, 1., c.y ) ); if ( f == 3 ) return normalize( vec3( c.x, - 1., - c.y ) );
+      if ( f == 4 ) return normalize( vec3( c.x, - c.y, 1. ) ); return normalize( vec3( - c.x, - c.y, - 1. ) ); }
+    void main() { float x = vUv.x * 6.; int f = int( floor( x ) ); gl_FragColor = textureLod( uC, faceDir( vec2( fract( x ), vUv.y ), f ), uLod ); }` })));
+const readCube = (tex, lod = 0) => { FU.uC.value = tex; FU.uLod.value = lod; const p = renderer.getRenderTarget(); renderer.setRenderTarget(faceRT); renderer.render(faceScene, cam); renderer.setRenderTarget(p); return readFloat(faceRT); };
+window.morphEquiv = async (frames = 40) => {
+  const [A, B, M] = await Promise.all([import('../being/morph-gl.mjs'), import(BASE + 'morph-gl.mjs'), import('../being/morph.mjs')]);
+  const ma = A.createMorph(renderer, THREE, { size: 384 }), mb = B.createMorph(renderer, THREE, { size: 384 });
+  const g0 = M.dnaGenome(1234), g1 = M.morphFor({}, 99, 1234); g0.w.attractor = g1.w.attractor = 0;   // the attractor image arrives from a worker, at its own time
+  const motion = new THREE.Vector4();
+  const rows = [];
+  // a schedule of what the body samples: hidden for a while (with a discrete genome change while hidden), then shown
+  for (let i = 0; i < frames; i++) {
+    const t = i / 60, g = M.lerpGenome(g0, g1, Math.min(1, i / (frames * .6)));
+    for (const m of [ma, mb]) m.setGenome(g, { cellN: g.cells.n, cellSeed: 3 });
+    motion.set(t * .3, (t * 2) % 1, .3, .5);
+    const shown = i >= frames * .7 || (i >= frames * .25 && i < frames * .35);
+    if (i % 2 === 0) { mb.bake(t, motion); ma.bake(t, motion, { defer: true }); }
+    if (shown) { ma.ensure(); rows.push([i, cmp(readCube(ma.texture), readCube(mb.texture)), cmp(readCube(ma.texture, 3), readCube(mb.texture, 3))]); }
+  }
+  return { rows, bakes: ma.state.bakes, deferred: ma.state.deferred };
+};
+
+// ---- particles: dead slots culled in the vertex shader, no draw when none is alive ----
+window.particlesEquiv = async (frames = 90) => {
+  const [A, B] = await Promise.all([import('../being/particles.mjs'), import(BASE + 'particles.mjs')]);
+  const U = { uRes: { value: new THREE.Vector2(256, 256) }, uLook: { value: new THREE.Vector2(.2, -.1) }, uZoom: { value: 1 }, uScale: { value: 1 }, uShift: { value: new THREE.Vector2() }, uShellR: { value: .36 }, uTime: { value: 0 }, uLight: { value: new THREE.Color(1, .8, .6) }, uAwake: { value: 1 } };
+  const rt = new THREE.WebGLRenderTarget(256, 256, { type: THREE.FloatType, depthBuffer: false });
+  const run = (mod) => {
+    seedRandom(42); const p = mod.createParticles(THREE, U), sc = new THREE.Scene(); sc.add(p.points);
+    const res = [];
+    for (let i = 0; i < frames; i++) {
+      const on = i < frames * .5;   // shedding, then everything dies out (and a burst near the end)
+      const rates = on ? [40, 8, 20, 10, 15, 0, 0, 0, 10, 0] : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      if (i === frames - 5) p.burst('spark', 24, .36);
+      U.uTime.value = i / 60; const live = p.step(1 / 60, rates, .36, i / 60, { beat: (i % 30) / 30, kick: 0, arousal: .5 });
+      if (i % 10 === 9 || i === frames - 1) { renderer.setRenderTarget(rt); renderer.setClearColor(0, 0); renderer.clear(); renderer.render(sc, cam); renderer.setRenderTarget(null); res.push([i, live, readFloat(rt)]); }
+    }
+    return res;
+  };
+  const ra = run(A), rb = run(B);
+  return ra.map(([i, live, a], k) => [i, live, rb[k][1], cmp(a, rb[k][2])]);
+};
+window.ready = true;
+</script></body></html>

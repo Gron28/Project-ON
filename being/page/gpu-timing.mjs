@@ -3,7 +3,12 @@ export function createGpuTiming(renderer) {
   const GT = { ext: null, q: [], res: {} };
   function gpuTime(label, fn) {
     if (!window.__gpuT) return fn();
-    const gl = renderer.getContext(); GT.ext = GT.ext || gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    const gl = renderer.getContext();
+    if (window.__gpuT === 'sync') {   // wall time between two pixel reads (SwiftShader has no usable timer queries)
+      const px = new Uint8Array(4), sync = () => { const fb = gl.getParameter(gl.FRAMEBUFFER_BINDING); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); gl.bindFramebuffer(gl.FRAMEBUFFER, fb); };
+      sync(); const t0 = performance.now(); fn(); sync(); (GT.res[label] = GT.res[label] || []).push(performance.now() - t0); return;
+    }
+    GT.ext = GT.ext || gl.getExtension('EXT_disjoint_timer_query_webgl2');
     if (!GT.ext) { window.__gpuT = false; console.warn('no GPU timer queries'); return fn(); }
     const q = gl.createQuery(); gl.beginQuery(GT.ext.TIME_ELAPSED_EXT, q); fn(); gl.endQuery(GT.ext.TIME_ELAPSED_EXT); GT.q.push([label, q]);
   }

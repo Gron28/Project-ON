@@ -1466,7 +1466,7 @@ function mlFrame(dt, now, kick, snare, hat, st) {
   for (const key in ML.target) if (key !== 'res') T[key] += (ML.target[key] - T[key]) * k;
   const want = (.02 + (.06 + .95 * MORPH.living + .3 * SKIN.expr) * MORPH.show) * T.skinAmt * (1 - SLEEP.z);   // Lenia is the 'living' family of the song's skin: it surfaces with it, and keeps growing faintly in between
   U.uSkinA.value += (want - U.uSkinA.value) * (1 - Math.exp(-dt / .8));
-  if (U.uSkinA.value > .005 || want > 0) { skin.feed({ energy: S.en, kick, snare, hat, bass: st.bass, intensity: S.int }); skin.step(dt); }
+  if (U.uSkinA.value > .005 || want > 0) { skin.feed({ energy: S.en, kick, snare, hat, bass: st.bass, intensity: S.int }); gpuTime('skin', () => skin.step(dt)); }
   if (now - ML.saveAt > 60000) { ML.saveAt = now; mlSave(); }
 }
 
@@ -2002,7 +2002,7 @@ function beadsFrame(dt) {
   if (!beads.mesh.visible) return;
   BEAD.flow += dt * (.05 + .25 * mind.arousal); BEAD.t += dt;
   const B2u = beads.uniforms; B2u.uBFlow.value = BEAD.flow; B2u.uBTime.value = BEAD.t; B2u.uBKick.value = V.kick * .8;
-  beads.place(dt);
+  gpuTime('beads', () => beads.place(dt));
 }
 window.__beads = () => { if (BEAD.on) { pressure.gather(); beadsOff(); } else { pressure.burst(); beadsOn('you asked'); } return BEAD.on; };   // lab hook
 pet.onBurst(() => window.__beads());   // menu: turn to beads, or melt back
