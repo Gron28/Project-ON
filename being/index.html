@@ -214,9 +214,19 @@ const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1,
 // drawn as a disc just covering its round window (uMaskR), not the whole square: every pixel outside it comes out exactly
 // transparent anyway, and the body's march is the page's costliest work (uDisc 0, lab: the whole window as before)
 U.uDisc = { value: 1 };
-scene.add(new THREE.Mesh(new THREE.CircleGeometry(1.01 / Math.cos(Math.PI / 48), 48), new THREE.ShaderMaterial({ uniforms: U, depthTest: false, depthWrite: false,
+const bodyMat = (defines) => new THREE.ShaderMaterial({ uniforms: U, defines, depthTest: false, depthWrite: false,   // U itself, never a copy: clone() would copy it
   vertexShader: 'uniform vec2 uRes; uniform float uMaskR, uDisc; void main() { gl_Position = vec4( position.xy * ( uDisc > .5 ? 2. * uMaskR * vec2( uRes.y / uRes.x, 1. ) : vec2( 2. ) ), 0., 1. ); }',
-  fragmentShader: bodyFragment({ EXT, NOTES, ND, NT, TP, NS }) })));
+  fragmentShader: bodyFragment({ EXT, NOTES, ND, NT, TP, NS }) });
+const BODY = { full: bodyMat({}), lite: bodyMat({ BODY_LITE: '' }) };
+// the same body without propShade (BODY_LITE), drawn whenever no shown material needs it: the stones', gems' and proposed
+// materials' shading is so large that merely having it in the program makes every pixel ~5x slower, taken or not.
+// The choice follows matShade's own test over the slots it can pick (uMw > .002), so the picture is the same (lab: __bodyFull)
+const bodyMesh = new THREE.Mesh(new THREE.CircleGeometry(1.01 / Math.cos(Math.PI / 48), 48), BODY.full);
+scene.add(bodyMesh);
+for (const m of [BODY.lite, BODY.full]) { bodyMesh.material = m; renderer.compile(scene, camera); }   // both programs linked at start, so switching never stalls a frame
+const bodyNeedsFull = () => { if (window.__bodyFull) return true;
+  for (let s = 0; s < 4; s++) { const id = Math.round(U.uMid.value[s]); if (U.uMw.value[s] > .002 && (id >= 17 || (U.uProp.value > .5 && id >= 6))) return true; }
+  return false; };
 /* ---------- feedback aura: an iterated image map around the creature (decay x warp of the previous frame + its glow) ---------- */
 const sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
 let fbA = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }), fbB = fbA.clone();
@@ -233,7 +243,7 @@ const coScene = new THREE.Scene(); coScene.add(new THREE.Mesh(new THREE.PlaneGeo
 /* lab: GPU time per pass, only while window.__gpuT is set (being/page/gpu-timing.mjs) */
 const { GT, gpuTime, gpuPoll } = createGpuTiming(renderer);
 function renderBeing() {
-  U.uBound.value = bodyBound(U);
+  U.uBound.value = bodyBound(U); bodyMesh.material = bodyNeedsFull() ? BODY.full : BODY.lite;
   renderer.setRenderTarget(sceneRT); renderer.render(scene, camera);
   FB.uPrev.value = fbA.texture; FB.uScene.value = sceneRT.texture;
   renderer.setRenderTarget(fbB); renderer.render(fbScene, camera);
@@ -1993,7 +2003,7 @@ window.__morphForce = (char, seed, t = 1) => { MORPH.song = morphFor(char, seed 
 const pressure = createPressure();
 try { pressure.restore(JSON.parse(localStorage.getItem('being-pressure-' + SEED) || 'null')); } catch {}
 setInterval(() => { try { localStorage.setItem('being-pressure-' + SEED, JSON.stringify(pressure.serialize())); } catch {} }, 20000);
-const beads = createBeads(THREE, renderer, { bodyFragment: scene.children[0].material.fragmentShader, U });
+const beads = createBeads(THREE, renderer, { bodyFragment: BODY.full.fragmentShader, U });
 scene.add(beads.mesh);
 // the bead material: the same shape made of shining balls (beads.mjs); the pressure organ turns it on and off
 const BEAD = { on: false, a: 0, flow: 0, t: 0 };

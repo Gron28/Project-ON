@@ -803,7 +803,9 @@ ${CA_GLSL}
     return vec4( col, a );
   }
   vec4 matShade( int id, vec3 p, vec3 n, vec3 rd, vec2 pat, vec4 moS, vec3 songC, vec3 songC0, vec3 f0m ) {
+#ifndef BODY_LITE   // the lite body (no stone, gem or proposed material shown) leaves propShade out: its size alone costs every pixel ~5x
     if ( ( uProp > .5 && id >= 6 ) || id >= 17 ) return propShade( id, p, n, rd );   // proposed elements and metals, the stones and the gems
+#endif
     vec3 v = - rd, r = reflect( rd, n ), sn = normalize( p );
     float ndv = max( dot( n, v ), 0. ), fres = pow( 1. - ndv, 5. ) * uRimK, dist = length( p ), dif = max( dot( n, normalize( - p ) ), 0. );
     vec3 accent = uStainM, col = vec3( 0. ); float a = 1.;

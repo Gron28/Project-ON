@@ -8,6 +8,7 @@ const { app, BrowserWindow } = require('electron'); const path = require('node:p
 const { execFileSync } = require('node:child_process');
 const ROOT = path.join(__dirname, '..'), OUT = path.join(__dirname, 'perf'), LOOK = path.join(OUT, 'look');
 if (process.env.SWIFT) { app.commandLine.appendSwitch('use-angle', 'swiftshader'); app.commandLine.appendSwitch('enable-unsafe-swiftshader'); }
+else if (process.platform === 'win32') app.commandLine.appendSwitch('use-angle', 'gl');   // as main.cjs: on ANGLE-D3D11 the body shader takes minutes to compile
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'on-ab-')));
 const BASE = process.env.BASE || 'perf/visual-preserving';
 // the page's defaults (being/index.html U) with a few lobes and cymatic modes, when no showcase states were captured
@@ -71,9 +72,13 @@ const toVal = (k, x) => { if (x == null || x === 'tex') return TEX[k] || null; i
 const U = {}; const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const mk = (S) => new THREE.ShaderMaterial({ uniforms: U, depthTest: false, depthWrite: false, vertexShader: 'void main() { gl_Position = vec4( position.xy, 0., 1. ); }', fragmentShader: S.bodyFragment(DIM) });
 const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); scene.add(mesh);
-const MA = mk(A), MB = mk(B);
+const MA = mk(A), MB0 = mk(B), MBL = mk(B); MBL.defines = { BODY_LITE: '' };
+// B is drawn as the page draws it: the lite body (no propShade) unless a shown slot needs it (being/index.html bodyNeedsFull)
+const needFull = () => { const id = U.uMid?.value || [], w = U.uMw?.value || [], pr = U.uProp?.value || 0;
+  for (let s = 0; s < 4; s++) { const i = Math.round(id[s] || 0); if ((w[s] || 0) > .002 && (i >= 17 || (pr > .5 && i >= 6))) return true; } return false; };
+const MB = new Proxy({}, { get: (_, k) => (needFull() ? MB0 : MBL)[k] });
 const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.FloatType }), px1 = new Float32Array(4);
-const draw = (m) => { mesh.material = m; renderer.setRenderTarget(rt); renderer.render(scene, cam); };
+const draw = (m) => { if (m === MB) m = needFull() ? MB0 : MBL; mesh.material = m; renderer.setRenderTarget(rt); renderer.render(scene, cam); };
 const read = () => { const o = new Float32Array(W * H * 4); renderer.readRenderTargetPixels(rt, 0, 0, W, H, o); return o; };
 function setState(base, force) {
   for (const k in U) delete U[k];
