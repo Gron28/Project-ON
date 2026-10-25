@@ -306,6 +306,7 @@ const unwrapRT = new THREE.WebGLRenderTarget(512, 256, { depthBuffer: false });
 function songPng() {   // a picture of what it remembers: its procedural skin for this song, unrolled
   paint(MEM.song, mind.traits.hue, songTex.image.data, songGlowTex.image.data, songGeneTex.image.data, MEM.geneDna || (MEM.geneDna = geneDna(SEED)), currentLook());
   songTex.needsUpdate = songGlowTex.needsUpdate = songGeneTex.needsUpdate = true;
+  morph.ensure();   // its bake may be waiting (deferred while the form is hidden)
   UNW.uTime.value = U.uTime.value; UNW.uSkinT.value = skin.texture; UNW.uMorphT.value = morph.texture; UNW.uLiving.value = Math.min(.8, MORPH.living);
   const prev = renderer.getRenderTarget(); renderer.setRenderTarget(unwrapRT); renderer.render(unwrapScene, camera);
   const px = new Uint8Array(512 * 256 * 4); renderer.readRenderTargetPixels(unwrapRT, 0, 0, 512, 256, px); renderer.setRenderTarget(prev);
@@ -1934,7 +1935,8 @@ function morphTick(dt, t) {
   }
   MORPH.motion.set(MORPH.flow, SHOW.phase, earFrame ? earFrame.sub : 0, mind.arousal);
   // the form moves slowly: baking every other frame (every fourth while it rests) is enough, and saves ~1-3 ms of GPU
-  if (!window.__noBake && ++MORPH.frame % (SLEEP.z > .98 ? 8 : 2) === 0) gpuTime('bake', () => morph.bake(t, MORPH.motion));
+  // the bake is deferred: drawn right before the body only while the body samples it (uMorphA > .01), see the frame loop
+  if (!window.__noBake && ++MORPH.frame % (SLEEP.z > .98 ? 8 : 2) === 0) morph.bake(t, MORPH.motion, { defer: true });
   // the body rests as clear, smooth metal: the grown form surfaces only at moments (a section, the drop, chills,
   // recognition), easing in over ~1.2 s and fading over ~4 s, so its relief and cavities never pop
   const show = sm(.3, .85, SKIN.expr);
@@ -1964,7 +1966,7 @@ window.__morphBench = (opts = {}, w = null, n = 10) => {   // lab: GPU time of o
   const t0 = performance.now(); for (let i = 0; i < n; i++) m.bake(i * .1, MORPH.motion); sync();
   return +((performance.now() - t0) / n).toFixed(2);
 };
-window.__morph = () => ({ t: +MORPH.t.toFixed(2), song: MORPH.song ? morphTop(MORPH.song) : null, cur: morphTop(MORPH.cur), cells: MORPH.cellN, sym: MORPH.cur.sym, attMs: +morph.state.attMs.toFixed(1), living: +MORPH.living.toFixed(2) });
+window.__morph = () => ({ t: +MORPH.t.toFixed(2), song: MORPH.song ? morphTop(MORPH.song) : null, cur: morphTop(MORPH.cur), cells: MORPH.cellN, sym: MORPH.cur.sym, attMs: +morph.state.attMs.toFixed(1), living: +MORPH.living.toFixed(2), bakes: morph.state.bakes, deferred: morph.state.deferred });
 // lab: a skin of one fractal kind only (0..14, morph.mjs FRACTAL_KINDS), at full strength
 window.__fractal = (kind) => { const g = morphFor({}, (Math.random() * 1e9) >>> 0, SEED); for (const k of Object.keys(g.w)) g.w[k] = k === 'lace' ? 1 : 0;
   let f = fractalFor(Math.random); for (let i = 0; i < 400 && f.kind !== kind; i++) f = fractalFor(Math.random); Object.assign(g.lace, f);
@@ -2377,6 +2379,7 @@ renderer.setAnimationLoop(ts => {
   const half = SLEEP.z > .98 && !window.__noHalf;
   if ((S.awake > .05 || ++skip % 3 === 0) && (!half || (++halfSkip & 1) === 0)) {
     if (half) { const d = FB.uDecay.value; FB.uGain.value *= 1 + d; FB.uDecay.value = d * d; }
+    if (U.uMorphA.value > .009 || window.__bakeAlways) gpuTime('bake', morph.ensure);   // the grown form is sampled (body, beads) only above .01: hidden, it is not baked
     CELLAB?.render(dt);
     gpuTime('body', renderBeing);
   }
