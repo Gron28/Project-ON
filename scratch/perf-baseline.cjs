@@ -35,7 +35,7 @@ app.whenReady().then(async () => {
   const measure = async (label, setup, settle = 2000) => {
     await js(setup + '; 1'); await sleep(settle);
     await js('window.__gpuT = true; window.__gpuStats(); window.__fc = 0; window.__fc0 = performance.now(); 1'); await sleep(SECS);
-    const s = await js('({ g: window.__gpuStats(), fps: window.__fc / ((performance.now() - window.__fc0) / 1000), frameMs: window.__being().frameMs, buf: [document.querySelector("canvas").width, document.querySelector("canvas").height], dpr: devicePixelRatio, k: window.__qual.k })');
+    const s = await js('({ g: window.__gpuStats(), fps: window.__fc / ((performance.now() - window.__fc0) / 1000), frameMs: window.__being().frameMs, body: window.__bodyInfo?.(), buf: [document.querySelector("canvas").width, document.querySelector("canvas").height], dpr: devicePixelRatio, k: window.__qual.k })');
     await js('window.__gpuT = false; 1');
     out.states[label] = s; const tot = Object.values(s.g).reduce((a, v) => a + v.median, 0);
     console.log(label.padEnd(26), ('fps ' + s.fps.toFixed(0)).padEnd(8), ('gpu ' + tot.toFixed(2) + ' ms').padEnd(14), Object.entries(s.g).sort((a, b) => b[1].median - a[1].median).map(([k, v]) => `${k} ${v.median}/${v.p90}`).join(' | '));

@@ -50,6 +50,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><body style="margin:0;backgro
 import * as THREE from 'three';
 const A = await import('./shaders.before.mjs'), B = await import('../../being/page/shaders.mjs?' + Date.now());
 const { bodyBound } = await import('../../being/page/body-bound.mjs');
+const { specialise, neededCases } = await import('../../being/page/body-variants.mjs?' + Date.now());
 const EXT = { shader: { decl: '', screen: '', bubbles: '' } }, DIM = { EXT, NOTES: 12, ND: 14, NT: 4, NS: 5, TP: 11 };
 const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c') }); renderer.autoClear = true;
 let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -72,13 +73,13 @@ const toVal = (k, x) => { if (x == null || x === 'tex') return TEX[k] || null; i
 const U = {}; const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const mk = (S) => new THREE.ShaderMaterial({ uniforms: U, depthTest: false, depthWrite: false, vertexShader: 'void main() { gl_Position = vec4( position.xy, 0., 1. ); }', fragmentShader: S.bodyFragment(DIM) });
 const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); scene.add(mesh);
-const MA = mk(A), MB0 = mk(B), MBL = mk(B); MBL.defines = { BODY_LITE: '' };
-// B is drawn as the page draws it: the lite body (no propShade) unless a shown slot needs it (being/index.html bodyNeedsFull)
-const needFull = () => { const id = U.uMid?.value || [], w = U.uMw?.value || [], pr = U.uProp?.value || 0;
-  for (let s = 0; s < 4; s++) { const i = Math.round(id[s] || 0); if ((w[s] || 0) > .002 && (i >= 17 || (pr > .5 && i >= 6))) return true; } return false; };
-const MB = new Proxy({}, { get: (_, k) => (needFull() ? MB0 : MBL)[k] });
+const MA = mk(A), MBL = mk(B); MBL.defines = { BODY_LITE: '' };
+// B is drawn as the page draws it (being/index.html bodyPick): the lite body, or one with only the shown materials' propShade cases
+const VAR = new Map(), mkCases = (ids) => { const k = ids.join(','); if (!VAR.has(k)) { const m = mk(B); m.fragmentShader = specialise(m.fragmentShader, ids); VAR.set(k, m); } return VAR.get(k); };
+const pickB = () => { const ids = neededCases(U.uMid?.value || [0, 0, 0, 0], U.uMw?.value || [1, 0, 0, 0], (U.uProp?.value || 0) > .5); return ids.length ? mkCases(ids) : MBL; };
+const MB = {};
 const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.FloatType }), px1 = new Float32Array(4);
-const draw = (m) => { if (m === MB) m = needFull() ? MB0 : MBL; mesh.material = m; renderer.setRenderTarget(rt); renderer.render(scene, cam); };
+const draw = (m) => { if (m === MB) m = pickB(); mesh.material = m; renderer.setRenderTarget(rt); renderer.render(scene, cam); };
 const read = () => { const o = new Float32Array(W * H * 4); renderer.readRenderTargetPixels(rt, 0, 0, W, H, o); return o; };
 function setState(base, force) {
   for (const k in U) delete U[k];

@@ -141,6 +141,7 @@ import { lexicon } from './lexicon.mjs';
 import { createInputGain } from './input-gain.mjs';
 import { createPhysics } from './physics.mjs';
 import { bodyFragment, AURA_FRAG, COMPOSITE_FRAG, UNWRAP_FRAG } from './page/shaders.mjs';
+import { specialise, neededCases } from './page/body-variants.mjs';
 import { bodyBound } from './page/body-bound.mjs';
 import { createGpuTiming } from './page/gpu-timing.mjs';
 import { createInput, WORKLET } from './page/input.mjs';
@@ -214,19 +215,34 @@ const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1,
 // drawn as a disc just covering its round window (uMaskR), not the whole square: every pixel outside it comes out exactly
 // transparent anyway, and the body's march is the page's costliest work (uDisc 0, lab: the whole window as before)
 U.uDisc = { value: 1 };
-const bodyMat = (defines) => new THREE.ShaderMaterial({ uniforms: U, defines, depthTest: false, depthWrite: false,   // U itself, never a copy: clone() would copy it
+const BODY_SRC = bodyFragment({ EXT, NOTES, ND, NT, TP, NS });
+const bodyMat = (src, defines) => new THREE.ShaderMaterial({ uniforms: U, defines, depthTest: false, depthWrite: false,   // U itself, never a copy: clone() would copy it
   vertexShader: 'uniform vec2 uRes; uniform float uMaskR, uDisc; void main() { gl_Position = vec4( position.xy * ( uDisc > .5 ? 2. * uMaskR * vec2( uRes.y / uRes.x, 1. ) : vec2( 2. ) ), 0., 1. ); }',
-  fragmentShader: bodyFragment({ EXT, NOTES, ND, NT, TP, NS }) });
-const BODY = { full: bodyMat({}), lite: bodyMat({ BODY_LITE: '' }) };
-// the same body without propShade (BODY_LITE), drawn whenever no shown material needs it: the stones', gems' and proposed
-// materials' shading is so large that merely having it in the program makes every pixel ~5x slower, taken or not.
-// The choice follows matShade's own test over the slots it can pick (uMw > .002), so the picture is the same (lab: __bodyFull)
+  fragmentShader: src });
+// the stones', gems' and proposed materials' shading (propShade) is so large that merely having all of it in the program makes
+// every pixel several times slower, taken or not. So the body is drawn by the lite program (BODY_LITE, no propShade) when no
+// shown material needs it, and otherwise by one carrying only the shown materials' cases (being/page/body-variants.mjs),
+// compiled in the background on first need (the full program draws until it is ready) and kept for the next time (at most 12).
+// Both follow matShade's own test over the slots it can pick, so the picture is the same (lab: __bodyFull, __bodyInfo())
+const BODY = { full: bodyMat(BODY_SRC, {}), lite: bodyMat(BODY_SRC, { BODY_LITE: '' }), v: new Map() };
 const bodyMesh = new THREE.Mesh(new THREE.CircleGeometry(1.01 / Math.cos(Math.PI / 48), 48), BODY.full);
 scene.add(bodyMesh);
 for (const m of [BODY.lite, BODY.full]) { bodyMesh.material = m; renderer.compile(scene, camera); }   // both programs linked at start, so switching never stalls a frame
-const bodyNeedsFull = () => { if (window.__bodyFull) return true;
-  for (let s = 0; s < 4; s++) { const id = Math.round(U.uMid.value[s]); if (U.uMw.value[s] > .002 && (id >= 17 || (U.uProp.value > .5 && id >= 6))) return true; }
-  return false; };
+function bodyPick() {
+  if (window.__bodyFull) return BODY.full;
+  const ids = neededCases(U.uMid.value, U.uMw.value, U.uProp.value > .5);
+  if (!ids.length) return BODY.lite;
+  const key = ids.join(','); let v = BODY.v.get(key);
+  if (!v) {
+    v = { m: bodyMat(specialise(BODY_SRC, ids), {}), ready: false, used: 0 }; BODY.v.set(key, v);
+    const sc = new THREE.Scene(); sc.add(new THREE.Mesh(bodyMesh.geometry, v.m));
+    renderer.compileAsync(sc, camera).then(() => { v.ready = true; }, () => {});
+    if (BODY.v.size > 12) { let old = null; for (const [k, x] of BODY.v) if (x !== v && (!old || x.used < old[1].used)) old = [k, x]; old[1].m.dispose(); BODY.v.delete(old[0]); }
+  }
+  v.used = performance.now();
+  return v.ready ? v.m : BODY.full;
+}
+window.__bodyInfo = () => ({ variants: [...BODY.v].map(([k, v]) => k + (v.ready ? '' : ' (compiling)')), drawn: bodyMesh.material === BODY.full ? 'full' : bodyMesh.material === BODY.lite ? 'lite' : 'cases' });
 /* ---------- feedback aura: an iterated image map around the creature (decay x warp of the previous frame + its glow) ---------- */
 const sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
 let fbA = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }), fbB = fbA.clone();
@@ -243,7 +259,7 @@ const coScene = new THREE.Scene(); coScene.add(new THREE.Mesh(new THREE.PlaneGeo
 /* lab: GPU time per pass, only while window.__gpuT is set (being/page/gpu-timing.mjs) */
 const { GT, gpuTime, gpuPoll } = createGpuTiming(renderer);
 function renderBeing() {
-  U.uBound.value = bodyBound(U); bodyMesh.material = bodyNeedsFull() ? BODY.full : BODY.lite;
+  U.uBound.value = bodyBound(U); bodyMesh.material = bodyPick();
   renderer.setRenderTarget(sceneRT); renderer.render(scene, camera);
   FB.uPrev.value = fbA.texture; FB.uScene.value = sceneRT.texture;
   renderer.setRenderTarget(fbB); renderer.render(fbScene, camera);
