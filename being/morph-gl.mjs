@@ -359,7 +359,7 @@ export function createMorph(renderer, THREE, { size = 384, mipmaps = true, half 
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }', fragmentShader: BAKE_GLSL });
   const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
-  const state = { cellsKey: '', attKey: '', genome: null, cellN: 0, attMs: 0, sig: '', fading: false };
+  const state = { cellsKey: '', attKey: '', genome: null, cellN: 0, attMs: 0, sig: '', fading: false, bakes: 0, deferred: 0 };
   // ---- cross-fade: a frozen copy of the skin to dissolve from, whenever something discrete changes ---------------------
   const snap = new THREE.WebGLCubeRenderTarget(size, { type: half ? THREE.HalfFloatType : THREE.UnsignedByteType, format: THREE.RGBAFormat, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
   U.uPrev.value = snap.texture;
@@ -373,9 +373,10 @@ export function createMorph(renderer, THREE, { size = 384, mipmaps = true, half 
         if ( uFace == 2 ) return normalize( vec3( c.x, 1., c.y ) ); if ( uFace == 3 ) return normalize( vec3( c.x, - 1., - c.y ) );
         if ( uFace == 4 ) return normalize( vec3( c.x, - c.y, 1. ) ); return normalize( vec3( - c.x, - c.y, - 1. ) ); }
       void main() { gl_FragColor = textureLod( uSrc, faceDir( vUv ), 0. ); }` })));
-  let baked = false, lastTime = null;
+  let baked = false, lastTime = null, stale = false;
   function freeze() {   // copy what is showing now; the next bakes dissolve from it
-    if (!baked) return;
+    if (!baked && !stale) return;
+    if (stale) render();  // a deferred bake not drawn yet: bring it up to date first, so the dissolve starts from what would have shown
     const prev = renderer.getRenderTarget();
     for (let f = 0; f < 6; f++) { CU.uFace.value = f; renderer.setRenderTarget(snap, f); renderer.render(copyScene, cam); }
     renderer.setRenderTarget(prev);
@@ -430,12 +431,22 @@ export function createMorph(renderer, THREE, { size = 384, mipmaps = true, half 
     U.uLace.value.set(g.lace.s, g.lace.scale, g.lace.twist, g.lace.kind || 0); U.uLace2.value.set(g.lace.p1 || 0, g.lace.p2 || 0, g.lace.p3 || .03, 0);
     if ((g.w.attractor || 0) > 0.01 && g.attractor) setAttractor(g.attractor);
   }
-  /** bake all six faces; motion: flow time (x), felt pulse phase (y), bass (z), arousal (w) */
-  function bake(time, motion) {
+  /**
+   * bake all six faces; motion: flow time (x), felt pulse phase (y), bass (z), arousal (w). With defer, only the clock, the
+   * motion and the cross-fade advance, and the faces are drawn by the next ensure() (or freeze()): a skin nothing samples
+   * costs nothing, and one that is sampled is exactly what an immediate bake would have drawn.
+   */
+  function bake(time, motion, { defer = false } = {}) {
     if (state.fading) { const dt = lastTime == null ? 0 : Math.max(0, Math.min(0.2, time - lastTime)); U.uX.value = Math.min(1, U.uX.value + dt / fade); if (U.uX.value >= 1) state.fading = false; }
     lastTime = time;
     U.uTime.value = time;
     if (motion) U.uMotion.value.copy(motion);
+    if (defer) { stale = true; state.deferred++; return; }
+    render();
+  }
+  /** draw a deferred bake now, if one is waiting (call before anything samples the texture) */
+  function ensure() { if (stale) render(); }
+  function render() {
     const prev = renderer.getRenderTarget(), prevAuto = renderer.autoClear;
     renderer.autoClear = false;
     for (let f = 0; f < 6; f++) { U.uFace.value = f; renderer.setRenderTarget(rt, f); renderer.render(scene, cam); }
@@ -444,9 +455,9 @@ export function createMorph(renderer, THREE, { size = 384, mipmaps = true, half 
       const gl = renderer.getContext(), tex = renderer.properties.get(rt.texture).__webglTexture;
       if (tex) { renderer.state.bindTexture(gl.TEXTURE_CUBE_MAP, tex); gl.generateMipmap(gl.TEXTURE_CUBE_MAP); renderer.state.unbindTexture(); }
     }
-    baked = true;
+    baked = true; stale = false; state.bakes++;
   }
   /** the elements the song lived through (11 weights 0..1: fire water air earth saturn jupiter mars sun venus mercury moon) */
   function setImprint(w) { const v = (i) => (Number.isFinite(w && w[i]) ? Math.max(0, Math.min(1, w[i])) : 0); U.uImpA.value.set(v(0), v(1), v(2), v(3)); U.uImpB.value.set(v(4), v(5), v(6), v(7)); U.uImpC.value.set(v(8), v(9), v(10), 0); }
-  return { texture: rt.texture, setGenome, bake, freeze, setImprint, state, uniforms: U, size };
+  return { texture: rt.texture, setGenome, bake, ensure, freeze, setImprint, state, uniforms: U, size };
 }

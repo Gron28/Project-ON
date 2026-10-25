@@ -141,6 +141,8 @@ import { lexicon } from './lexicon.mjs';
 import { createInputGain } from './input-gain.mjs';
 import { createPhysics } from './physics.mjs';
 import { bodyFragment, AURA_FRAG, COMPOSITE_FRAG, UNWRAP_FRAG } from './page/shaders.mjs';
+import { specialise, neededCases } from './page/body-variants.mjs';
+import { bodyBound } from './page/body-bound.mjs';
 import { createGpuTiming } from './page/gpu-timing.mjs';
 import { createInput, WORKLET } from './page/input.mjs';
 import { createHud } from './page/hud.mjs';
@@ -150,6 +152,8 @@ import { createImmersive } from './page/immersive.mjs';
 import { createGlitch } from './page/glitch.mjs';
 import { createJumpScan } from './page/jumps.mjs';
 import { createCellab } from './page/cellab.mjs';
+import { createGovernor, governorStep, createUpscale } from './page/quality.mjs';
+import { installQualityLab } from './page/quality-lab.mjs';
 
 const pet = window.pet || new Proxy({}, {
   get: (_, prop) => {
@@ -202,14 +206,43 @@ const U = {
   uWR: { value: [new THREE.Vector4(0, 1, 0, .6), new THREE.Vector4(.3, .95, 0, .7)] }, uWRA: { value: 0 }, uSer: { value: Array.from({ length: 48 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uSerA: { value: [0, 0, 0] }, uSerB: { value: Array.from({ length: 3 }, () => new THREE.Vector4(0, 0, 0, 0)) },
   uGl: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, .05, 0)) }, uGlR: { value: [0, 0, 0, 0, 0, 0] }, uGlisten: { value: 0 }, uBeatPulse: { value: 0 }, uRegP: { value: new Array(8).fill(0) }, uRegA: { value: 0 },
   // the CelLab automata (being/page/cellab.mjs): the surface's palette + height atlas, its amount, depth, cells a face, hue; the inside's half-resolution light and amount
-  uCa: { value: null }, uCaA: { value: 0 }, uCaD: { value: .03 }, uCaN: { value: 128 }, uCaHueC: { value: new THREE.Color(1, 1, 1) }, uCaHue: { value: .45 }, uCv: { value: null }, uCvA: { value: 0 }
+  uCa: { value: null }, uCaA: { value: 0 }, uCaD: { value: .03 }, uCaN: { value: 128 }, uCaHueC: { value: new THREE.Color(1, 1, 1) }, uCaHue: { value: .45 }, uCv: { value: null }, uCvA: { value: 0 },
+  uBound: { value: 1.45 }   // a sphere round all the body can draw: rays that miss it skip the march (bodyBound(), set before each draw)
 };
 
 /* ---------- one shader: a liquid-metal mass with lobes and falling drops, ray-marched around an analytic core of light ---------- */
 const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms: U, depthTest: false, depthWrite: false,
-  vertexShader: 'void main() { gl_Position = vec4( position.xy, 0., 1. ); }',
-  fragmentShader: bodyFragment({ EXT, NOTES, ND, NT, TP, NS }) })));
+// drawn as a disc just covering its round window (uMaskR), not the whole square: every pixel outside it comes out exactly
+// transparent anyway, and the body's march is the page's costliest work (uDisc 0, lab: the whole window as before)
+U.uDisc = { value: 1 };
+const BODY_SRC = bodyFragment({ EXT, NOTES, ND, NT, TP, NS });
+const bodyMat = (src, defines) => new THREE.ShaderMaterial({ uniforms: U, defines, depthTest: false, depthWrite: false,   // U itself, never a copy: clone() would copy it
+  vertexShader: 'uniform vec2 uRes; uniform float uMaskR, uDisc; void main() { gl_Position = vec4( position.xy * ( uDisc > .5 ? 2. * uMaskR * vec2( uRes.y / uRes.x, 1. ) : vec2( 2. ) ), 0., 1. ); }',
+  fragmentShader: src });
+// the stones', gems' and proposed materials' shading (propShade) is so large that merely having all of it in the program makes
+// every pixel several times slower, taken or not. So the body is drawn by the lite program (BODY_LITE, no propShade) when no
+// shown material needs it, and otherwise by one carrying only the shown materials' cases (being/page/body-variants.mjs),
+// compiled in the background on first need (the full program draws until it is ready) and kept for the next time (at most 12).
+// Both follow matShade's own test over the slots it can pick, so the picture is the same (lab: __bodyFull, __bodyInfo())
+const BODY = { full: bodyMat(BODY_SRC, {}), lite: bodyMat(BODY_SRC, { BODY_LITE: '' }), v: new Map() };
+const bodyMesh = new THREE.Mesh(new THREE.CircleGeometry(1.01 / Math.cos(Math.PI / 48), 48), BODY.full);
+scene.add(bodyMesh);
+for (const m of [BODY.lite, BODY.full]) { bodyMesh.material = m; renderer.compile(scene, camera); }   // both programs linked at start, so switching never stalls a frame
+function bodyPick() {
+  if (window.__bodyFull) return BODY.full;
+  const ids = neededCases(U.uMid.value, U.uMw.value, U.uProp.value > .5);
+  if (!ids.length) return BODY.lite;
+  const key = ids.join(','); let v = BODY.v.get(key);
+  if (!v) {
+    v = { m: bodyMat(specialise(BODY_SRC, ids), {}), ready: false, used: 0 }; BODY.v.set(key, v);
+    const sc = new THREE.Scene(); sc.add(new THREE.Mesh(bodyMesh.geometry, v.m));
+    renderer.compileAsync(sc, camera).then(() => { v.ready = true; }, () => {});
+    if (BODY.v.size > 12) { let old = null; for (const [k, x] of BODY.v) if (x !== v && (!old || x.used < old[1].used)) old = [k, x]; old[1].m.dispose(); BODY.v.delete(old[0]); }
+  }
+  v.used = performance.now();
+  return v.ready ? v.m : BODY.full;
+}
+window.__bodyInfo = () => ({ variants: [...BODY.v].map(([k, v]) => k + (v.ready ? '' : ' (compiling)')), drawn: bodyMesh.material === BODY.full ? 'full' : bodyMesh.material === BODY.lite ? 'lite' : 'cases' });
 /* ---------- feedback aura: an iterated image map around the creature (decay x warp of the previous frame + its glow) ---------- */
 const sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
 let fbA = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }), fbB = fbA.clone();
@@ -226,22 +259,29 @@ const coScene = new THREE.Scene(); coScene.add(new THREE.Mesh(new THREE.PlaneGeo
 /* lab: GPU time per pass, only while window.__gpuT is set (being/page/gpu-timing.mjs) */
 const { GT, gpuTime, gpuPoll } = createGpuTiming(renderer);
 function renderBeing() {
+  U.uBound.value = bodyBound(U); bodyMesh.material = bodyPick();
   renderer.setRenderTarget(sceneRT); renderer.render(scene, camera);
   FB.uPrev.value = fbA.texture; FB.uScene.value = sceneRT.texture;
   renderer.setRenderTarget(fbB); renderer.render(fbScene, camera);
   const t = fbA; fbA = fbB; fbB = t;
-  CO.uFb.value = fbA.texture; CO.uScene.value = sceneRT.texture;
+  CO.uFb.value = fbA.texture; CO.uScene.value = QUAL.up ? UP.render(sceneRT) : sceneRT.texture;   // a smaller body is upscaled to the window
   renderer.setRenderTarget(null); renderer.render(coScene, camera);
 }
-// render resolution: the Settings slider (QUAL.res) is the ceiling; with 'auto' the governor lowers QUAL.k when frames run long and raises it back when there is room
+// render resolution: the Settings slider (QUAL.res) is the ceiling; with 'auto' the governor (being/page/quality.mjs) eases unseen
+// work first and lowers QUAL.k last when frames run long, and climbs back when there is room. QUAL.k scales only the body and
+// its aura; the window itself (the final picture) stays at full resolution and the body is upscaled into it (UP)
 // retro / PS1 look (Settings): RETRO.pix = block size in window pixels (1 off), lev = levels a channel (0 off), dith 0..1
 const RETRO = { pix: 1, lev: 0, dith: 0 };
-const retroApply = () => { CO.uPix.value = Math.max(1, RETRO.pix * U.uRes.value.x / Math.max(1, innerWidth)); CO.uLev.value = RETRO.lev; CO.uDith.value = RETRO.dith; CO.uRes.value.copy(U.uRes.value); };
-const QUAL = { res: 1, auto: true, k: 1, slow: 0, fast: 0, last: 0 };
-window.__qual = QUAL;   // lab: the resolution governor's state
-const resize = () => { renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5) * T.res * QUAL.k); renderer.setSize(innerWidth, innerHeight, false); renderer.getDrawingBufferSize(U.uRes.value);
-  const w = U.uRes.value.x, h = U.uRes.value.y; sceneRT.setSize(w, h); fbA.setSize(w >> 1, h >> 1); fbB.setSize(w >> 1, h >> 1); FB.uAspect.value = w / h; retroApply(); };
+const retroApply = () => { CO.uPix.value = Math.max(1, RETRO.pix * CO.uRes.value.x / Math.max(1, innerWidth)); CO.uLev.value = RETRO.lev; CO.uDith.value = RETRO.dith; };
+const QUAL = createGovernor();
+window.__qual = QUAL;   // lab: the governor's state (k: body resolution, cap: every other refresh, bake: the skin's bake interval)
+const UP = createUpscale(THREE, renderer);
+const resize = () => { renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5) * T.res); renderer.setSize(innerWidth, innerHeight, false); renderer.getDrawingBufferSize(CO.uRes.value);
+  const W = CO.uRes.value.x, H = CO.uRes.value.y, w = Math.max(2, Math.round(W * QUAL.k)), h = Math.max(2, Math.round(H * QUAL.k));
+  QUAL.up = w !== W || h !== H; if (QUAL.up) UP.setSize(W, H);
+  U.uRes.value.set(w, h); sceneRT.setSize(w, h); fbA.setSize(w >> 1, h >> 1); fbB.setSize(w >> 1, h >> 1); FB.uAspect.value = w / h; retroApply(); };
 addEventListener('resize', resize); resize();
+installQualityLab({ THREE, renderer, U, CO, QUAL, UP, resize, scene, camera, coScene, sceneRT, T });   // lab: window.__qualLab (being/page/quality-lab.mjs)
 
 /* ---------- the analysis engine and audio in ---------- */
 const SR = 48000, an = createAnalyzer({ sampleRate: SR });
@@ -306,6 +346,7 @@ const unwrapRT = new THREE.WebGLRenderTarget(512, 256, { depthBuffer: false });
 function songPng() {   // a picture of what it remembers: its procedural skin for this song, unrolled
   paint(MEM.song, mind.traits.hue, songTex.image.data, songGlowTex.image.data, songGeneTex.image.data, MEM.geneDna || (MEM.geneDna = geneDna(SEED)), currentLook());
   songTex.needsUpdate = songGlowTex.needsUpdate = songGeneTex.needsUpdate = true;
+  morph.ensure();   // its bake may be waiting (deferred while the form is hidden)
   UNW.uTime.value = U.uTime.value; UNW.uSkinT.value = skin.texture; UNW.uMorphT.value = morph.texture; UNW.uLiving.value = Math.min(.8, MORPH.living);
   const prev = renderer.getRenderTarget(); renderer.setRenderTarget(unwrapRT); renderer.render(unwrapScene, camera);
   const px = new Uint8Array(512 * 256 * 4); renderer.readRenderTargetPixels(unwrapRT, 0, 0, 512, 256, px); renderer.setRenderTarget(prev);
@@ -830,7 +871,7 @@ function orgSnap() {   // the dashboard's drive meter
 window.__orgDrive = () => ({ on: ORGD.on, s: ORGD.s, k: +ORGD.k.toFixed(3), A: ORGD.A, R: ORGD.R, ageMs: ORGD.d ? Math.round(performance.now() - ORGD.at) : null, received: ORGD.n, rate: ORGD.rate, last: ORGD.d, lo: ORGD.lo, hi: ORGD.hi,
   mapped: { ...ORGD.v, reg: Array.from(ORGD.v.reg), modes: Array.from(ORGD.v.modes), pos: Array.from(ORGD.v.pos), omega: Array.from(ORGD.v.omega), D: ORGD.D, colour: '#' + ORGD.col.getHexString(), colW: ORGD.colW, metalW: ORGD.metalW, glow: ORGD.glow } });   // lab
 pet.onRetro?.(v => { RETRO.pix = Math.min(24, Math.max(1, +v?.pix || 1)); RETRO.lev = +v?.lev >= 2 ? Math.min(64, +v.lev) : 0; RETRO.dith = Math.min(1, Math.max(0, +v?.dith || 0)); retroApply(); });
-pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
+pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.hz = +v?.hz || 0; QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
 const HATCH = { t: -1, swapped: false, A: 1.4, B: 2.8 };
 let LAST_TRACK = null;
 async function hatchSwap() {   // at the darkest point: everything that is the being changes hands
@@ -1466,7 +1507,7 @@ function mlFrame(dt, now, kick, snare, hat, st) {
   for (const key in ML.target) if (key !== 'res') T[key] += (ML.target[key] - T[key]) * k;
   const want = (.02 + (.06 + .95 * MORPH.living + .3 * SKIN.expr) * MORPH.show) * T.skinAmt * (1 - SLEEP.z);   // Lenia is the 'living' family of the song's skin: it surfaces with it, and keeps growing faintly in between
   U.uSkinA.value += (want - U.uSkinA.value) * (1 - Math.exp(-dt / .8));
-  if (U.uSkinA.value > .005 || want > 0) { skin.feed({ energy: S.en, kick, snare, hat, bass: st.bass, intensity: S.int }); skin.step(dt); }
+  if (U.uSkinA.value > .005 || want > 0) { skin.feed({ energy: S.en, kick, snare, hat, bass: st.bass, intensity: S.int }); gpuTime('skin', () => skin.step(dt)); }
   if (now - ML.saveAt > 60000) { ML.saveAt = now; mlSave(); }
 }
 
@@ -1934,7 +1975,9 @@ function morphTick(dt, t) {
   }
   MORPH.motion.set(MORPH.flow, SHOW.phase, earFrame ? earFrame.sub : 0, mind.arousal);
   // the form moves slowly: baking every other frame (every fourth while it rests) is enough, and saves ~1-3 ms of GPU
-  if (!window.__noBake && ++MORPH.frame % (SLEEP.z > .98 ? 8 : 2) === 0) gpuTime('bake', () => morph.bake(t, MORPH.motion));
+  // the bake is deferred: drawn right before the body only while the body samples it (uMorphA > .01), see the frame loop;
+  // the governor can stretch the shown pace to every third frame (QUAL.bake)
+  if (!window.__noBake && ++MORPH.frame % (SLEEP.z > .98 ? 8 : QUAL.bake) === 0) morph.bake(t, MORPH.motion, { defer: true });
   // the body rests as clear, smooth metal: the grown form surfaces only at moments (a section, the drop, chills,
   // recognition), easing in over ~1.2 s and fading over ~4 s, so its relief and cavities never pop
   const show = sm(.3, .85, SKIN.expr);
@@ -1964,7 +2007,7 @@ window.__morphBench = (opts = {}, w = null, n = 10) => {   // lab: GPU time of o
   const t0 = performance.now(); for (let i = 0; i < n; i++) m.bake(i * .1, MORPH.motion); sync();
   return +((performance.now() - t0) / n).toFixed(2);
 };
-window.__morph = () => ({ t: +MORPH.t.toFixed(2), song: MORPH.song ? morphTop(MORPH.song) : null, cur: morphTop(MORPH.cur), cells: MORPH.cellN, sym: MORPH.cur.sym, attMs: +morph.state.attMs.toFixed(1), living: +MORPH.living.toFixed(2) });
+window.__morph = () => ({ t: +MORPH.t.toFixed(2), song: MORPH.song ? morphTop(MORPH.song) : null, cur: morphTop(MORPH.cur), cells: MORPH.cellN, sym: MORPH.cur.sym, attMs: +morph.state.attMs.toFixed(1), living: +MORPH.living.toFixed(2), bakes: morph.state.bakes, deferred: morph.state.deferred });
 // lab: a skin of one fractal kind only (0..14, morph.mjs FRACTAL_KINDS), at full strength
 window.__fractal = (kind) => { const g = morphFor({}, (Math.random() * 1e9) >>> 0, SEED); for (const k of Object.keys(g.w)) g.w[k] = k === 'lace' ? 1 : 0;
   let f = fractalFor(Math.random); for (let i = 0; i < 400 && f.kind !== kind; i++) f = fractalFor(Math.random); Object.assign(g.lace, f);
@@ -1976,7 +2019,7 @@ window.__morphForce = (char, seed, t = 1) => { MORPH.song = morphFor(char, seed 
 const pressure = createPressure();
 try { pressure.restore(JSON.parse(localStorage.getItem('being-pressure-' + SEED) || 'null')); } catch {}
 setInterval(() => { try { localStorage.setItem('being-pressure-' + SEED, JSON.stringify(pressure.serialize())); } catch {} }, 20000);
-const beads = createBeads(THREE, renderer, { bodyFragment: scene.children[0].material.fragmentShader, U });
+const beads = createBeads(THREE, renderer, { bodyFragment: BODY.full.fragmentShader, U });
 scene.add(beads.mesh);
 // the bead material: the same shape made of shining balls (beads.mjs); the pressure organ turns it on and off
 const BEAD = { on: false, a: 0, flow: 0, t: 0 };
@@ -2002,7 +2045,7 @@ function beadsFrame(dt) {
   if (!beads.mesh.visible) return;
   BEAD.flow += dt * (.05 + .25 * mind.arousal); BEAD.t += dt;
   const B2u = beads.uniforms; B2u.uBFlow.value = BEAD.flow; B2u.uBTime.value = BEAD.t; B2u.uBKick.value = V.kick * .8;
-  beads.place(dt);
+  gpuTime('beads', () => beads.place(dt));
 }
 window.__beads = () => { if (BEAD.on) { pressure.gather(); beadsOff(); } else { pressure.burst(); beadsOn('you asked'); } return BEAD.on; };   // lab hook
 pet.onBurst(() => window.__beads());   // menu: turn to beads, or melt back
@@ -2313,12 +2356,8 @@ renderer.setAnimationLoop(ts => {
   S.enL += (S.en - S.enL) * (1 - Math.exp(-dt / 12));
   const contrast = (st.level - S.lvAvg) * cu.dynamics * .35; S.lvAvg += (st.level - S.lvAvg) * (1 - Math.exp(-dt / 5));
   BOUNCE.k += ((BOUNCE.on ? 1 : 0) - BOUNCE.k) * (1 - Math.exp(-dt / .3));
-  { const now = performance.now(), ft = now - QUAL.last; QUAL.last = now;   // governor: wall-clock frame time (asleep, the page draws every other frame, so only judge awake)
-    if (QUAL.auto && SLEEP.z < .5 && ft > 0 && ft < 1000) {
-      if (ft > 24) { QUAL.slow += ft; QUAL.fast = 0; } else if (ft < 14) { QUAL.fast += ft; QUAL.slow = Math.max(0, QUAL.slow - ft); } else { QUAL.slow = Math.max(0, QUAL.slow - ft); QUAL.fast = 0; }
-      if (QUAL.slow > 2000 && QUAL.k > .5) { QUAL.k = Math.max(.5, QUAL.k - .1); QUAL.slow = 0; resize(); }
-      else if (QUAL.fast > 8000 && QUAL.k < QUAL.res) { QUAL.k = Math.min(QUAL.res, QUAL.k + .05); QUAL.fast = 0; resize(); }
-    } else if (!QUAL.auto && QUAL.k !== QUAL.res) { QUAL.k = QUAL.res; resize(); } }
+  { const now = performance.now(), ft = now - QUAL.last; QUAL.last = now;   // governor (being/page/quality.mjs); asleep, the page draws every other frame, so it only judges awake
+    if ((SLEEP.z < .5 || !QUAL.auto) && governorStep(QUAL, ft, lastFrameMs, now, beingClock.t) === 'res') resize(); }
   const rawScale = ((.80 + .12 * loudF + .2 * loudF * X + BOUNCE.k * (1 - ORGD.R) * (S.grid * pulseBeat * (.05 + .06 * S.down) * lockF + (1 - S.grid * Math.min(1, lockF)) * kickV * .04) * S.awake * (.3 + 1.3 * X) * T.pulse + S.drop * .06 + (swell + contrast) * S.awake) * T.size);
   // a soft ceiling: above 1 the size compresses smoothly toward 1.18 (beats still show), so it never outgrows the window
   const quiet = c01(S.quiet / 4);
@@ -2372,11 +2411,12 @@ renderer.setAnimationLoop(ts => {
   hatchFrame(dt); formFrame(dt); reactFrame(dt);
   beadsFrame(dt);
   gpuPoll();
-  // fast asleep (silence: shell whole, breathing at ~0.2 Hz, everything dimmed): draw every other frame. The aura runs two of its passes in one
+  // fast asleep (silence: shell whole, breathing at ~0.2 Hz, everything dimmed), or capped by the governor on a fast display: draw every other frame. The aura runs two of its passes in one
   // (x -> d*d*x + (1+d)*g*scene is exactly two applications of x -> d*x + g*scene), so its trails fade at the same rate
-  const half = SLEEP.z > .98 && !window.__noHalf;
+  const half = (SLEEP.z > .98 || QUAL.cap > 0) && !window.__noHalf;
   if ((S.awake > .05 || ++skip % 3 === 0) && (!half || (++halfSkip & 1) === 0)) {
     if (half) { const d = FB.uDecay.value; FB.uGain.value *= 1 + d; FB.uDecay.value = d * d; }
+    if (U.uMorphA.value > .009 || window.__bakeAlways) gpuTime('bake', morph.ensure);   // the grown form is sampled (body, beads) only above .01: hidden, it is not baked
     CELLAB?.render(dt);
     gpuTime('body', renderBeing);
   }

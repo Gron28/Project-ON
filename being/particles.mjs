@@ -38,6 +38,7 @@ export function createParticles(THREE, U) {
       mat2 rot( float a ) { float c = cos( a ), s = sin( a ); return mat2( c, - s, s, c ); }
       vec3 proj( vec3 p, vec3 ro, vec3 uu, vec3 vv, vec3 ww ) { vec3 v = p - ro; float z = max( dot( v, ww ), .05 ); return vec3( vec2( dot( v, uu ), dot( v, vv ) ) * 1.6 / z * uScale + uShift, z ); }
       void main() {
+        if ( aA.w <= 0. ) { gl_Position = vec4( 2., 2., 2., 1. ); return; }   // a dead slot (size 0, fade 0) would add exactly nothing: no fragments for it
         vec3 ro = vec3( 0., 0., 4.2 * uZoom ); ro.yz *= rot( uLook.y * .35 ); ro.xz *= rot( uLook.x * .55 );   // the body's camera
         vec3 ww = normalize( - ro ), uu = normalize( cross( ww, vec3( 0., 1., 0. ) ) ), vv = cross( uu, ww );
         vec3 a = proj( aA.xyz, ro, uu, vv, ww ), b = proj( aA.xyz - aB.xyz, ro, uu, vv, ww );   // now, and where it was a moment ago
@@ -211,7 +212,8 @@ export function createParticles(THREE, U) {
         iB[A] = settled[i] ? 0 : vel[J] * st; iB[A + 1] = settled[i] ? 0 : vel[J + 1] * st; iB[A + 2] = settled[i] ? 0 : vel[J + 2] * st; iB[A + 3] = k;
         iC[A] = seed[i]; iC[A + 1] = fade[i]; iC[A + 2] = heat[i];
       }
-      aA.needsUpdate = aB.needsUpdate = aC.needsUpdate = true;
+      points.visible = live > 0;   // nothing alive: no draw (it would add nothing)
+      if (live > 0) aA.needsUpdate = aB.needsUpdate = aC.needsUpdate = true;   // nothing to upload while it is not drawn
       return live;
     },
   };
