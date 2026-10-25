@@ -207,8 +207,11 @@ const U = {
 
 /* ---------- one shader: a liquid-metal mass with lobes and falling drops, ray-marched around an analytic core of light ---------- */
 const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms: U, depthTest: false, depthWrite: false,
-  vertexShader: 'void main() { gl_Position = vec4( position.xy, 0., 1. ); }',
+// drawn as a disc just covering its round window (uMaskR), not the whole square: every pixel outside it comes out exactly
+// transparent anyway, and the body's march is the page's costliest work (uDisc 0, lab: the whole window as before)
+U.uDisc = { value: 1 };
+scene.add(new THREE.Mesh(new THREE.CircleGeometry(1.01 / Math.cos(Math.PI / 48), 48), new THREE.ShaderMaterial({ uniforms: U, depthTest: false, depthWrite: false,
+  vertexShader: 'uniform vec2 uRes; uniform float uMaskR, uDisc; void main() { gl_Position = vec4( position.xy * ( uDisc > .5 ? 2. * uMaskR * vec2( uRes.y / uRes.x, 1. ) : vec2( 2. ) ), 0., 1. ); }',
   fragmentShader: bodyFragment({ EXT, NOTES, ND, NT, TP, NS }) })));
 /* ---------- feedback aura: an iterated image map around the creature (decay x warp of the previous frame + its glow) ---------- */
 const sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
