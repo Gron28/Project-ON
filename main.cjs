@@ -374,7 +374,9 @@ const fromSettings = (e) => settingsWin && !settingsWin.isDestroyed() && e.sende
 // render cost in one choice: auto lowers the resolution itself when frames run long
 const PERFORMANCE = { auto: { quality: 1, adaptive: true }, sharp: { quality: 1, adaptive: false }, light: { quality: .6, adaptive: false } };
 // what the page's governor needs: the resolution ceiling, whether it adapts, and the refresh rate of the display it is on
-const quality = () => { let hz = 0; try { if (win && !win.isDestroyed()) hz = screen.getDisplayMatching(win.getBounds()).displayFrequency || 0; } catch {} return { res: settings.quality, auto: settings.adaptive, hz }; };
+// (Linux X11 reports 0 for displayFrequency: the rate comes from xrandr there, native/refresh-linux.cjs)
+const refresh = process.platform === 'linux' ? require('./native/refresh-linux.cjs').createRefresh() : null;
+const quality = () => { let hz = 0; try { if (win && !win.isDestroyed()) { const b = win.getBounds(), d = screen.getDisplayMatching(b); hz = d.displayFrequency || (refresh ? refresh.hzFor(b, d.scaleFactor) : 0); } } catch {} return { res: settings.quality, auto: settings.adaptive, hz }; };
 const performanceNow = () => (settings.adaptive !== false ? 'auto' : (settings.quality ?? 1) >= .9 ? 'sharp' : 'light');
 function setRetro(key, value) {   // the pixelated / PS1 look (dashboard, Look)
   if (!['pix', 'lev', 'dith'].includes(key) || !Number.isFinite(value)) return false;
@@ -534,6 +536,7 @@ app.on('second-instance', (_e, argv, _cwd, data) => {
 // a way to the menu without right-clicking the pet (it is click-through, and a mouse is not for everyone): Ctrl+Alt+O opens it at the pointer
 const MENU_KEY = 'CommandOrControl+Alt+O';
 app.on('will-quit', () => globalShortcut.unregisterAll());
+if (refresh) app.whenReady().then(() => { for (const ev of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(ev, () => { refresh.forget(); send('quality', quality()); }); });
 app.whenReady().then(() => { createWindow(); if (PAGE === 'being') { if (!SHOWCASE) { createTray(); EXTM?.ready?.(); try { globalShortcut.register(MENU_KEY, () => Menu.buildFromTemplate(menuTemplate()).popup()); } catch {} } if (PAGE === 'being') startCosmos(); } if (process.argv.includes('--dashboard')) openDashboard(); if (process.argv.includes('--sky')) openSky(); });
 // lab: ENTITY_SHOT=<dir> saves the dashboard and the being after a while and quits (scratch/ harnesses)
 if (process.env.ENTITY_SHOT) app.whenReady().then(() => setTimeout(async () => {

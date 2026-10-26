@@ -2,6 +2,8 @@
 const { app, BrowserWindow } = require('electron'); const path = require('node:path'); const fs = require('node:fs');
 const ROOT = path.join(__dirname, '..');
 require(path.join(ROOT, 'being', 'memory-store.cjs')).registerMemoryIpc(require('electron').ipcMain, app);
+require('electron').ipcMain.handle('page-schema', () => []);   // the preload asks main for the tuning schema
+require('electron').ipcMain.on('ml-get', (e) => { e.returnValue = null; });   // the page reads its model settings synchronously at start
 app.whenReady().then(async () => {
   const w = new BrowserWindow({ show: true, x: -3000, y: 0, skipTaskbar: true, focusable: false, width: 900, height: 900, backgroundColor: '#000', webPreferences: { preload: path.join(ROOT, 'being', 'preload.cjs'), contextIsolation: true, sandbox: false, backgroundThrottling: false } });
   w.webContents.on('console-message', (e) => { const m = e.message || ''; if (!/Security|Policy|risks|electronjs|packaged|^\s*$/.test(m)) console.log('[page]', m.slice(0, 240), e.sourceId ? path.basename(e.sourceId) + ':' + (e.lineNumber || '') : ''); });

@@ -208,7 +208,7 @@ export function createView(host, tip) {
     const row = flow.row;
     for (const g of G.groups) {
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(g.rb + 0.012, 32, 20), rimMat(g.col, 0, 2.2)); mesh.position.set(...g.p); mesh.userData.group = g.id;
-      // the card: the block on its left, the text to its right; arrows meet its edges
+      // the label box: the block on its left, the text to its right; arrows meet its edges
       const x0 = g.p[0] - FLOW.rbMax - 0.035, x1 = g.p[0] + FLOW.card, y0 = g.p[1] - 0.44 * row, y1 = g.p[1] + 0.44 * row;
       const card = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x0, y0, 0), new THREE.Vector3(x1, y0, 0), new THREE.Vector3(x1, y1, 0), new THREE.Vector3(x0, y1, 0)]),
         new THREE.LineBasicMaterial({ color: g.col, transparent: true, opacity: 0, depthWrite: false }));
@@ -383,7 +383,7 @@ export function createView(host, tip) {
   function diagramFrame(dt) {
     const k = ease(m), rf = org.net.rf;
     descT += dt; if (descT > 1) { descT = 0; setRoleTexts(); }
-    // card text is sized to the card in screen pixels
+    // label text is sized to its box in screen pixels
     const K = (host.clientHeight || 500) / (2 * Math.max(0.1, camera.position.distanceTo(controls.target)) * Math.tan((camera.fov * Math.PI) / 360));
     if (!labelK || Math.abs(K - labelK) > 0.03 * labelK) {
       labelK = K;

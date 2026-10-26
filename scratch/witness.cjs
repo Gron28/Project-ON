@@ -9,6 +9,7 @@ const { app, BrowserWindow, ipcMain } = require('electron'); const path = requir
 const ROOT = path.join(__dirname, '..');
 require(path.join(ROOT, 'being', 'memory-store.cjs')).registerMemoryIpc(ipcMain, app);
 ipcMain.on('ml-get', (e) => { e.returnValue = null; });   // the page reads its model settings synchronously at start
+ipcMain.handle('page-schema', () => []);   // the preload asks main for the tuning schema
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const FORMS = ['bloom', 'crystal', 'foam', 'sponge', 'julia', 'geometry', 'coral', 'lattice'];
 const mix = (i) => JSON.stringify(FORMS.map((_, k) => (k === i ? 1 : 0)));
