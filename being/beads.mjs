@@ -74,7 +74,7 @@ export function createBeads(THREE, renderer, { bodyFragment, U, W = 128, H = 128
   const drawMat = new THREE.ShaderMaterial({ uniforms, depthTest: true, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending,
     vertexShader: /* glsl */`
     uniform sampler2D uPos; uniform float uBW, uBN, uBA, uBKick, uBSize, uBTime, uBMelt, uBOrbit; uniform vec3 uBOrigin, uBAxis;
-    uniform vec2 uRes; uniform vec2 uLook; uniform float uScale; uniform vec2 uShift; uniform float uZoom;
+    uniform vec2 uRes; uniform vec2 uLook; uniform float uScale; uniform vec2 uShift; uniform float uZoom; uniform float uPxK;
     varying vec2 vQ; varying vec3 vP; varying float vLp; varying float vSeed; varying vec3 vHome; varying float vKind; varying float vFront; varying float vSp; varying float vGain;
     const float HALO = 3.;
     ${camGLSL}
@@ -125,7 +125,7 @@ export function createBeads(THREE, renderer, { bodyFragment, U, W = 128, H = 128
       vec2 uv = vec2( dot( rel, uu ), dot( rel, vv ) ) * 1.6 / z * uScale + uShift;
       float rad = r * 1.6 / z * uScale * HALO;   // the quad holds the glow, the bead itself is its inner third
       // a light smaller than a pixel aliases into a square: at least ~3 px, its brightness spread over the area it gained
-      float radMin = 3. / uRes.y; vGain = rad > 0. ? min( 1., ( rad * rad ) / ( radMin * radMin ) ) : 0.; rad = rad > 0. ? max( rad, radMin ) : 0.;
+      float radMin = 3. * uPxK / uRes.y; vGain = rad > 0. ? min( 1., ( rad * rad ) / ( radMin * radMin ) ) : 0.; rad = rad > 0. ? max( rad, radMin ) : 0.;
       vQ = position.xy; vP = p; vLp = lp; vSeed = seed; vHome = home; vKind = kind + lift; vFront = front; vSp = s3;
       gl_Position = vec4( ( uv.x + position.x * rad ) * 2. * uRes.y / uRes.x, ( uv.y + position.y * rad ) * 2., clamp( ( z - 2.5 ) / 3.5, 0., 1. ) * 2. - 1., 1. );
     }`,

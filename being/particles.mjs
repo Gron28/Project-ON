@@ -28,11 +28,11 @@ export function createParticles(THREE, U) {
   geo.setAttribute('aA', aA); geo.setAttribute('aB', aB); geo.setAttribute('aC', aC);
   geo.instanceCount = MAX;
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uRes: U.uRes, uLook: U.uLook, uZoom: U.uZoom, uScale: U.uScale, uShift: U.uShift, uShellR: U.uShellR, uTime: U.uTime, uLight: U.uLight, uAwake: U.uAwake, uGatherC: U.uGatherC || { value: new THREE.Color(1, .92, .8) } },
+    uniforms: { uRes: U.uRes, uPxK: U.uPxK || { value: 1 }, uLook: U.uLook, uZoom: U.uZoom, uScale: U.uScale, uShift: U.uShift, uShellR: U.uShellR, uTime: U.uTime, uLight: U.uLight, uAwake: U.uAwake, uGatherC: U.uGatherC || { value: new THREE.Color(1, .92, .8) } },
     transparent: true, depthTest: false, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor,
     vertexShader: /* glsl */`
-      uniform vec2 uRes, uLook, uShift; uniform float uZoom, uScale, uShellR;
+      uniform vec2 uRes, uLook, uShift; uniform float uZoom, uScale, uShellR, uPxK;
       attribute vec4 aA, aB, aC;   // pos.xyz size | smear.xyz kind | seed fade heat -
       varying vec2 vQ; varying float vLen, vKind, vSeed, vFade, vHeat, vGain;
       mat2 rot( float a ) { float c = cos( a ), s = sin( a ); return mat2( c, - s, s, c ); }
@@ -43,7 +43,7 @@ export function createParticles(THREE, U) {
         vec3 ww = normalize( - ro ), uu = normalize( cross( ww, vec3( 0., 1., 0. ) ) ), vv = cross( uu, ww );
         vec3 a = proj( aA.xyz, ro, uu, vv, ww ), b = proj( aA.xyz - aB.xyz, ro, uu, vv, ww );   // now, and where it was a moment ago
         vec2 asp = vec2( uRes.y / uRes.x, 1. ) * 2.;   // screen units -> clip
-        float px = 1. / uRes.y;   // one pixel in screen units (the screen is 1 unit tall here, see asp)
+        float px = uPxK / uRes.y;   // one window pixel in screen units (the screen is 1 unit tall here, see asp; uPxK: the body drawn above the window's resolution)
         float w = aA.w * 1.6 / a.z * uScale;   // the particle's radius on screen
         float wMin = 1.25 * px; vGain = w > 0. ? min( 1., ( w * w ) / ( wMin * wMin ) ) : 0.; w = max( w, wMin );
         vec2 d = a.xy - b.xy; float L = length( d ); vec2 dir = L > 1e-6 ? d / L : vec2( 1., 0. ), nrm = vec2( - dir.y, dir.x );

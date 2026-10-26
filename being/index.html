@@ -143,7 +143,7 @@ import { createPhysics } from './physics.mjs';
 import { bodyFragment, AURA_FRAG, COMPOSITE_FRAG, UNWRAP_FRAG } from './page/shaders.mjs';
 import { specialise, neededCases } from './page/body-variants.mjs';
 import { bodyBound } from './page/body-bound.mjs';
-import { createGpuTiming } from './page/gpu-timing.mjs';
+import { createGpuTiming, createFrameTimer } from './page/gpu-timing.mjs';
 import { createInput, WORKLET } from './page/input.mjs';
 import { createHud } from './page/hud.mjs';
 import { createCalibration } from './page/calibration.mjs';
@@ -179,7 +179,7 @@ if (window.pet?.hasLocal ?? true) try { EXT_MOD = await import('./local/page.mjs
 catch (e) { EXT_MOD = null; if (!/fetch|resolve|not found|ERR_FILE_NOT_FOUND/i.test(String(e && e.message))) console.error('[local]', e); }
 const NOTES = 12, ND = 14, NT = 4, NS = 5, TP = 11;   // TP: points along each tendril
 const U = {
-  uRes: { value: new THREE.Vector2() }, uTime: { value: 0 }, uLook: { value: new THREE.Vector2() }, uScale: { value: 1 }, uShift: { value: new THREE.Vector2() }, uWide: { value: 0 },
+  uRes: { value: new THREE.Vector2() }, uPxK: { value: 1 }, uTime: { value: 0 }, uLook: { value: new THREE.Vector2() }, uScale: { value: 1 }, uShift: { value: new THREE.Vector2() }, uWide: { value: 0 },
   uL: { value: Array.from({ length: NOTES }, () => new THREE.Vector4()) },   // lobes: centre xyz + radius
   uD: { value: Array.from({ length: ND }, () => new THREE.Vector4()) },      // falling drops: centre xyz + radius
   uT: { value: Array.from({ length: NT * TP }, () => new THREE.Vector4()) },   // tendrils: TP points each (xyz + radius)
@@ -222,29 +222,56 @@ const bodyMat = (src, defines) => new THREE.ShaderMaterial({ uniforms: U, define
 // the stones', gems' and proposed materials' shading (propShade) is so large that merely having all of it in the program makes
 // every pixel several times slower, taken or not. So the body is drawn by the lite program (BODY_LITE, no propShade) when no
 // shown material needs it, and otherwise by one carrying only the shown materials' cases (being/page/body-variants.mjs),
-// compiled in the background on first need (the full program draws until it is ready) and kept for the next time (at most 12).
+// compiled in the background on first need (the full program draws until it is ready) and kept for the next time (at most 12);
+// a ready one that carries every needed case is used rather than compiling another (extra cases change nothing drawn).
 // Both follow matShade's own test over the slots it can pick, so the picture is the same (lab: __bodyFull, __bodyInfo())
-const BODY = { full: bodyMat(BODY_SRC, {}), lite: bodyMat(BODY_SRC, { BODY_LITE: '' }), v: new Map() };
+// Some drivers link on the GPU process's own thread: Mesa radeonsi under ANGLE's GL backend takes ~3 s per variant, and every
+// ON window freezes meanwhile, while there the full program is hardly slower. So a compile that held the frames for over a
+// second marks this GPU (localStorage on-body-stall, by renderer), and from then on no new variant is compiled: a ready one
+// that covers the shown materials, else the full program (lab: window.__bodyStall(false) forgets the mark)
+const BODY = { full: bodyMat(BODY_SRC, {}), lite: bodyMat(BODY_SRC, { BODY_LITE: '' }), v: new Map(), stall: false, at: 0, compiling: 0 };
+const GPU_NAME = (() => { try { const g = renderer.getContext(), d = g.getExtension('WEBGL_debug_renderer_info'); return d ? String(g.getParameter(d.UNMASKED_RENDERER_WEBGL)) : '?'; } catch { return '?'; } })();
+try { BODY.stall = localStorage.getItem('on-body-stall') === GPU_NAME; } catch {}
+window.__bodyStall = (on) => { if (on !== undefined) { BODY.stall = !!on; try { on ? localStorage.setItem('on-body-stall', GPU_NAME) : localStorage.removeItem('on-body-stall'); } catch {} } return { stall: BODY.stall, gpu: GPU_NAME }; };
 const bodyMesh = new THREE.Mesh(new THREE.CircleGeometry(1.01 / Math.cos(Math.PI / 48), 48), BODY.full);
 scene.add(bodyMesh);
-for (const m of [BODY.lite, BODY.full]) { bodyMesh.material = m; renderer.compile(scene, camera); }   // both programs linked at start, so switching never stalls a frame
+const sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });   // the body's own picture (the aura and composite read it)
+// three makes a program for the target it draws to (the screen's colour space and tone mapping differ from a render target's), so
+// every body program is compiled against sceneRT, where it is drawn: compiled against the screen, the program first drawn was
+// another one, linked on the spot (~4 s frozen on Mesa)
+const toScene = (fn) => { const prev = renderer.getRenderTarget(); renderer.setRenderTarget(sceneRT); try { return fn(); } finally { renderer.setRenderTarget(prev); } };
+toScene(() => { for (const m of [BODY.lite, BODY.full]) { bodyMesh.material = m; renderer.compile(scene, camera); } });   // both programs linked at start, so switching never stalls a frame
+function bodyStallCheck(now) {   // frames held over a second while a variant compiles: this GPU links on its own thread
+  const gap = now - BODY.at;
+  if (BODY.stall || gap < 1000 || !BODY.at || document.visibilityState !== 'visible') return;
+  BODY.stall = true; try { localStorage.setItem('on-body-stall', GPU_NAME); } catch {}
+  console.warn(`being: a body variant's compile held the frames ${gap.toFixed(0)} ms on ${GPU_NAME}; no more variants on this GPU`);
+}
 function bodyPick() {
+  const now = performance.now();
+  if (BODY.compiling) bodyStallCheck(now); BODY.at = now;
   if (window.__bodyFull) return BODY.full;
   const ids = neededCases(U.uMid.value, U.uMw.value, U.uProp.value > .5);
   if (!ids.length) return BODY.lite;
   const key = ids.join(','); let v = BODY.v.get(key);
+  if (!v || !v.ready) {   // a ready variant that carries every needed case draws the same picture
+    let best = null;
+    for (const x of BODY.v.values()) if (x.ready && ids.every((id) => x.ids.includes(id)) && (!best || x.ids.length < best.ids.length)) best = x;
+    if (best) { best.used = now; return best.m; }
+  }
+  if (!v && BODY.stall) return BODY.full;
   if (!v) {
-    v = { m: bodyMat(specialise(BODY_SRC, ids), {}), ready: false, used: 0 }; BODY.v.set(key, v);
+    v = { m: bodyMat(specialise(BODY_SRC, ids), {}), ids, ready: false, used: 0 }; BODY.v.set(key, v);
     const sc = new THREE.Scene(); sc.add(new THREE.Mesh(bodyMesh.geometry, v.m));
-    renderer.compileAsync(sc, camera).then(() => { v.ready = true; }, () => {});
+    BODY.compiling++; const done = () => { bodyStallCheck(performance.now()); BODY.compiling--; };   // the freeze may end before the next frame
+    toScene(() => renderer.compileAsync(sc, camera)).then(() => { v.ready = true; done(); }, done);
     if (BODY.v.size > 12) { let old = null; for (const [k, x] of BODY.v) if (x !== v && (!old || x.used < old[1].used)) old = [k, x]; old[1].m.dispose(); BODY.v.delete(old[0]); }
   }
-  v.used = performance.now();
+  v.used = now;
   return v.ready ? v.m : BODY.full;
 }
-window.__bodyInfo = () => ({ variants: [...BODY.v].map(([k, v]) => k + (v.ready ? '' : ' (compiling)')), drawn: bodyMesh.material === BODY.full ? 'full' : bodyMesh.material === BODY.lite ? 'lite' : 'cases' });
+window.__bodyInfo = () => ({ stall: BODY.stall, variants: [...BODY.v].map(([k, v]) => k + (v.ready ? '' : ' (compiling)')), drawn: bodyMesh.material === BODY.full ? 'full' : bodyMesh.material === BODY.lite ? 'lite' : 'cases' });
 /* ---------- feedback aura: an iterated image map around the creature (decay x warp of the previous frame + its glow) ---------- */
-const sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
 let fbA = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }), fbB = fbA.clone();
 const FB = { uPrev: { value: null }, uScene: { value: null }, uZoom: { value: 1.006 }, uRot: { value: 0 }, uDecay: { value: .94 }, uGain: { value: .2 }, uTint: { value: new THREE.Color(1, 1, 1) }, uTime: { value: 0 }, uAspect: { value: 1 }, uWarp: { value: .002 },
   uFlow: { value: 0 }, uFk: { value: new THREE.Vector4(1, 0, 0, 0) }, uFz: { value: 0 }, uHue: { value: 0 }, uSun: { value: 0 }, uSunRot: { value: 0 } };   // the journey: echoes flowing along the form constants, their colour drifting each pass
@@ -258,6 +285,7 @@ const coScene = new THREE.Scene(); coScene.add(new THREE.Mesh(new THREE.PlaneGeo
   fragmentShader: COMPOSITE_FRAG })));
 /* lab: GPU time per pass, only while window.__gpuT is set (being/page/gpu-timing.mjs) */
 const { GT, gpuTime, gpuPoll } = createGpuTiming(renderer);
+const FTM = createFrameTimer(renderer);   // the governor's GPU time per drawn frame (QUAL.gpu), for its rich rungs
 function renderBeing() {
   U.uBound.value = bodyBound(U); bodyMesh.material = bodyPick();
   renderer.setRenderTarget(sceneRT); renderer.render(scene, camera);
@@ -274,12 +302,15 @@ function renderBeing() {
 const RETRO = { pix: 1, lev: 0, dith: 0 };
 const retroApply = () => { CO.uPix.value = Math.max(1, RETRO.pix * CO.uRes.value.x / Math.max(1, innerWidth)); CO.uLev.value = RETRO.lev; CO.uDith.value = RETRO.dith; };
 const QUAL = createGovernor();
-window.__qual = QUAL;   // lab: the governor's state (k: body resolution, cap: every other refresh, bake: the skin's bake interval)
+window.__qual = QUAL;   // lab: the governor's state (k: body resolution, above 1 supersampled; cap: every other refresh; bake: the skin's bake interval; gpu: ms per drawn frame)
 const UP = createUpscale(THREE, renderer);
 const resize = () => { renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5) * T.res); renderer.setSize(innerWidth, innerHeight, false); renderer.getDrawingBufferSize(CO.uRes.value);
   const W = CO.uRes.value.x, H = CO.uRes.value.y, w = Math.max(2, Math.round(W * QUAL.k)), h = Math.max(2, Math.round(H * QUAL.k));
   QUAL.up = w !== W || h !== H; if (QUAL.up) UP.setSize(W, H);
-  U.uRes.value.set(w, h); sceneRT.setSize(w, h); fbA.setSize(w >> 1, h >> 1); fbB.setSize(w >> 1, h >> 1); FB.uAspect.value = w / h; retroApply(); };
+  // above the window's resolution (the governor's rich rungs) the aura stays at the window's (its trails look the same and cost
+  // no more), and pixel floors (particles, beads) stay in window pixels (uPxK), so thin streaks keep their brightness
+  const fw = Math.round(w / Math.max(1, QUAL.k)), fh = Math.round(h / Math.max(1, QUAL.k)); U.uPxK.value = Math.max(1, QUAL.k);
+  U.uRes.value.set(w, h); sceneRT.setSize(w, h); fbA.setSize(fw >> 1, fh >> 1); fbB.setSize(fw >> 1, fh >> 1); FB.uAspect.value = w / h; retroApply(); };
 addEventListener('resize', resize); resize();
 installQualityLab({ THREE, renderer, U, CO, QUAL, UP, resize, scene, camera, coScene, sceneRT, T });   // lab: window.__qualLab (being/page/quality-lab.mjs)
 
@@ -871,7 +902,7 @@ function orgSnap() {   // the dashboard's drive meter
 window.__orgDrive = () => ({ on: ORGD.on, s: ORGD.s, k: +ORGD.k.toFixed(3), A: ORGD.A, R: ORGD.R, ageMs: ORGD.d ? Math.round(performance.now() - ORGD.at) : null, received: ORGD.n, rate: ORGD.rate, last: ORGD.d, lo: ORGD.lo, hi: ORGD.hi,
   mapped: { ...ORGD.v, reg: Array.from(ORGD.v.reg), modes: Array.from(ORGD.v.modes), pos: Array.from(ORGD.v.pos), omega: Array.from(ORGD.v.omega), D: ORGD.D, colour: '#' + ORGD.col.getHexString(), colW: ORGD.colW, metalW: ORGD.metalW, glow: ORGD.glow } });   // lab
 pet.onRetro?.(v => { RETRO.pix = Math.min(24, Math.max(1, +v?.pix || 1)); RETRO.lev = +v?.lev >= 2 ? Math.min(64, +v.lev) : 0; RETRO.dith = Math.min(1, Math.max(0, +v?.dith || 0)); retroApply(); });
-pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.hz = +v?.hz || 0; QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
+pet.onQuality?.(v => { QUAL.res = Math.min(1, Math.max(.4, +v?.res || 1)); QUAL.auto = v?.auto !== false; QUAL.hz = +v?.hz || 0; if (QUAL.res < 1) QUAL.k = Math.min(QUAL.k, QUAL.res); QUAL.slow = QUAL.fast = 0; resize(); });
 const HATCH = { t: -1, swapped: false, A: 1.4, B: 2.8 };
 let LAST_TRACK = null;
 async function hatchSwap() {   // at the darkest point: everything that is the being changes hands
@@ -2410,15 +2441,17 @@ renderer.setAnimationLoop(ts => {
   voiceFrame(dt);
   hatchFrame(dt); formFrame(dt); reactFrame(dt);
   beadsFrame(dt);
-  gpuPoll();
+  gpuPoll(); QUAL.gpu = FTM.poll();
   // fast asleep (silence: shell whole, breathing at ~0.2 Hz, everything dimmed), or capped by the governor on a fast display: draw every other frame. The aura runs two of its passes in one
   // (x -> d*d*x + (1+d)*g*scene is exactly two applications of x -> d*x + g*scene), so its trails fade at the same rate
   const half = (SLEEP.z > .98 || QUAL.cap > 0) && !window.__noHalf;
   if ((S.awake > .05 || ++skip % 3 === 0) && (!half || (++halfSkip & 1) === 0)) {
     if (half) { const d = FB.uDecay.value; FB.uGain.value *= 1 + d; FB.uDecay.value = d * d; }
+    FTM.begin();
     if (U.uMorphA.value > .009 || window.__bakeAlways) gpuTime('bake', morph.ensure);   // the grown form is sampled (body, beads) only above .01: hidden, it is not baked
     CELLAB?.render(dt);
     gpuTime('body', renderBeing);
+    FTM.end();
   }
   if (window.__jumpWatch) jumpScan();
   if (look.hud && f0 - beingHudT > 66) { beingHudT = f0; drawBeing(); }
