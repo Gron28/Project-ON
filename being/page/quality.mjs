@@ -99,8 +99,11 @@ export const UPSCALE_FRAG = /* glsl */`precision highp float; varying vec2 vUv; 
     if ( uSharp > 0. ) {   // CAS: sharpen less where the neighbourhood already spans the full range
       vec4 blur = ( a + b + d + e ) * .25;
       vec3 amp = sqrt( clamp( min( mn.rgb, 1. - mx.rgb ) / max( mx.rgb, 1e-4 ), 0., 1. ) );
+      float m0 = max( c.r, max( c.g, c.b ) );
       c.rgb += ( c.rgb - blur.rgb ) * amp * uSharp;
       c = clamp( c, mn, mx );
+      float m1 = max( c.r, max( c.g, c.b ) );
+      if ( c.a < .98 && m0 > 1e-4 ) c.a *= clamp( m1 / m0, 0., 1. );   // a soft light dimmed by the sharpening loses its alpha with it: no dark rim on the desktop
     }
     gl_FragColor = vec4( min( c.rgb, vec3( c.a ) ), c.a );
   }`;

@@ -281,6 +281,7 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
   let tPeak = 0;
   let resetIdx = 0;
   let buildArmed = true;
+  const kickT = new Float64Array(32); let kickN = 0;   // recent kick times, for the drop test (the drums coming back)
   let slowDens = 0;
   const kEnergy = coef(3000);
   // intensity: short-term loudness against a reference that follows the loudest recent passages (sinking ~6 dB per
@@ -556,6 +557,7 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
         const s = 0.3 + 0.7 * (f / peak);
         lastHit[b] = hopIdx;
         events.push({ type: evNames[b], time: now - LAT, strength: s });
+        if (b === 0) kickT[kickN++ % 32] = now - LAT;
         if (s > drumEnv[b]) drumEnv[b] = s;
         blockHits++;
         if (b === 0) kickStrength = s;
@@ -1342,7 +1344,13 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
       }
       loudUp /= 4;
       bassUp /= 4;
-      const dropLike = tPeak >= 0.3 && loudUp > 0.03 && bassUp > 0.1;
+      // a drop is the kick coming back, louder, after it was gone or held back: kicks since the change, and the gap before it
+      // (loudness and bass alone fired mid-build, where a riser and a roll swell both, and missed drops after a tension the
+      // structure had not scored)
+      const kicksSince = (t) => { let k = 0; for (let i = 0; i < Math.min(kickN, 32); i++) if (kickT[i] >= t) k++; return k; };
+      const kickGapBefore = (t) => { let lastB = -1e9; for (let i = 0; i < Math.min(kickN, 32); i++) if (kickT[i] < t - 0.25 && kickT[i] > lastB) lastB = kickT[i]; return t - lastB; };
+      const dropTest = (t) => loudUp > 0.03 && kicksSince(t - 0.25) >= 2 && ((tPeak >= 0.3 && bassUp > 0.1) || (tPeak >= 0.5 && loudUp > 0.045) || kickGapBefore(t) > 3);
+      const dropLike = dropTest(now - 2.5);
 
       if (novN >= 8 && nov > thr && nov > 0.08 && rise >= 0.1 && (sinceSec > 6 || (dropLike && sinceSec > 3))) {
         // Detection trails the change by up to a second or two (the 2 s window has to fill), so
@@ -1365,7 +1373,7 @@ export function createAnalyzer({ sampleRate = 48000 } = {}) {
         lastSectionT = now;
         state.structure.section++;
         events.push({ type: 'section', time: boundaryT, strength: clamp01(nov / (thr + 1e-9) - 0.5) });
-        if (dropLike) {
+        if (dropTest(boundaryT)) {
           events.push({ type: 'drop', time: boundaryT, strength: clamp01(0.5 + loudUp * 4) });
           tension = 0;
           tPeak = 0;
