@@ -76,7 +76,8 @@ const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2)); scene.add(mesh);
 const MA = mk(A), MBL = mk(B); MBL.defines = { BODY_LITE: '' };
 // B is drawn as the page draws it (being/index.html bodyPick): the lite body, or one with only the shown materials' propShade cases
 const VAR = new Map(), mkCases = (ids) => { const k = ids.join(','); if (!VAR.has(k)) { const m = mk(B); m.fragmentShader = specialise(m.fragmentShader, ids); VAR.set(k, m); } return VAR.get(k); };
-const pickB = () => { const ids = neededCases(U.uMid?.value || [0, 0, 0, 0], U.uMw?.value || [1, 0, 0, 0], (U.uProp?.value || 0) > .5); return ids.length ? mkCases(ids) : MBL; };
+const SUPER = ${JSON.stringify((process.env.SUPER || '').split(',').filter(Boolean).map(Number))};   // SUPER=6,...,16: needed cases within it draw with all of it (a stalling GPU's shared variant)
+const pickB = () => { let ids = neededCases(U.uMid?.value || [0, 0, 0, 0], U.uMw?.value || [1, 0, 0, 0], (U.uProp?.value || 0) > .5); if (SUPER.length && ids.length && ids.every((id) => SUPER.includes(id))) ids = SUPER; return ids.length ? mkCases(ids) : MBL; };
 const MB = {};
 const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.FloatType }), px1 = new Float32Array(4);
 const draw = (m) => { if (m === MB) m = pickB(); mesh.material = m; renderer.setRenderTarget(rt); renderer.render(scene, cam); };
