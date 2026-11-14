@@ -124,6 +124,8 @@ import { createSkin } from './skin/lenia.mjs';
 import { rankPatterns } from './mind/prompt.mjs';
 import { createMind, traitsFor } from './mind.mjs';
 import { createTiming, blendGrids } from './timing.mjs';
+import { createMirror } from './mirror.mjs';
+import { createClock } from './clock.mjs';
 import { createMap, dnaWeights, featureOf, blend, paint, unb64, b64, geneDna, songLook, keyHash, CHAR_KEYS, MW, MH, NU, DIM } from './memory.mjs';
 import { speciesFor } from './species-lenia.mjs';
 import { morphFor, dnaGenome, lerpGenome, mutate, validGenome, fractalFor, FRACTAL_KINDS, FAMILIES as MORPH_FAMILIES } from './morph.mjs';
@@ -137,6 +139,7 @@ import { alignTargets, alignEvents } from './cosmos/align.mjs';
 import { createMaterials, affinities, materialLight, lightCast, MATERIALS, MATERIAL_LIGHT, N as N_MAT } from './materials.mjs';
 import { createGlints, ringGeometry, createSerpents } from './flourish.mjs';
 import { createParticles } from './particles.mjs';
+import { createLightning } from './lightning.mjs';
 import { lexicon } from './lexicon.mjs';
 import { createInputGain } from './input-gain.mjs';
 import { createPhysics } from './physics.mjs';
@@ -188,8 +191,8 @@ const U = {
   uS: { value: Array.from({ length: NS }, () => new THREE.Vector4()) },        // satellite orbs
   uGrain: { value: 0 }, uFrac: { value: 0 }, uIntr: { value: 0 }, uDisp: { value: 0 }, uSeed: { value: 0 }, uSplit: { value: 0 }, uRays: { value: 0 }, uCool: { value: 0 }, uCrisp: { value: 0 }, uSpikeP: { value: 3 }, uFlowS: { value: 0 },
   uNoteC: { value: Array.from({ length: NOTES }, (_, i) => new THREE.Color().setHSL(i / NOTES, .85, .55)) },
-  uNoteTint: { value: .6 }, uLight: { value: new THREE.Color(1, .92, .8) }, uCoreR: { value: .2 }, uCoreI: { value: .6 }, uGlow: { value: .5 }, uK: { value: .2 },
-  uChaos: { value: 0 }, uVar: { value: .05 }, uSkin: { value: null }, uSkinA: { value: 0 }, uZoom: { value: 1 }, uEnv: { value: 1 }, uTurbSpeed: { value: 1 }, uTurbDetail: { value: 1 }, uWob: { value: 1 }, uShellR: { value: .36 }, uRise: { value: 0 }, uMaskR: { value: .5 }, uImm: { value: 0 }, uRiseSeed: { value: new THREE.Vector4(.5, .5, .5, .5) }, uRW: { value: new Float32Array(8) }, uEther: { value: 0 }, uJour: { value: 0 }, uPeak: { value: 0 }, uPhen: { value: new Float32Array(8) }, uCyA: { value: 0 }, uCyN: { value: 6 }, uCyPh: { value: 0 }, uCyAx: { value: new THREE.Vector3(0, 1, 0) }, uPhenT: { value: 0 }, uPhenK: { value: 0 }, uPhenS: { value: 0 }, uMarb: { value: 0 }, uIllum: { value: 0 }, uAbsorption: { value: 0 }, uJFlow: { value: 0 }, uJBars: { value: 0 }, uJPal: { value: 0 }, uThick: { value: .085 }, uOpen: { value: 0 }, uHalo: { value: 0 },
+  uNoteTint: { value: .6 }, uLight: { value: new THREE.Color(1, .92, .8) }, uBoltC: { value: new THREE.Color(.45, .52, 1) }, uCoreR: { value: .2 }, uCoreI: { value: .6 }, uGlow: { value: .5 }, uK: { value: .2 },
+  uChaos: { value: 0 }, uVar: { value: .05 }, uSkin: { value: null }, uSkinA: { value: 0 }, uZoom: { value: 1 }, uEnv: { value: 1 }, uTurbSpeed: { value: 1 }, uTurbDetail: { value: 1 }, uWob: { value: 1 }, uShellR: { value: .36 }, uRise: { value: 0 }, uGeo: { value: new THREE.Vector4(1, 0, 0, 2) }, uRiseLive: { value: new THREE.Vector4() }, uMaskR: { value: .5 }, uImm: { value: 0 }, uRiseSeed: { value: new THREE.Vector4(.5, .5, .5, .5) }, uRW: { value: new Float32Array(8) }, uEther: { value: 0 }, uJour: { value: 0 }, uPeak: { value: 0 }, uPhen: { value: new Float32Array(8) }, uCyA: { value: 0 }, uCyN: { value: 6 }, uCyPh: { value: 0 }, uCyAx: { value: new THREE.Vector3(0, 1, 0) }, uPhenT: { value: 0 }, uPhenK: { value: 0 }, uPhenS: { value: 0 }, uMarb: { value: 0 }, uIllum: { value: 0 }, uAbsorption: { value: 0 }, uJFlow: { value: 0 }, uJBars: { value: 0 }, uJPal: { value: 0 }, uThick: { value: .085 }, uOpen: { value: 0 }, uHalo: { value: 0 },
   uSpikes: { value: 0 }, uSpikeF: { value: 14 }, uFilm: { value: 0 }, uMetal: { value: new THREE.Color(.95, .95, .97) },
   uRing: { value: 9 }, uRingA: { value: 0 }, uRing2: { value: 9 }, uRing2A: { value: 0 },
   uSparks: { value: 0 }, uMote: { value: .04 }, uAwake: { value: 0 }, uHat: { value: 0 }, uKick: { value: 0 },
@@ -204,7 +207,7 @@ const U = {
   ...EXT.uniforms,   // the local folder's own (EXT)
   uMid: { value: [0, 0, 0, 0] }, uMw: { value: [1, 0, 0, 0] }, uMatMix: { value: 0 }, uMatScale: { value: 2.2 },
   uWR: { value: [new THREE.Vector4(0, 1, 0, .6), new THREE.Vector4(.3, .95, 0, .7)] }, uWRA: { value: 0 }, uSer: { value: Array.from({ length: 48 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uSerA: { value: [0, 0, 0] }, uSerB: { value: Array.from({ length: 3 }, () => new THREE.Vector4(0, 0, 0, 0)) },
-  uGl: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, .05, 0)) }, uGlR: { value: [0, 0, 0, 0, 0, 0] }, uGlisten: { value: 0 }, uBeatPulse: { value: 0 }, uRegP: { value: new Array(8).fill(0) }, uRegA: { value: 0 },
+  uGl: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, .05, 0)) }, uGlR: { value: [0, 0, 0, 0, 0, 0] }, uGlisten: { value: 0 }, uBeatPulse: { value: 0 }, uHw: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 1, 0, 9)) }, uHs: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) }, uHitA: { value: 0 }, uRegP: { value: new Array(8).fill(0) }, uRegA: { value: 0 },
   // the CelLab automata (being/page/cellab.mjs): the surface's palette + height atlas, its amount, depth, cells a face, hue; the inside's half-resolution light and amount
   uCa: { value: null }, uCaA: { value: 0 }, uCaD: { value: .03 }, uCaN: { value: 128 }, uCaHueC: { value: new THREE.Color(1, 1, 1) }, uCaHue: { value: .45 }, uCv: { value: null }, uCvA: { value: 0 },
   uBound: { value: 1.45 }   // a sphere round all the body can draw: rays that miss it skip the march (bodyBound(), set before each draw)
@@ -225,13 +228,21 @@ const bodyMat = (src, defines) => new THREE.ShaderMaterial({ uniforms: U, define
 // compiled in the background on first need (the full program draws until it is ready) and kept for the next time (at most 12);
 // a ready one that carries every needed case is used rather than compiling another (extra cases change nothing drawn).
 // Both follow matShade's own test over the slots it can pick, so the picture is the same (lab: __bodyFull, __bodyInfo())
-// Some drivers link on the GPU process's own thread: Mesa radeonsi under ANGLE's GL backend takes ~3 s per variant, and every
-// ON window freezes meanwhile, while there the full program is hardly slower. So a compile that held the frames for over a
-// second marks this GPU (localStorage on-body-stall, by renderer), and from then on no new variant is compiled: a ready one
-// that covers the shown materials, else the full program (lab: window.__bodyStall(false) forgets the mark)
-const BODY = { full: bodyMat(BODY_SRC, {}), lite: bodyMat(BODY_SRC, { BODY_LITE: '' }), v: new Map(), stall: false, at: 0, compiling: 0 };
+// Some drivers link on the GPU process's own thread, and every ON window freezes meanwhile: Mesa radeonsi under ANGLE's GL
+// backend ~3 s per variant, Intel Arc under ANGLE's GL backend on Windows ~7-9 s, and there the full program costs ~40 ms a
+// frame. Such a GPU is marked (BODY.stall): one without KHR_parallel_shader_compile from the start, any other once a compile has
+// held the frames for over a second (localStorage on-body-stall, by renderer). Chromium keeps linked programs on disk, so a
+// variant this GPU has linked before links again at once: those (localStorage on-body-warm) are still compiled on need; a new
+// one only while the being is fully asleep, where a held frame does not show, and until then the lite program draws (stones and
+// gems as silver, proposed elements in their first shading and shape) (lab: window.__bodyStall(false) forgets the mark)
+// There each set of shown elements would be a compile of its own, rarely ready, so the elements and planets (6..16) share one
+// variant, compiled the first time the being sleeps: from then on any mix of them draws in its proposed shading
+const BODY = { full: bodyMat(BODY_SRC, {}), lite: bodyMat(BODY_SRC, { BODY_LITE: '' }), v: new Map(), stall: false, fall: false, at: 0, compiling: 0, warm: new Set(), comp: new Set() };
 const GPU_NAME = (() => { try { const g = renderer.getContext(), d = g.getExtension('WEBGL_debug_renderer_info'); return d ? String(g.getParameter(d.UNMASKED_RENDERER_WEBGL)) : '?'; } catch { return '?'; } })();
-try { BODY.stall = localStorage.getItem('on-body-stall') === GPU_NAME; } catch {}
+try { BODY.stall = localStorage.getItem('on-body-stall') === GPU_NAME; const w = JSON.parse(localStorage.getItem('on-body-warm') || 'null'); if (w?.gpu === GPU_NAME) BODY.warm = new Set(w.keys); } catch {}
+if (!renderer.getContext().getExtension('KHR_parallel_shader_compile')) BODY.stall = true;
+const ELEMENTS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], ELEMENTS_KEY = ELEMENTS.join(',');
+const bodyWarm = (key, on) => { BODY.warm.delete(key); if (on) BODY.warm.add(key); try { localStorage.setItem('on-body-warm', JSON.stringify({ gpu: GPU_NAME, keys: [...BODY.warm].slice(-64) })); } catch {} };
 window.__bodyStall = (on) => { if (on !== undefined) { BODY.stall = !!on; try { on ? localStorage.setItem('on-body-stall', GPU_NAME) : localStorage.removeItem('on-body-stall'); } catch {} } return { stall: BODY.stall, gpu: GPU_NAME }; };
 const bodyMesh = new THREE.Mesh(new THREE.CircleGeometry(1.01 / Math.cos(Math.PI / 48), 48), BODY.full);
 scene.add(bodyMesh);
@@ -243,34 +254,42 @@ const toScene = (fn) => { const prev = renderer.getRenderTarget(); renderer.setR
 toScene(() => { for (const m of [BODY.lite, BODY.full]) { bodyMesh.material = m; renderer.compile(scene, camera); } });   // both programs linked at start, so switching never stalls a frame
 function bodyStallCheck(now) {   // frames held over a second while a variant compiles: this GPU links on its own thread
   const gap = now - BODY.at;
-  if (BODY.stall || gap < 1000 || !BODY.at || document.visibilityState !== 'visible') return;
+  if (gap < 1000 || !BODY.at || document.visibilityState !== 'visible') return;
+  for (const k of BODY.comp) if (BODY.warm.has(k)) bodyWarm(k, false);   // not linked from the disk after all
+  if (BODY.stall) return;
   BODY.stall = true; try { localStorage.setItem('on-body-stall', GPU_NAME); } catch {}
-  console.warn(`being: a body variant's compile held the frames ${gap.toFixed(0)} ms on ${GPU_NAME}; no more variants on this GPU`);
+  console.warn(`being: a body variant's compile held the frames ${gap.toFixed(0)} ms on ${GPU_NAME}; new variants only while asleep on this GPU`);
+}
+function bodyVariant(ids, key, now) {   // a variant with only these cases, compiled in the background
+  const v = { m: bodyMat(specialise(BODY_SRC, ids), {}), ids, ready: false, used: now }; BODY.v.set(key, v);
+  const sc = new THREE.Scene(); sc.add(new THREE.Mesh(bodyMesh.geometry, v.m));
+  BODY.compiling++; BODY.comp.add(key); const done = () => { bodyStallCheck(performance.now()); BODY.compiling--; BODY.comp.delete(key); };   // the freeze may end before the next frame
+  toScene(() => renderer.compileAsync(sc, camera)).then(() => { v.ready = true; done(); if (BODY.stall || BODY.warm.has(key)) bodyWarm(key, true); }, done);
+  if (BODY.v.size > 12) { let old = null; for (const [k, x] of BODY.v) if (x !== v && (!old || x.used < old[1].used)) old = [k, x]; old[1].m.dispose(); BODY.v.delete(old[0]); }
+  return v;
 }
 function bodyPick() {
   const now = performance.now();
-  if (BODY.compiling) bodyStallCheck(now); BODY.at = now;
+  if (BODY.compiling) bodyStallCheck(now); BODY.at = now; BODY.fall = false;
   if (window.__bodyFull) return BODY.full;
-  const ids = neededCases(U.uMid.value, U.uMw.value, U.uProp.value > .5);
+  if (BODY.stall && SLEEP.z >= .98 && U.uProp.value > .5 && !BODY.v.has(ELEMENTS_KEY) && !BODY.compiling) bodyVariant(ELEMENTS, ELEMENTS_KEY, now);   // asleep: ready the elements' variant
+  let ids = neededCases(U.uMid.value, U.uMw.value, U.uProp.value > .5);
   if (!ids.length) return BODY.lite;
+  if (BODY.stall && ids.every((id) => id <= 16)) ids = ELEMENTS;
   const key = ids.join(','); let v = BODY.v.get(key);
   if (!v || !v.ready) {   // a ready variant that carries every needed case draws the same picture
     let best = null;
     for (const x of BODY.v.values()) if (x.ready && ids.every((id) => x.ids.includes(id)) && (!best || x.ids.length < best.ids.length)) best = x;
     if (best) { best.used = now; return best.m; }
   }
-  if (!v && BODY.stall) return BODY.full;
-  if (!v) {
-    v = { m: bodyMat(specialise(BODY_SRC, ids), {}), ids, ready: false, used: 0 }; BODY.v.set(key, v);
-    const sc = new THREE.Scene(); sc.add(new THREE.Mesh(bodyMesh.geometry, v.m));
-    BODY.compiling++; const done = () => { bodyStallCheck(performance.now()); BODY.compiling--; };   // the freeze may end before the next frame
-    toScene(() => renderer.compileAsync(sc, camera)).then(() => { v.ready = true; done(); }, done);
-    if (BODY.v.size > 12) { let old = null; for (const [k, x] of BODY.v) if (x !== v && (!old || x.used < old[1].used)) old = [k, x]; old[1].m.dispose(); BODY.v.delete(old[0]); }
-  }
+  if (!v && BODY.stall && !BODY.warm.has(key) && SLEEP.z < .98) { BODY.fall = true; return BODY.lite; }
+  if (!v) v = bodyVariant(ids, key, now);
   v.used = now;
-  return v.ready ? v.m : BODY.full;
+  if (v.ready) return v.m;
+  if (BODY.stall) { BODY.fall = true; return BODY.lite; }
+  return BODY.full;
 }
-window.__bodyInfo = () => ({ stall: BODY.stall, variants: [...BODY.v].map(([k, v]) => k + (v.ready ? '' : ' (compiling)')), drawn: bodyMesh.material === BODY.full ? 'full' : bodyMesh.material === BODY.lite ? 'lite' : 'cases' });
+window.__bodyInfo = () => ({ stall: BODY.stall, fallback: BODY.fall, variants: [...BODY.v].map(([k, v]) => k + (v.ready ? '' : ' (compiling)')), drawn: bodyMesh.material === BODY.full ? 'full' : bodyMesh.material === BODY.lite ? 'lite' : 'cases' });
 /* ---------- feedback aura: an iterated image map around the creature (decay x warp of the previous frame + its glow) ---------- */
 let fbA = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }), fbB = fbA.clone();
 const FB = { uPrev: { value: null }, uScene: { value: null }, uZoom: { value: 1.006 }, uRot: { value: 0 }, uDecay: { value: .94 }, uGain: { value: .2 }, uTint: { value: new THREE.Color(1, 1, 1) }, uTime: { value: 0 }, uAspect: { value: 1 }, uWarp: { value: .002 },
@@ -286,9 +305,32 @@ const coScene = new THREE.Scene(); coScene.add(new THREE.Mesh(new THREE.PlaneGeo
 /* lab: GPU time per pass, only while window.__gpuT is set (being/page/gpu-timing.mjs) */
 const { GT, gpuTime, gpuPoll } = createGpuTiming(renderer);
 const FTM = createFrameTimer(renderer);   // the governor's GPU time per drawn frame (QUAL.gpu), for its rich rungs
+/* lab prototype, inert unless window.__layers is set ({ core, res, every, k }): an outer body drawn cheaply behind a smaller core
+   (the lite program, at res of the body's resolution, every 'every' frames), laid under the core's picture in sceneRT */
+const LAY = { rt: new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false }), scene: new THREE.Scene(), under: new THREE.Scene(), n: 0 };
+LAY.scene.add(new THREE.Mesh(bodyMesh.geometry, BODY.lite));
+LAY.uu = { uT: { value: LAY.rt.texture }, uK: { value: .6 } };
+LAY.under.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms: LAY.uu, depthTest: false, depthWrite: false, transparent: true,
+  blending: THREE.CustomBlending, blendSrc: THREE.OneMinusDstAlphaFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneMinusDstAlphaFactor, blendDstAlpha: THREE.OneFactor,
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
+  fragmentShader: 'precision highp float; varying vec2 vUv; uniform sampler2D uT; uniform float uK; void main(){ gl_FragColor = texture2D(uT, vUv) * uK; }' })));
 function renderBeing() {
+  const L = window.__layers, s0 = U.uScale.value;
+  if (L) {
+    if (LAY.n++ % (L.every || 1) === 0) {
+      const r0 = U.uRes.value.clone(), w = Math.max(2, Math.round(r0.x * (L.res || .5))), h = Math.max(2, Math.round(r0.y * (L.res || .5)));
+      if (LAY.rt.width !== w || LAY.rt.height !== h) LAY.rt.setSize(w, h);
+      U.uRes.value.set(w, h); U.uBound.value = bodyBound(U);
+      renderer.setRenderTarget(LAY.rt); renderer.render(LAY.scene, camera);   // (inside the 'body' timer: timer queries cannot nest)
+      U.uRes.value.copy(r0);
+    }
+    U.uScale.value = s0 * (L.core || .62); LAY.uu.uK.value = L.k ?? .6;
+  }
   U.uBound.value = bodyBound(U); bodyMesh.material = bodyPick();
+  const prop = U.uProp.value; if (BODY.fall) U.uProp.value = 0;   // the lite program standing in: the first shape with the first shading, not the proposed shape half shaded
   renderer.setRenderTarget(sceneRT); renderer.render(scene, camera);
+  if (L) { renderer.render(LAY.under, camera); U.uScale.value = s0; }
+  U.uProp.value = prop;
   FB.uPrev.value = fbA.texture; FB.uScene.value = sceneRT.texture;
   renderer.setRenderTarget(fbB); renderer.render(fbScene, camera);
   const t = fbA; fbA = fbB; fbB = t;
@@ -391,6 +433,8 @@ window.__timingInfo = () => ({ bias: +timing.bias.toFixed(3), errMs: +timing.err
 async function saveSong(withPicture = true) {
   if (!MEM.ready || !MEM.key || !MEM.song || MEM.song.experience < 5) return;
   if (MEM.meta && timing.evidence > 16) { MEM.meta.groove = timing.serialize(); if (mind.lock > .4) MEM.meta.bpm = mind.pulseHz * 60; }
+  if (MEM.meta && MIRROR.on) { MEM.meta.mirror = MIR.songState();   // its way of moving to this song
+    if (CHO.secs.length >= 3) MEM.meta.sections = CHO.secs.slice(); if (CHO.drops.length) MEM.meta.drops = CHO.drops.slice(); }
   if (MEM.meta) { MEM.meta.love = b64(VOICE.love); MEM.meta.chroma = Array.from(VOICE.chroma, (x) => +x.toFixed(3)); }
   const d = MEM.song.serialize(); d.meta = { ...d.meta, ...MEM.meta, experience: MEM.song.experience, lastHeard: Date.now() };
   await pet.memorySave(SEED, MEM.key, d, withPicture ? songPng() : null);   // a canvas drawn while the page closes comes out blank
@@ -484,9 +528,11 @@ async function onTrack(t) {
   let prior = null; try { prior = JSON.parse(localStorage.getItem('being-groove-' + SEED) || 'null'); } catch {}
   timing.reset(prior);
   MEM.key = t.key;
+  MIR.newSong(keyHash(t.key)); PLACE.ring.fill(-1); PLACE.cur = -1; Object.assign(SECT, { list: [], cur: -1, at: -1e9, known: false, kh: keyHash(t.key) | 1 });
+  Object.assign(CHO, { t0: Math.max(0, an.total - Math.round(LATM.delay * 48)) / SR, secs: [], drops: [], known: [], knownDrops: [], match: 0 });
   VOICE.love.fill(0); VOICE.chroma.fill(0); voice.interrupt();
   MORPH.xf = { from: MORPH.cur, at: beingClock.t };   // the skin of the last song melts into the next one's over 2.5 s
-  MORPH.song = null; MORPH.evolved = null; MORPH.floor = 0; MORPH.sec = 0; MORPH.cellN = 0; MORPH.vary = 0;
+  MORPH.song = null; MORPH.evolved = null; MORPH.floor = 0; MORPH.sec = 0; MORPH.cellN = 0; MORPH.vary = 0; laceNew();
   MORPH.dna = mutate(dnaGenome(SEED), keyHash(t.key), .35);   // its own skin, but each song starts from a different variant of it
   if (pressure.gather()) beadsOff();   // back toward its own skin until it knows this song
   const stored = await pet.memoryLoad(SEED, t.key);
@@ -499,6 +545,8 @@ async function onTrack(t) {
     if (stored.meta.lenia) applySpecies(stored.meta.lenia);
     if (validGenome(stored.meta.morph)) { MORPH.song = stored.meta.morph; MORPH.floor = .8; }
     if (stored.meta.groove) timing.recall(stored.meta.groove);
+    MIR.recall(stored.meta.mirror);
+    if (Array.isArray(stored.meta.sections)) CHO.known = stored.meta.sections.filter(Number.isFinite); if (Array.isArray(stored.meta.drops)) CHO.knownDrops = stored.meta.drops.filter(Number.isFinite);
     if (typeof stored.meta.love === 'string') { try { const l = unb64(stored.meta.love); if (l.length === NU && l.every(Number.isFinite)) VOICE.love.set(l); } catch {} }
     if (Array.isArray(stored.meta.chroma) && stored.meta.chroma.length === 12) VOICE.chroma.set(stored.meta.chroma.map((x) => +x || 0));
     if (Number.isFinite(stored.meta.bpm)) mind.prime(stored.meta.bpm / 60);
@@ -526,6 +574,7 @@ function memoryHear(e) {
     featureOf(frame, MEM.feat);
     MEM.song.learn(MEM.feat, .1); MEM.general.learn(MEM.feat, .1);
     const b = MEM.song.bmu;
+    if (b >= 0) { PLACE.ring[PLACE.n++ % PLACE.ring.length] = placeOf(b); }
     loveUpdate(VOICE.love, b, Math.max(0, mind.daPhasic) + .5 * Math.max(0, mind.valence));   // what it liked, where on its map
     for (let i = 0; i < 12; i++) VOICE.chroma[i] += .004 * (mind.pitch[i] - VOICE.chroma[i]);
     if (b >= 0 && Math.random() < .25 + .5 * a.onset) skin.seedAt((b % MW + .5) / MW, (((b / MW) | 0) + .5) / MH, .6 + .4 * Math.min(1, a.onset), .7 + .5 * Math.min(1, a.onset));
@@ -559,6 +608,115 @@ const timing = createTiming({ prior: (() => { try { return JSON.parse(localStora
 try { timing.restoreSelf(JSON.parse(localStorage.getItem('being-timing-' + SEED) || 'null')); } catch {}
 const saveTiming = () => { try { localStorage.setItem('being-timing-' + SEED, JSON.stringify(timing.serializeSelf())); } catch {} };
 setInterval(saveTiming, 20000); addEventListener('beforeunload', saveTiming);
+/* ---------- following the sound (being/mirror.mjs, being/clock.mjs) ----------
+   The mirror is the body's fast layer: each channel against the song's own range drives damped springs (a kick in
+   the size and shell, a snare in a squash, hats in the spikes, loudness in size and glow, brightness in sharpness, the
+   pulse with a wind-up before each beat), styled by Laban-like movement qualities the song and the feeling set, and
+   mapped onto the body's regions in the being's own way (varied per song, re-mapped by boredom at phrase boundaries,
+   kept with the song). The clock gives the mind one beat (the rhythm organ when it is sure, the analyzer only where
+   it agrees) and the body a trust in it that needs drums to keep coming. MIRROR.on false (localStorage on-mirror '0',
+   the dashboard's Look switch, window.__mirror(false)) is exactly the page as before. */
+/* the drums, each its own layer: every heard kick, snare and hat starts a wave over the skin from where that instrument lives
+   in the body (MIR.map, the being's own body map varied per song), kicks wide, deep and slow, snares a sharp quick crest, hats
+   a fine shiver (hitAt() in the body shader). Three slots for kicks, two for snares, three for hats, so the fast hats never
+   cut a kick short. Gated by awake, sleep, beads and Calm. */
+const HITW = { slot: { kick: [0, 1, 2], snare: [3, 4], hat: [5, 6, 7] }, next: { kick: 0, snare: 0, hat: 0 }, live: 0 };
+const REGION_DIR = (g) => new THREE.Vector3((g & 1) * 2 - 1, ((g >> 1) & 1) * 2 - 1, (g >> 2) * 2 - 1).normalize();
+function hitWave(type, s) {
+  const sl = HITW.slot[type]; if (!sl) return;
+  const i = sl[HITW.next[type]++ % sl.length], reg = (MIR.map && Number.isInteger(MIR.map[type])) ? MIR.map[type] : { kick: 0, snare: 5, hat: 3 }[type];
+  const spread = type === 'kick' ? .25 : type === 'snare' ? .45 : .8, j = () => new THREE.Vector3(Math.random() - .5, Math.random() - .5, Math.random() - .5);
+  const off = motifOn() && SHOW.gate > .2 ? withSeed(motifSeed({ kick: 1, snare: 2, hat: 3 }[type], true), j) : j();   // following: a drum on the same slot of the bar starts from the same spot
+  const d = REGION_DIR(reg).add(off.multiplyScalar(spread)).normalize();
+  U.uHw.value[i].set(d.x, d.y, d.z, 0); U.uHs.value[i].set(type === 'kick' ? 0 : type === 'snare' ? 1 : 2, Math.min(1.3, .35 + .9 * s), 0, 0);
+}
+function hitFrame(dt) {
+  let a = 0;
+  for (let i = 0; i < 8; i++) { const w = U.uHw.value[i], h = U.uHs.value[i]; w.w += dt; if (w.w > (h.x < .5 ? 1.6 : h.x < 1.5 ? 1 : .6)) h.y = 0; a = Math.max(a, h.y); }
+  U.uHitA.value = a > 0 ? S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * BOUNCE.k * (.55 + .45 * (S.fe ?? .3)) * (MIRROR.on ? Math.min(1.6, Math.sqrt(MIRROR.gain)) : 1) : 0;   // the gate scales the whole layer
+}
+// gain: how strongly the body follows (0.5..3, localStorage on-mirror-gain, the dashboard's Look slider); at 1 the mirror's own amplitudes
+const MIRROR = { on: (() => { try { return localStorage.getItem('on-mirror') !== '0'; } catch { return true; } })(),
+  gain: (() => { try { const g = parseFloat(localStorage.getItem('on-mirror-gain')); return Number.isFinite(g) ? THREE.MathUtils.clamp(g, .5, 3) : 1.8; } catch { return 1.8; } })() };
+const MIR = createMirror(SEED), CLK = createClock();
+/* repetition: the same figure, the same move. A section is known by what it sounds like: its fingerprint is where the music sat on
+   the song's map over the last ~4 s (PLACE.ring as a share of each of the 18 places); one that matches a section this song already
+   played (cosine >= .8) is that section again. Following the sound, the body's gestures are drawn from the section and the slot in
+   the bar, not from chance: the form at a section, a drop and the slow re-forms (seededReseed), satellite and tendril paths at a
+   chord (by the chord), the drops' directions and each drum wave's start (by the 16th it falls on), and the instruments' places in
+   the body (MIR's map, kept per section, no boredom remaps inside a section it has played before). So a riff that pops right then
+   left does so every time it returns; the fractals, colours and the rest still change around it. */
+const SECT = { list: [], cur: -1, at: -1e9, known: false, kh: 0, slot: -1, nth: 0 };
+const motifOn = () => MIRROR.on && SECT.kh !== 0;
+const slotNow = () => ((Math.floor(SHOW.slot + .5) % 16) + 16) % 16;
+function motifSeed(salt, bySlot) { return (SECT.kh ^ Math.imul(SECT.cur + 2, 0x9E3779B1) ^ Math.imul((bySlot ? slotNow() : 16) + 1, 0x85EBCA6B) ^ Math.imul(salt + 1, 0xC2B2AE35)) >>> 0; }
+function withSeed(seed, fn) { const r0 = Math.random; Math.random = mulberry(seed); try { return fn(); } finally { Math.random = r0; } }
+function sectNow() {   // the section playing now: a known one, or a new one (at most 16 per song; then the nearest)
+  const now = performance.now(); if (now - SECT.at < 500) return SECT.cur; SECT.at = now;
+  const h = new Float32Array(18); let n = 0; for (const p of PLACE.ring) if (p >= 0) { h[p]++; n++; }
+  if (n < 10) return SECT.cur;
+  let hn = 0; for (let j = 0; j < 18; j++) { h[j] /= n; hn += h[j] * h[j]; }
+  let best = -1, bs = -1;
+  SECT.list.forEach((s, i) => { let d = 0, sn = 0; for (let j = 0; j < 18; j++) { d += h[j] * s.h[j]; sn += s.h[j] * s.h[j]; } const c = d / Math.sqrt(hn * sn + 1e-12); if (c > bs) { bs = c; best = i; } });
+  if (best >= 0 && (bs >= .8 || SECT.list.length >= 16)) { const s = SECT.list[best]; for (let j = 0; j < 18; j++) s.h[j] += .3 * (h[j] - s.h[j]); return best; }
+  return SECT.list.push({ h, n: 0, map: null }) - 1;
+}
+function sectEnter(id) {   // the instruments go back to where they lived the last time this section played
+  if (id < 0 || id === SECT.cur) return;
+  const prev = SECT.list[SECT.cur]; if (prev) prev.map = MIR.map;
+  const s = SECT.list[id]; SECT.cur = id; SECT.known = s.n++ > 0;
+  if (s.map) MIR.recall({ map: s.map });
+}
+/* choreography memory: a song remembers when its sections and drops came (s from its start, meta.sections /
+   meta.drops). On a return listen, once two of this listen's section changes land within 1.5 s of remembered ones (so a
+   seek or another version does not fool it), it gathers itself over the 4 s before each drop it remembers; at a drop,
+   recognition or chills it plays its signature move (MIR.signature, kept with the song in meta.mirror). */
+const CHO = { t0: 0, secs: [], drops: [], known: [], knownDrops: [], match: 0 };
+const choNow = () => Math.max(0, an.total - Math.round(LATM.delay * 48)) / SR - CHO.t0;
+function choSection(t) {
+  const ts = t - CHO.t0; if (!(ts > 0) || CHO.secs.length > 40) return;
+  CHO.secs.push(+ts.toFixed(2));
+  if (CHO.known.some((k) => Math.abs(k - ts) < 1.5)) CHO.match++;
+}
+function choAnticip() {
+  if (CHO.match < 2 || !CHO.knownDrops.length) return 0;
+  const ts = choNow(); let a = 0;
+  for (const d of CHO.knownDrops) { const u = d - ts; if (u > 0 && u < 4) a = Math.max(a, 1 - sm(.3, 4, u)); }
+  return a;
+}
+function setMirror(v) { MIRROR.on = !!v; try { localStorage.setItem('on-mirror', MIRROR.on ? '1' : '0'); } catch {} }
+function setMirrorGain(v) { if (!Number.isFinite(+v)) return; MIRROR.gain = THREE.MathUtils.clamp(+v, .5, 3); try { localStorage.setItem('on-mirror-gain', String(MIRROR.gain)); } catch {} }
+function clockStep(dt) {   // the beat the mind follows: at the analysed time, on the organ's own clock
+  const r = RHY.r, ta = Math.max(0, an.total - Math.round(LATM.delay * 48)) / SR;
+  const organ = r && beatOrgan ? { fresh: performance.now() - RHY.at < 4000, confidence: r.confidence, period: r.period, lastBeat: r.lastBeat, t: beatOrgan.audioEnd - LATM.delay / 1000 } : null;
+  return CLK.step(dt, { an: an.state.beat, organ, lock: mind.lock, sinceDrum: ta - Math.max(LASTHIT.kick, LASTHIT.snare) });
+}
+function mirrorFrame(dt, st) {
+  if (!MIRROR.on) return;
+  const e = earFrame;
+  MIR.step(dt, { level: st.level, centroid: st.centroid, bass: st.bass, lead: st.lead, rough: e ? e.rough : 0, intensity: an.state.intensity,
+    beat: { count: SHOW.count, phase: SHOW.phase, hz: mind.pulseHz, trust: CLK.trust }, char: CHR, feel: { arousal: mind.arousal, valence: mind.valence, bored: mind.bored, flow: Q.flow, drift: Q.drift, mood: ML.brain ? { ...ML.brain.moods, dance: ML.brain.dance } : null },
+    gate: S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - EXT.lead) * (1 - .7 * VOX.listen), bounce: BOUNCE.k, metric: 1 - ORGD.R, anticip: choAnticip(),
+    poise: LIFE.poise && MEM.song ? c01(MEM.song.experience / 600) * timing.readiness * (1 - mind.confused) : 0, hold: SECT.known });   // ~3 listens to know a song
+  if (motifOn() && SECT.cur < 0) sectEnter(sectNow());   // the song's opening is a section too
+}
+// the mirror's glow moves around the glow's own level instead of adding to it: hits and loud passages flash against the recent
+// average (~4 s), at most +50% and -30%, so following the sound never washes the body out to a ball of light
+const MIRG = { avg: 0 };
+function mirGlow(dt) { const g = MIR.out.glow; MIRG.avg += (g - MIRG.avg) * (1 - Math.exp(-dt / 4)); return 1 + THREE.MathUtils.clamp(g - MIRG.avg, -.3, .5); }
+function mirrorApply() {   // after the dance's easing, so the accents are not smeared (danceFrame)
+  if (!MIRROR.on) return;
+  const o = MIR.out, G = MIRROR.gain, sc = U.uScale.value * (1 + G * o.size * T.pulse);
+  U.uScale.value = sc <= 1.06 ? sc : 1.06 + .16 * Math.tanh((sc - 1.06) / .16);   // never outgrows the window
+  U.uWide.value = THREE.MathUtils.clamp(U.uWide.value + G * o.squash, -.3, .6);
+  U.uShift.value.y += G * o.dip; U.uShift.value.x += G * o.sway * T.sway;
+  if (look.fx.spikes) U.uSpikes.value += G * o.spikes * T.spikes;
+  U.uShellR.value *= 1 + G * o.shell * T.jolt;
+  U.uCrisp.value = c01(U.uCrisp.value + o.crisp * .5);
+  S.stepT += o.twist * .02 * BOUNCE.k;   // the signature's turn (S.step eases toward it)
+}
+window.__mirror = (v) => { if (v && typeof v === 'object') { if ('gain' in v) setMirrorGain(v.gain); if ('on' in v) setMirror(v.on); } else if (v !== undefined) setMirror(v); const o = MIR.out; return { on: MIRROR.on, gain: MIRROR.gain, trust: +CLK.trust.toFixed(2), perc: +CLK.perc.toFixed(2), agree: +CLK.agree.toFixed(2), source: CLK.beat.source, bpm: +CLK.beat.bpm.toFixed(1), conf: +CLK.beat.confidence.toFixed(2),
+  style: Object.fromEntries(Object.entries(MIR.style).map(([k, x]) => [k, +x.toFixed(2)])), map: MIR.map, size: +o.size.toFixed(3), squash: +o.squash.toFixed(3), surge: +o.surge.toFixed(2), swell: +o.swell.toFixed(2) }; };   // lab
 // the shown pulse: the being's grid (16 slots = 4 felt beats) at the moment the listener hears this frame
 const SHOW = { phase: 0, count: 0, slot: 0, prev: null, gate: 0 };
 const GH = { ta: new Float64Array(64), cum: new Float64Array(64), n: 0 };   // recent (heard audio time, grid position)
@@ -591,7 +749,7 @@ function beOnTime(dt, f0) {
     if (SHOW.gate > .05 && S.awake > .3) for (const h of timing.predict(SHOW.prev, shown, PRED)) {
       if (ta - LASTHIT[h.type] > 2.5 * 60 / Math.max(40, mind.pulseHz * 60)) continue;   // a breakdown: the drum has gone quiet, do not hallucinate it
       const mix = h.type === 'kick' ? T.mixKick : h.type === 'snare' ? T.mixSnare : T.mixHat;
-      if (mix > 0) { drumHit(h.type, Math.max(.2, Math.min(1, h.strength * SHOW.gate * mix)), true); if (window.__hc) window.__hc['p' + h.type]++; }
+      if (mix > 0) { drumHit(h.type, Math.max(.2, Math.min(1, h.strength * SHOW.gate * mix)), true); if (MIRROR.on) MIR.hit(h.type, h.strength * mix, true); if (window.__hc) window.__hc['p' + h.type]++; }
     }
     if (Math.floor(shown / 4) > Math.floor(SHOW.prev / 4)) beatShown(f0 + disp);   // tap calibration compares taps with SEEN beats
   }
@@ -650,6 +808,7 @@ function beingEvents(evs) {
     if (e.type === 'startle') {
       const a = e.amount; B.flinch = Math.max(B.flinch, a); V.kick = Math.max(V.kick, a); if (a > .45) S.ring = 0;
       for (let k = 0, n = Math.round(a * 7); k < n; k++) spawnDrop(.045 + .045 * a);
+      if (a > .6 && BOLT.e > .2) boltBurst(1, a);
       S.jit.x += (Math.random() - .5) * a * .5; S.jit.y += (Math.random() - .5) * a * .5; S.jit.z += (Math.random() - .5) * a * .5;
       beingWorker.postMessage({ type: 'kick', amount: a }); CELLAB?.moment('startle', a);
       blog.unshift('startled ' + a.toFixed(2));
@@ -780,8 +939,8 @@ pet.onReseed(() => newForm());
 const MOT = { on: false, scale: 1, shell: 0, spikes: 0, chaos: 0, kick: 0, sx: 0, sy: 0, D: 0 };
 function ease(cur, to, dt, up, down) { return cur + (to - cur) * (1 - Math.exp(-dt / (to > cur ? up : down))); }
 function danceFrame(dt) {
-  const D = BOUNCE.k * c01((mind.lock - .25) / .5) * (.35 + .65 * mind.groove) * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);   // listening to a voice, or led by something other than the music: no dance
-  MOT.D = ease(MOT.D, D, dt, .6, 1.2);
+  const D = BOUNCE.k * (MIRROR.on ? c01((CLK.trust - .1) / .5) * 1.8 : c01((mind.lock - .25) / .5)) * (.35 + .65 * mind.groove) * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);   // listening to a voice, or led by something other than the music: no dance
+  MOT.D = ease(MOT.D, D * (.15 + .85 * sm(.1, .5, S.fe ?? .3)), dt, .6, 1.2);   // calm music sways a little, however sure the beat (a piano's bass notes read as kicks)
   const ph = SHOW.phase, beat = .5 + .5 * Math.cos(2 * Math.PI * ph), kM = 1 - ORGD.R;   // the organism's dance replaces this one by ORGD.R (0: unchanged)
   U.uShift.value.y += -.011 * MOT.D * beat * beat * kM;                               // a dip on the beat
   U.uShift.value.x += .016 * MOT.D * Math.sin(Math.PI * (SHOW.count + ph)) * kM;       // a sway every two beats
@@ -798,6 +957,7 @@ function danceFrame(dt) {
   MOT.chaos = ease(MOT.chaos, U.uChaos.value, dt, .15, .45); U.uChaos.value = MOT.chaos;
   MOT.kick = ease(MOT.kick, U.uKick.value, dt, .03, .18); U.uKick.value = MOT.kick;
   MOT.sx = ease(MOT.sx, U.uShift.value.x, dt, .08, .16); MOT.sy = ease(MOT.sy, U.uShift.value.y, dt, .08, .16); U.uShift.value.set(MOT.sx, MOT.sy);
+  mirrorApply();
   regionFrame(dt);
 }
 /* the motor population's regions (mind.regions, being/kuramoto.mjs): each region of the body swells on its own pulse,
@@ -808,8 +968,8 @@ function regionFrame(dt) {
   const R = mind.regions; if (!R) return;
   let mean = 0;
   const kO = ORGD.A;   // the organism's regions replace the mind's by ORGD.A and swell up to twice as much (0: unchanged)
-  for (let g = 0; g < 8; g++) { const ph = SHOW.phase + R.phase[g], fr = ph - Math.floor(ph); REG.p[g] = Math.pow(1 - fr, 3) * R.coh[g]; if (kO > 0) REG.p[g] += (ORGD.v.reg[g] - REG.p[g]) * kO; mean += REG.p[g] / 8; }
-  const want = (window.__regionsA ?? .06) * (1 + kO) * BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);
+  for (let g = 0; g < 8; g++) { const ph = SHOW.phase + R.phase[g], fr = ph - Math.floor(ph); REG.p[g] = Math.pow(1 - fr, 3) * R.coh[g] + (MIRROR.on ? .6 * MIRROR.gain * MIR.out.regions[g] : 0); if (kO > 0) REG.p[g] += (ORGD.v.reg[g] - REG.p[g]) * kO; mean += REG.p[g] / 8; }
+  const want = ((window.__regionsA ?? .06) + (MIRROR.on ? .04 : 0)) * (1 + kO) * BOUNCE.k * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - VOX.listen) * (1 - EXT.lead);
   REG.a = ease(REG.a, want, dt, .5, .8); U.uRegA.value = REG.a;
   for (let g = 0; g < 8; g++) U.uRegP.value[g] = REG.p[g] - mean;
 }
@@ -1052,7 +1212,7 @@ function placeTendrils(dt, lead) {
 }
 
 /* ---------- falling drops: metal arriving from every direction, coalescing into the mass ---------- */
-const D = { p: new Float32Array(ND * 3), v: new Float32Array(ND * 3), r: new Float32Array(ND), a: new Uint8Array(ND), sh: new Uint8Array(ND), age: new Float32Array(ND) };
+const D = { p: new Float32Array(ND * 3), v: new Float32Array(ND * 3), r: new Float32Array(ND), a: new Uint8Array(ND), sh: new Uint8Array(ND), age: new Float32Array(ND), nm: new Float32Array(ND) };   // nm: time left before a split pair may join again
 const R_SHELL = .36;
 function hitDrop(size) {   // a drop launched by a hit, scaled by the Amount slider (0 = none, 2 = two)
   let n = T.drops * (.6 + .9 * Q.den); while (n >= 1) { spawnDrop(size); n--; } if (Math.random() < n) spawnDrop(size);
@@ -1061,12 +1221,34 @@ function spawnShard(size) { spawnDrop(size, true); }   // fracture: a faceted sh
 function spawnDrop(size, shard) {
   let k = -1, best = 1e9;
   for (let i = 0; i < ND; i++) { if (!D.a[i]) { k = i; break; } const r = Math.hypot(D.p[3 * i], D.p[3 * i + 1], D.p[3 * i + 2]); if (r < best) { best = r; k = i; } }
-  randUnit(dir); if (S.biasAmt) { dir.addScaledVector(S.bias, S.biasAmt * 2).normalize(); }
+  if (motifOn() && SHOW.gate > .2) { const sl = slotNow(); if (sl !== SECT.slot) { SECT.slot = sl; SECT.nth = 0; } withSeed(motifSeed(0x400 + (SECT.nth++ & 31) + (shard ? 64 : 0), true), () => randUnit(dir)); }   // following: the same 16th of the bar, the same places
+  else randUnit(dir);
+  if (S.biasAmt) { dir.addScaledVector(S.bias, S.biasAmt * 2).normalize(); }
   if (S.spawnPan) dir.x += S.spawnPan * 3.4 * T.pan;   // drops gather on the side the sound came from
   dir.y += THREE.MathUtils.clamp(S.high * 5, -.8, .8) * T.height; dir.normalize();   // and lean up for bright sound, down for dark
   const rad = shard ? .5 + Math.random() * .08 : 1 + Math.random() * .2;
   D.p[3 * k] = dir.x * rad; D.p[3 * k + 1] = dir.y * rad; D.p[3 * k + 2] = dir.z * rad;
-  D.v[3 * k] = D.v[3 * k + 1] = D.v[3 * k + 2] = 0; D.r[k] = size * T.dropSize; D.a[k] = 1; D.sh[k] = shard ? 1 : 0; D.age[k] = 0;
+  D.v[3 * k] = D.v[3 * k + 1] = D.v[3 * k + 2] = 0; D.r[k] = size * T.dropSize; D.a[k] = 1; D.sh[k] = shard ? 1 : 0; D.age[k] = 0; D.nm[k] = 0;
+}
+/* mercury: a hard hit splits the biggest drops in two (volume kept, each r / cbrt 2); the halves fly apart sideways, stretched
+   on a neck (the body shader's smooth union between drops), and once the push has eased (~0.35 s) the capillary pull in
+   stepDrops brings them back together and they merge again. Following the sound, the split's direction comes from the slot
+   in the bar, so a figure that returns splits the same way. LIFE.mercury off: no splits, no spiral (the page as before). */
+const SPLIT = new THREE.Vector3(), RAD = new THREE.Vector3();
+function splitDrops(s) {
+  if (!LIFE.mercury) return;
+  const quick = MAT.m.shown[15] || 0;   // quicksilver splits more readily
+  for (let n = s > .75 || quick > .3 ? 2 : 1; n > 0; n--) {
+    let i = -1, j = -1, br = .028 - .01 * quick;
+    for (let k = 0; k < ND; k++) { if (D.a[k] && !D.sh[k] && D.nm[k] <= 0 && D.r[k] > br) { br = D.r[k]; i = k; } if (!D.a[k] && j < 0) j = k; }
+    if (i < 0 || j < 0) return;
+    RAD.set(D.p[3 * i], D.p[3 * i + 1], D.p[3 * i + 2]).normalize();
+    if (motifOn() && SHOW.gate > .2) withSeed(motifSeed(0x600 + n, true), () => randUnit(SPLIT)); else randUnit(SPLIT);
+    SPLIT.addScaledVector(RAD, -SPLIT.dot(RAD)).normalize();   // sideways, along the skin
+    const r = D.r[i] / Math.cbrt(2), sp = (.45 + .7 * s) * (1 + .6 * quick);
+    for (let a = 0; a < 3; a++) { D.p[3 * j + a] = D.p[3 * i + a]; D.v[3 * j + a] = D.v[3 * i + a] - SPLIT.getComponent(a) * sp; D.v[3 * i + a] += SPLIT.getComponent(a) * sp; }
+    D.r[i] = D.r[j] = r; D.a[j] = 1; D.sh[j] = 0; D.age[j] = D.age[i]; D.nm[i] = D.nm[j] = .35;
+  }
 }
 let dropsAlive = 0;
 function stepDrops(dt, tension, energy, bpm) {
@@ -1087,7 +1269,7 @@ function stepDrops(dt, tension, energy, bpm) {
       const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 < .055 && d2 > 1e-7) {
         const dist = Math.sqrt(d2), rj = D.r[j], touch = (ri + rj) * 1.12;
-        if (dist < touch && !D.sh[i] && !D.sh[j]) {
+        if (dist < touch && !D.sh[i] && !D.sh[j] && D.nm[i] <= 0 && D.nm[j] <= 0) {
           const m1 = ri * ri * ri, m2 = rj * rj * rj, mTot = m1 + m2;
           D.p[3 * i] = (xi * m1 + D.p[3 * j] * m2) / mTot;
           D.p[3 * i + 1] = (yi * m1 + D.p[3 * j + 1] * m2) / mTot;
@@ -1109,12 +1291,15 @@ function stepDrops(dt, tension, energy, bpm) {
   for (let i = 0; i < ND; i++) {
     const w = U.uD.value[i];
     if (!D.a[i]) { w.w = 0; continue; }
+    if (D.nm[i] > 0) D.nm[i] -= dt;
     if (over > 0 || D.age[i] > 7) { D.r[i] *= evap; if (over > 0) over--; if (D.r[i] < .006) { D.a[i] = 0; w.w = 0; continue; } }
     let px = D.p[3 * i], py = D.p[3 * i + 1], pz = D.p[3 * i + 2];
     const r = Math.hypot(px, py, pz) + 1e-5, ir = 1 / r;
     let tx = ay * pz - az * py, ty = az * px - ax * pz, tz = ax * py - ay * px; const il = 1 / (Math.hypot(tx, ty, tz) + 1e-4);
     D.age[i] += dt;
-    const vin = base * hold * (1 + Math.max(0, 1.2 - r) * 1.3) - (tension > .4 && r < 1 ? (1 - r) * tension * 1.2 : 0) - (D.sh[i] ? 2.6 * Math.max(0, 1 - D.age[i] / .4) : 0), sp = sw * 1 * (S.awake > .2 ? 1 : .3);
+    const vin = base * hold * (1 + Math.max(0, 1.2 - r) * 1.3) - (tension > .4 && r < 1 ? (1 - r) * tension * 1.2 : 0) - (D.sh[i] ? 2.6 * Math.max(0, 1 - D.age[i] / .4) : 0);
+    // the spiral: a vortex round the body's axis, faster nearer the body (as water round a drain), with the energy, surging on the beat
+    const sp = sw * (S.awake > .2 ? 1 : .3) + (LIFE.mercury ? (S.swirl < 0 ? -1 : 1) * (.08 + .3 * ENG.base) * (MIRROR.on ? MIR.out.surge : 1) * S.awake / Math.max(.45, r) : 0);
     D.v[3 * i] += (-px * ir * vin + tx * il * sp + slX - D.v[3 * i]) * ease;
     D.v[3 * i + 1] += (-py * ir * vin + ty * il * sp + slY - D.v[3 * i + 1]) * ease;
     D.v[3 * i + 2] += (-pz * ir * vin + tz * il * sp + slZ - D.v[3 * i + 2]) * ease;
@@ -1163,7 +1348,9 @@ function handleEvents(evs, now) {
         if (Number.isFinite(e.time)) LASTHIT[e.type] = Math.max(LASTHIT[e.type], e.time);
         const ex = timing.observe(e.type, e.strength || .6, gridAt(e.time), 250 / Math.max(.3, mind.pulseHz)) * SHOW.gate;
         if (ex < .5) drumHit(e.type, s * (1 - ex), live);
-        if (live) CELLAB?.hit(e.type, s, ex > .5);   // the automata are fed as the tissue is: predicted hits in one place, surprises scattered
+        if (live && MIRROR.on) MIR.hit(e.type, (e.strength || .6) * gain, false);   // the body plays what is played: a predicted hit only tops up
+        if (live) CELLAB?.hit(e.type, s, ex > .5);
+        if (live) { hitWave(e.type, (e.strength || .6) * gain); boltHit(e.type, s); if (e.type !== 'hat' && s > .55 && dropsAlive) splitDrops(s); }   // the automata are fed as the tissue is: predicted hits in one place, surprises scattered
         // closed loop (tissue.mjs, lab E11): while it is trying to be on time, a hit it predicted reaches its tissue as the
         // same stamp every time, a hit that surprised it as noise
         if (SHOW.gate > .15 && live) beingWorker.postMessage(ex > .5 ? { type: 'feedback', kind: 'pattern', band: e.type === 'kick' ? 0 : e.type === 'snare' ? 1 : 2, amount: Math.min(1, .4 + .6 * s) } : { type: 'feedback', kind: 'noise', amount: Math.min(1, .4 + .6 * s) });
@@ -1172,12 +1359,13 @@ function handleEvents(evs, now) {
       }
       case 'build': S.flash = 'BUILD'; S.flashT = now; break;
       case 'drop':
-        B.dropNow = true; glitchHit(1); riseMoment(1.5); journeyMoment(1.5);
-        S.drop = 1; S.rush = 1; S.ring = 0; S.ring2 = -.28; V.kick = 1; S.flash = 'DROP'; S.flashT = now; reseed(true);
+        B.dropNow = true; glitchHit(1); if (MIRROR.on) { MIR.signature(1); const td = (Number.isFinite(e.time) ? e.time : an.total / SR) - CHO.t0; if (td > 0 && CHO.drops.length < 12) CHO.drops.push(+td.toFixed(2)); } riseMoment(1.5); journeyMoment(1.5);
+        S.drop = 1; S.rush = 1; S.ring = 0; S.ring2 = -.28; V.kick = 1; S.flash = 'DROP'; S.flashT = now; if (motifOn()) seededReseed(motifSeed(0xD20)); else reseed(true);
         flourish(mind.daPhasic > .6 ? 'star' : 'glint', 1); flourish('glisten', .8); particles.burst('spark', 24, U.uShellR.value);
+        if (BOLT.e > .25) boltBurst(1 + Math.round(3 * BOLT.e), 1);
         if (live) for (let k = 0, nb = Math.round(11 * T.burst); k < nb; k++) spawnDrop(.06 + Math.random() * .05);
         break;
-      case 'section': morphSection(); glitchHit(.6); riseMoment(1); if (!hadDrop && now - S.flashT > 300) { S.hueTo += .15; reseed(true); S.flash = 'SECT ' + (an.state.structure.section | 0); S.flashT = now; } break;
+      case 'section': if (motifOn()) sectEnter(sectNow()); MIR.sectionMoment(); if (Number.isFinite(e.time)) choSection(e.time); morphSection(); glitchHit(.6); riseMoment(1); if (!hadDrop && now - S.flashT > 300) { S.hueTo += .15; if (motifOn()) seededReseed(motifSeed(0x5EC)); else reseed(true); S.flash = 'SECT ' + (an.state.structure.section | 0); S.flashT = now; } break;
     }
   }
 }
@@ -1206,7 +1394,7 @@ const vib = { v: 0 };
 const LOBE_R = new Float32Array(12), LOBE_V = new Float32Array(12), LOBE_W = new Float32Array(12);
 function placeLobes(dt, t, st, kickV) {
   const TN = S.tension, notes = st.notes, bass = st.bass, shellR = U.uShellR.value;
-  S.spin += dt * (.02 + S.xc * .75 + TN * .6) * T.spin * (1 - .35 * Q.flow) * (.8 + .5 * Q.den);
+  S.spin += dt * (.02 + S.xc * .75 + TN * .6) * T.spin * (1 - .35 * Q.flow) * (.8 + .5 * Q.den) * (MIRROR.on ? MIR.out.surge : 1);   // following: it turns on the beat and coasts between
   S.flowRot += dt * Q.drift * (.06 + .05 * Math.sin(t * .23));
   S.jit.multiplyScalar(Math.exp(-dt * 3));
   S.jitS = S.jitS || new THREE.Vector3(); S.jitS.lerp(S.jit, 1 - Math.exp(-dt / .22));   // jolts arrive as an eased lean, not a shake
@@ -1260,9 +1448,19 @@ const SP = { lo: 0, hi: 0, all: 0, wd: 0 };
 /* the channel mix and response sliders, applied once to a reusable copy of the engine state */
 const MIX = { level: 0, centroid: 0, energy: 0, intensity: 0, bass: 0, lead: 0, pads: 0, voice: 0, notes: new Float32Array(12), drums: { kick: 0, snare: 0, hat: 0 }, beat: null, structure: null };
 const c01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+/* how intense the music is, on one scale shared by all songs: the music's perceived arousal (the emoMusic / DEAM heads,
+   trained on human ratings: a noise wall ~.8, a soft filtered piano ~.3, a choir ~.2), read fresh and eased ~1 s, the mind's
+   arousal while the model has not spoken. The analyzer's intensity is relative to the song's own level (a steady passage of
+   any mastered track reads ~.8), so it only moves the body within the range this sets. */
+const ENG = { m: .3, base: .2 };
+function energyFrame(dt) {
+  const fresh = ML.av && performance.now() - ML.avT < 5000 && Number.isFinite(ML.av.arousal);
+  ENG.m = ease(ENG.m, fresh ? ML.av.arousal : MLL.feel && brain ? Math.min(mind.arousal, .35) : mind.arousal, dt, .8, 1.2);   // the model about to speak (it needs ~3 s of a song): a neutral guess, not the startle of sound out of silence
+  ENG.base = c01((ENG.m - .18) / .6);
+}
 function mixState(s) {
-  MIX.width = S.wide; MIX.level = s.level; MIX.centroid = s.centroid; MIX.energy = s.energy; MIX.beat = beingBeat(s.beat); MIX.structure = s.structure;
-  { const rel = s.intensity, ab = Q.xAbs, w = Math.min(1, T.absRel); let b = rel + (ab - rel) * w; if (T.absRel > 1) b = Math.pow(c01(b), 1 + (T.absRel - 1) * .7); MIX.intensity = Math.pow(c01(b * T.sens), T.curve); MIX.intensity = c01(.25 * MIX.intensity + .75 * mind.arousal); }
+  MIX.width = S.wide; MIX.level = s.level; MIX.centroid = s.centroid; MIX.energy = s.energy; MIX.beat = beingBeat(MIRROR.on ? CLK.beat : s.beat); MIX.structure = s.structure;
+  { const rel = s.intensity, ab = Q.xAbs, w = Math.min(1, T.absRel); let b = rel + (ab - rel) * w; if (T.absRel > 1) b = Math.pow(c01(b), 1 + (T.absRel - 1) * .7); MIX.intensity = Math.pow(c01(b * T.sens), T.curve); MIX.intensity = MIRROR.on ? c01(ENG.base * (.5 + .5 * MIX.intensity) + .08 * MIX.intensity) : c01(.25 * MIX.intensity + .75 * mind.arousal); }   // following: the moment's intensity within a range the feeling sets
   MIX.bass = c01(s.bass * T.mixBass); MIX.lead = c01(s.lead * T.mixLead); MIX.voice = c01(s.voice * T.mixLead); MIX.pads = c01(s.pads * T.mixPads);
   const tw = .52 + .30 * c01(CHR.tonality * 1.4);
   for (let i = 0; i < 12; i++) MIX.notes[i] = c01((tw * s.notes[i] + (1 - tw) * mind.pitch[i]) * T.mixNotes);
@@ -1402,6 +1600,66 @@ pet.onTrackBoundary(track=>{
 });
 
 function mlSave() { if (taste) pet.mlSave({ taste: taste.serialize(), species: species ? species.serialize() : (ML.saved && ML.saved.species) || null }); }
+/* signs of life beyond following the music: each reads the being's own states (the mind's expectation, its chills and
+   climax, its boredom, what it has learned of the song), never the sound directly, and each is its own switch (LIFE,
+   localStorage on-life, dev-cmd { k: 'life', name, v }, lab window.__life(name, on)); off, the page is exactly as before.
+     awe     the opening: at a peak it has earned (chills with restraint's climax and a firm lock), at most every few minutes,
+             it draws in and dims for a breath, then light floods out through thinned metal and its skin surfaces
+     poise   how well it knows the song (being/mirror.mjs): the more it has learned it, the less it startles and the more it
+             anticipates
+     think   surprise and uncertainty made visible (mind.IC, mind.entropy: Pearce 2018; the orienting reflex): an unexpected
+             hit turns the nucleus to look; not knowing what comes next, it holds still and goes glassy
+     fidget  displacement activity (Tinbergen): bored, with nothing to lock to, it shifts its weight now and then
+     breath  awake and without a beat it breathes, a little faster when roused, and sighs every few minutes (Li et al. 2016)
+   They run after reactFrame, on uniforms the frame rebuilds every time, so nothing they do accumulates; their glow goes
+   into the glow's eased target (AWE.glow) rather than onto the eased value. */
+const LIFE = (() => { const d = { awe: true, poise: true, think: true, fidget: true, breath: true, lightning: true, mercury: true }; try { return { ...d, ...JSON.parse(localStorage.getItem('on-life') || '{}') }; } catch { return d; } })();
+function setLife(name, v) { if (!(name in LIFE)) return; LIFE[name] = !!v; try { localStorage.setItem('on-life', JSON.stringify(LIFE)); } catch {} }
+window.__life = (name, v) => { if (name !== undefined && v !== undefined) setLife(name, v); return { on: { ...LIFE }, opening: AWE.k ? +(beingClock.t - AWE.t).toFixed(1) : null, nextIn: Math.max(0, Math.round(AWE.last + AWE.wait - beingClock.t)), look: +THINK.look.toFixed(2), still: +THINK.u.toFixed(2), sigh: +BREATH.sigh.toFixed(2), fidgetIn: +FID.next.toFixed(1) }; };   // lab
+const AWE = { k: 0, t: -1e9, last: -1e9, wait: 150, m: 0, glow: 0 };
+function aweFrame(dt) {
+  AWE.m = 0; AWE.glow = 0;
+  if (!LIFE.awe) { AWE.k = 0; return; }
+  const t = beingClock.t;
+  if (!AWE.k && B.chill > .8 && MAXIM.climax > .5 && mind.lock > .5 && S.awake > .9 && SLEEP.z < .05 && !(BEAD.a > .01) && t - AWE.last > AWE.wait) {
+    AWE.k = 1; AWE.t = AWE.last = t; AWE.wait = 150 + 120 * Math.random();   // the next one no sooner than 2.5-4.5 min
+    skinFlush(1, 'the opening'); if (MIRROR.on) MIR.signature(1);
+  }
+  if (!AWE.k) return;
+  const u = t - AWE.t; if (u > 12) { AWE.k = 0; return; }
+  const g = sm(0, .7, u) * (1 - sm(.7, 1.1, u)), f = sm(.7, 1.4, u) * Math.exp(-Math.max(0, u - 2.1) / 3) * (1 - sm(8, 12, u));   // gather, then flood, fading out
+  U.uScale.value *= 1 - .05 * g + .04 * f; U.uEnv.value *= 1 + .5 * g;   // it draws in and goes glassy
+  U.uThick.value *= 1 - .9 * f; U.uOpen.value = Math.max(U.uOpen.value, f); U.uCoreI.value *= 1 + 2.5 * f;   // then the light comes through thin metal
+  FB.uGain.value = Math.min(.36, FB.uGain.value + .2 * f); FB.uDecay.value = Math.max(FB.uDecay.value, .975 + .01 * f);   // and lingers in the aura
+  if (MIRROR.on) MIR.out.surge *= 1 - .7 * g;   // time slows while it gathers (read by the next frame's flow)
+  AWE.m = f; AWE.glow = -.35 * g + 1.2 * f;   // AWE.m holds restraint open through the afterglow (restApply)
+}
+const THINK = { ic: 0, look: 0, dir: 1, at: -1e9, u: 0 };
+function thinkFrame(dt) {
+  if (!LIFE.think) { THINK.look = 0; THINK.u = 0; return; }
+  const m = mind, t = beingClock.t, z = m.IC - THINK.ic;   // surprise (bits) against its own running level
+  THINK.ic += z * (1 - Math.exp(-dt / 20));
+  if (z > 2.2 && m.lock > .3 && THINK.look < .05 && t - THINK.at > 1.5 && S.awake > .5 && SLEEP.z < .5) { THINK.look = c01(z / 4); THINK.dir = m.valence >= 0 ? 1 : -1; THINK.at = t; blog.unshift('something it did not expect'); }
+  THINK.look *= Math.exp(-dt / .4);
+  U.uNucRot.value += dt * 6 * THINK.look * THINK.dir; U.uJw.value += .12 * THINK.look; U.uCoreI.value *= 1 + .8 * THINK.look;   // the nucleus turns to look
+  // not sure what comes next: the entropy of its own grid while it half hears a beat (it is only updated while the lock holds)
+  const uT = c01((m.entropy - .6) / .35) * c01(m.lock * 4) * c01((1 - m.lock) * 1.5) * S.awake * (1 - SLEEP.z);
+  THINK.u += (uT - THINK.u) * (1 - Math.exp(-dt / 1.5));
+  U.uEnv.value *= 1 + .4 * THINK.u; U.uChaos.value *= 1 - .5 * THINK.u;   // it goes glassy and still
+  if (MIRROR.on) MIR.out.surge *= 1 - .25 * THINK.u;
+}
+const FID = { next: 8 };
+function fidgetFrame(dt) {
+  if (!LIFE.fidget) return;
+  const idle = c01(mind.bored * 1.5) * c01(1 - mind.lock * 2) * S.awake * (1 - SLEEP.z) * (1 - (BEAD.a || 0)) * (1 - EXT.lead);
+  FID.next -= dt * (.3 + idle);
+  if (FID.next > 0 || idle < .2) return;
+  FID.next = 6 + 19 * Math.random();
+  const a = .12 * (.4 + .6 * mind.energy) * idle, th = Math.random() * 6.283;   // about a fifth of a poke
+  phys.impulse(a * Math.cos(th), a * Math.sin(th), 0, 0, (Math.random() - .5) * .4 * a);   // a small shift of weight, its own
+  S.stepT += (Math.random() - .5) * .015;
+}
+const BREATH = { sigh: 0 };
 // a rating you can see: love is a warm swell and bloom; not-this is a flinch, a dimming and a turn to something else.
 // REACT eases from 1 to 0 over a few seconds; reactFrame applies it after everything else sets the uniforms.
 const REACT = { love: 0, no: 0 };
@@ -1462,6 +1720,7 @@ function devFrame(now) {
   const snap = {
     t: now, perf: { fps, frameMs: num(lastFrameMs, 1), gpu: GT.res.bake || GT.res.body ? window.__gpuStats() : null },
     ear: e ? { amp: Array.from(e.amp, (x) => num(x, 4)), onset: num(e.onset), rough: num(e.rough), sub: num(e.sub), level: num(e.level, 4), hum: num(e.hum) } : null,
+    energy: { music: num(ENG.base), moment: num(S.xc ?? 0), felt: num(S.fe ?? 0), size: num(U.uScale.value), sleep: num(SLEEP.z), t: num(beingClock.t, 2) },   // the dashboard's intensity graph: the music against ON's size
     tissue: { act: num(tissueStats.act, 4), sigma: num(tissueStats.sigma), branching: num(tissueStats.branching), coherence: num(tissueStats.coherence) },
     engine: { level: num(st.level, 4), intensity: num(st.intensity), energy: num(st.energy), centroid: num(st.centroid), drums: { kick: num(st.drums.kick), snare: num(st.drums.snare), hat: num(st.drums.hat) },
       beat: { bpm: num(st.beat.bpm, 1), confidence: num(st.beat.confidence) }, structure: { section: st.structure.section, tension: num(st.structure.tension) }, character: st.character ? Object.fromEntries(Object.entries(st.character).map(([k, v]) => [k, num(v)])) : null },
@@ -1485,7 +1744,7 @@ function devFrame(now) {
       cast: U.uCast.value.toArray().map((x) => num(x)), ...EXT.matSnap?.(MAT) },
     memory: { title: MEM.meta ? MEM.meta.title : null, artist: MEM.meta ? MEM.meta.artist : null, album: MEM.meta ? MEM.meta.album : null, plays: MEM.meta ? MEM.meta.plays : 0,
       familiarity: MEM.song ? num(MEM.song.familiarity) : 0, experience: MEM.song ? num(MEM.song.experience, 1) : 0, known: MEM.known },
-    proposals: PROP.on, fx: { ...FX }, glitch: { ...GLX }, rise: window.__rise(), journey: window.__journey(), ...EXT.snap?.(),
+    proposals: PROP.on, mirror: MIRROR.on, mirrorGain: MIRROR.gain, fx: { ...FX }, glitch: { ...GLX }, rise: window.__rise(), journey: window.__journey(), ...EXT.snap?.(),
     look: { light: U.uLight.value.toArray().map((x) => num(x)), metal: U.uMetal.value.toArray().map((x) => num(x)), glow: num(U.uGlow.value), stainAmt: num(U.uStainA.value) },
     tune: { user: { ...ML.user }, live: Object.fromEntries(Object.entries(T).map(([k, v]) => [k, num(v)])) }, dials: { rhythm: DIALS.rhythm, sync: DIALS.sync },
     dev: DEV, seed: SEED, log: blog.slice(0, 8), events: DEV_EV.slice(-30), orgDrive: ORGD.on || ORGD.k > 0 ? orgSnap() : null, cellab: CELLAB ? CELLAB.snap() : null,
@@ -1521,6 +1780,9 @@ function devCommand(c) {
     case 'glitch': window.__glitch(c.v); break;
     case 'rise': window.__rise(c.v); break;
     case 'journey': window.__journey(c.v); break;
+    case 'mirror': setMirror(c.v); break;
+    case 'mirrorGain': setMirrorGain(c.v); break;
+    case 'life': setLife(c.name, c.v); break;
     case 'fx': if (c.name in FX) { FX[c.name] = !!c.v; try { localStorage.setItem('on-fx', JSON.stringify(FX)); } catch {} } break;
     case 'voice': if (['off', 'whisper', 'sing'].includes(c.v)) { voice.mode = c.v; try { localStorage.setItem('being-voice', c.v); } catch {} } break;
     case 'section': morphSection(); skinFlush(.8, 'dashboard'); break;
@@ -1736,6 +1998,17 @@ function riseFrame(dt) {
     U.uRW.value[i] = RS.w[i];
   }
   U.uRise.value = RS.k < .002 ? 0 : RS.k; U.uEther.value = RS.e * c01(RS.k * 3);
+  // live: the forms take their power, twist and turning from the music (energy, harmony, beat, a flow that runs with the
+  // energy and surges on the beat), and the cage climbs the ladder of solids, adds shells and spins faster as it intensifies;
+  // held at a height it keeps climbing slowly (it grows more elaborate the longer it is risen), and a section knocks it a rung
+  RS.flow = (RS.flow || 0) + dt * (.12 + 1.1 * ENG.base) * (MIRROR.on ? MIR.out.surge : 1);
+  U.uRiseLive.value.set(ENG.base, LACE.harm, U.uBeatPulse.value, RS.flow);
+  RS.climb = RS.k > .2 ? Math.min(2, (RS.climb || 0) + dt / 25) : Math.max(0, (RS.climb || 0) - dt / 10);
+  const lvl = c01(.65 * ENG.base + .2 * mind.groove + .15 * mind.lock) * 4 + RS.climb + (RS.rung || 0);
+  RS.lvl = ease(RS.lvl ?? 1, Math.min(6.9, lvl), dt, 1.2, 3);
+  RS.spin = (RS.spin || 0) + dt * (.06 + .5 * ENG.base) * (1 + 1.5 * U.uBeatPulse.value * ENG.base);
+  RS.shells = ease(RS.shells ?? 2, 1 + 5 * c01(.3 + .8 * ENG.base), dt, 1, 3);
+  U.uGeo.value.set(RS.lvl, RS.spin, U.uBeatPulse.value, RS.shells);
 }
 window.__rise = (o) => {
   if (o && typeof o === 'object') {
@@ -1919,6 +2192,94 @@ const FIELD = (() => {
   function normal(x, y, z) { const e = .004, nx = dist(x + e, y, z) - dist(x - e, y, z), ny = dist(x, y + e, z) - dist(x, y - e, z), nz = dist(x, y, z + e) - dist(x, y, z - e), l = Math.hypot(nx, ny, nz) || 1; return [nx / l, ny / l, nz / l]; }
   return { dist, surface, normal };
 })();
+/* lightning (being/lightning.mjs: a stepped leader that forks, a return stroke, restrikes down the same channel), drawn as
+   lines by the particles. Electric music strikes: storms heard in the sound, iron and fire in the body, very intense or rough
+   music (BOLT.e); then hard kicks strike out from the skin into the air, snares arc across the body's face (leaping round it,
+   not through it), a drop strikes several at once, a big startle arcs. Following the sound, whether a hit strikes and the path
+   it takes come from the section and the slot in the bar, so a figure that returns strikes the same way. The stroke flashes
+   the body's glow. LIFE.lightning off, Calm (not the bounce switch: that is the dance only), asleep or beads: none. */
+const BOLT = { L: createLightning({ max: 5 }), A: createLightning({ max: 6 }),   // L: the strikes; A: the small arcs between things, kept apart so they never crowd a strike out
+  buf: new Float32Array(384 * 9), e: 0, flash: 0, t: -1e9, balls: [], nb: 0, links: 0, lit: 0, hits: 0, cn: new THREE.Color(), cm: new THREE.Color() };
+const rdir3 = (rnd) => { const z = rnd() * 2 - 1, a = rnd() * 6.2832, q = Math.sqrt(1 - z * z); return [Math.cos(a) * q, Math.sin(a) * q, z]; };
+const nrm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+function boltOk() { return LIFE.lightning && !CALM && S.awake > .3 && SLEEP.z < .5 && !(BEAD.a > .1); }   // Calm stills it; the bounce switch is only the dance
+function boltStrike(rnd, energy, kind) {
+  const R = U.uShellR.value, r0 = rdir3(rnd), d = nrm3([r0[0], r0[1], r0[2] + .7]);   // mostly on the side facing us
+  const from = FIELD.surface(d[0], d[1], d[2]).map((v) => v * 1.01);
+  if (kind === 'arc') {   // across the face, up and over the body through a waypoint outside it
+    const r1 = rdir3(rnd), e = nrm3([d[0] + 1.3 * r1[0], d[1] + 1.3 * r1[1], d[2] + 1.3 * r1[2] + .5]), to = FIELD.surface(e[0], e[1], e[2]).map((v) => v * 1.01);
+    const m = nrm3([d[0] + e[0], d[1] + e[1], d[2] + e[2]]), k = R * (1.8 + .5 * rnd());
+    BOLT.L.strike(from, to, { rnd, energy, via: [[m[0] * k, m[1] * k, m[2] * k]], width: .012 * (1 + .5 * BOLT.e) * R / .36, branch: .3 + .2 * BOLT.e });
+  } else {   // out of the skin into the air, or to the nearest ball on that side (lightning finds the nearest conductor)
+    let best = null, bd = R * 1.8;
+    if (rnd() < .35) for (const b of boltBalls()) { const dx = b.c[0] - from[0], dy = b.c[1] - from[1], dz = b.c[2] - from[2], l = Math.hypot(dx, dy, dz);
+      if (l > R * .5 && l < bd && (dx * d[0] + dy * d[1] + dz * d[2]) > .3 * l) { bd = l; best = b; } }   // a third of the time, to a ball well off the skin
+    if (best) { boltLink({ c: from, r: 0, body: true }, best, rnd, energy, true); return; }
+    const r1 = rdir3(rnd), o = nrm3([d[0] + .55 * r1[0], d[1] + .55 * r1[1], d[2] + .55 * r1[2]]), k = R * (2.9 + .6 * rnd());
+    BOLT.L.strike(from, [o[0] * k, o[1] * k, o[2] * k], { rnd, energy, width: .014 * (1 + .5 * BOLT.e) * R / .36, branch: .35 + .25 * BOLT.e });
+  }
+}
+function boltHit(type, s) {   // a hard hit in electric music strikes; the more electric, the more often
+  if (type === 'hat' || !boltOk()) return;
+  const now = performance.now(), p = (.07 + .93 * BOLT.e) * s * (type === 'kick' ? 1 : .85);   // most music strikes rarely, on its hardest hits; with Jupiter, often
+  if (p < .08 || now - BOLT.t < 1100 - 850 * BOLT.e) return;
+  const rnd = motifOn() && SHOW.gate > .2 ? mulberry(motifSeed(type === 'kick' ? 0xB0 : 0xB1, true)) : Math.random;
+  if (rnd() > p) return;
+  BOLT.t = now; BOLT.hits++; boltStrike(rnd, Math.min(1, .3 + p), type === 'snare' ? 'arc' : 'out');
+}
+function boltBurst(n, energy) {   // the drop, a big startle: several at once
+  if (!boltOk()) return;
+  for (let k = 0; k < n; k++) { const rnd = motifOn() ? mulberry(motifSeed(0xB8 + k)) : Math.random; boltStrike(rnd, energy, k % 3 === 2 ? 'arc' : 'out'); }
+  BOLT.t = performance.now();
+}
+/* lightning between things: the drops and satellite orbs are conductors. Wherever two of them (or one and the body) come within
+   reach, arcs keep jumping the gap, more often the closer they are and the more electric the moment; big balls crackle with
+   small arcs crawling over them (a corona); and what a bolt joins it pulls together: two drops linked are drawn to each other
+   (and may merge), a drop linked to the body falls in faster. The reach grows with BOLT.e. */
+function boltBalls() {   // the conductors in body space (the shader divides x by 1 + uWide before it tests them)
+  const out = BOLT.balls; out.length = 0; const wx = 1 + U.uWide.value;
+  for (let i = 0; i < ND; i++) { const w = U.uD.value[i]; if (w.w > .012) out.push({ c: [w.x * wx, w.y, w.z], r: w.w, drop: i }); }
+  for (let i = 0; i < NS; i++) { const w = U.uS.value[i]; if (w.w > .012) out.push({ c: [w.x * wx, w.y, w.z], r: w.w, drop: -1 }); }
+  return out;
+}
+function ballAt(b, toward) {   // the point of a ball (or the body) facing a target
+  if (b.body) return b.c;
+  const d = nrm3([toward[0] - b.c[0], toward[1] - b.c[1], toward[2] - b.c[2]]); return [b.c[0] + d[0] * b.r * 1.03, b.c[1] + d[1] * b.r * 1.03, b.c[2] + d[2] * b.r * 1.03];
+}
+function boltLink(a, b, rnd, energy, strike = false) {
+  const R = U.uShellR.value, pa = ballAt(a, b.c), pb = ballAt(b, pa);
+  const m = [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, (pa[2] + pb[2]) / 2], ml = Math.hypot(...m), span = Math.hypot(pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]);
+  // it bows outward across the window (toward the outline, where it reads against the dark), and round the body, never through it
+  const mxy = Math.hypot(m[0], m[1]) || 1e-6, push = Math.max(0, R * 1.3 - ml) + .45 * span;
+  const via = [[m[0] + m[0] / mxy * push, m[1] + m[1] / mxy * push, m[2] * .5]];
+  (strike ? BOLT.L : BOLT.A).strike(pa, pb, { rnd, energy, via, width: (strike ? .013 : .008) * R / .36, branch: .18, maxSegs: 40, step: Math.max(.012, span / 8), flash: strike ? 1 : .3 });
+  // what it joins it pulls together
+  const pull = .35 * energy, dx = b.c[0] - a.c[0], dy = b.c[1] - a.c[1], dz = b.c[2] - a.c[2], l = Math.hypot(dx, dy, dz) || 1;
+  for (const [o, sg] of [[a, 1], [b, -1]]) if (o.drop >= 0 && D.a[o.drop]) { const k = 3 * o.drop; D.v[k] += sg * dx / l * pull; D.v[k + 1] += sg * dy / l * pull; D.v[k + 2] += sg * dz / l * pull; D.nm[o.drop] = 0; }
+}
+function boltCorona(b, rnd, energy) {   // a small arc crawling over a ball, out and back to its own skin
+  const u = rdir3(rnd), v = nrm3([u[0] + rdir3(rnd)[0] * 1.2, u[1] + rdir3(rnd)[1] * 1.2, u[2] + rdir3(rnd)[2] * 1.2]), m = nrm3([u[0] + v[0], u[1] + v[1], u[2] + v[2]]), r = b.r;
+  const P = (n, k) => [b.c[0] + n[0] * r * k, b.c[1] + n[1] * r * k, b.c[2] + n[2] * r * k];
+  BOLT.A.strike(P(u, 1.03), P(v, 1.03), { rnd, energy: energy * .6, via: [P(m, 1.5 + .4 * rnd())], width: .0045 * U.uShellR.value / .36, branch: .1, maxSegs: 16, step: r * .45, flash: .1 });
+}
+function boltFrame(dt) {
+  if (!boltOk()) return;   // the arcs between things run whenever they are near: electric music only makes them reach further and come faster
+  const balls = boltBalls(); BOLT.nb = balls.length; if (!balls.length) return;
+  const e = .12 + .88 * BOLT.e, R = U.uShellR.value, reach = R * (.25 + .7 * e), rate = .25 + 6 * e * e; let made = 0;   // a rare crackle in most music; alive with Jupiter
+  // mostly where it can be seen: a gap whose middle lies on the bright body (as the window sees it) jumps less often than one at or past the outline
+  const seen = (a, b) => .15 + .85 * c01((Math.hypot(a.c[0] + b.c[0], a.c[1] + b.c[1]) / 2 - .75 * R) / (.4 * R));
+  const tryLink = (a, b, gap) => { if (made < 1 && gap > R * .15 && gap < reach &&   // too short a gap would draw a dot, not a bolt
+ Math.random() < rate * (1 - Math.max(0, gap) / reach) * seen(a, b) * dt) { boltLink(a, b, Math.random, .5 + .5 * e); made++; BOLT.links++; } };
+  for (let i = 0; i < balls.length; i++) {
+    const a = balls[i], ra = Math.hypot(...a.c);
+    for (let j = i + 1; j < balls.length; j++) { const b = balls[j]; tryLink(a, b, Math.hypot(b.c[0] - a.c[0], b.c[1] - a.c[1], b.c[2] - a.c[2]) - a.r - b.r); }
+    if (ra > R * 1.05) { const n = a.c.map((x) => x / ra), bp = FIELD.surface(n[0], n[1], n[2]); tryLink({ c: bp, r: 0, body: true, drop: -1 }, a, ra - Math.hypot(...bp) - a.r); }   // ball and body
+    if (a.r > .045 && BOLT.e > .4 && made < 1 && Math.random() < .8 * e * dt) { boltCorona(a, Math.random, e); made++; }
+  }
+}
+window.__fx = (kind, n = 20) => { if (kind === 'split') { splitDrops(1); return dropsAlive; } particles.burst(kind, n, U.uShellR.value); return n; };   // lab: shed a kind of particle now, or split the drops
+window.__arcs = () => ({ on: !!LIFE.lightning, ok: boltOk(), calm: CALM, bounce: BOUNCE.on, electric: +BOLT.e.toFixed(2), balls: BOLT.nb, links: BOLT.links, hits: BOLT.hits, bolts: BOLT.L.count, arcs: BOLT.A.count, segments: BOLT.lit });   // lab: why there are (no) arcs
+window.__bolt = (kind = 'out') => { boltStrike(Math.random, 1, kind); return BOLT.L.count; };   // lab
 function bodyPoint() {   // a point on the body's visible face, in window coordinates
   const a = Math.random() * Math.PI * 2, b = Math.acos(.35 + .6 * Math.random()), R = U.uShellR.value * (.8 + .25 * Math.random());
   const x = Math.sin(b) * Math.cos(a) * R, y = Math.sin(b) * Math.sin(a) * R, z = Math.cos(b) * R, k = 1.6 / (4.2 * U.uZoom.value - z) * U.uScale.value;
@@ -1963,7 +2324,24 @@ function flourishFrame(dt, t) {
   const wMars = wp[12] + .45 * (wp[17] + wp[24] + wp[33]), wSun = wp[13] + .45 * (wp[21] + wp[34]), wSat = wp[10] + .45 * (wp[26] + wp[27] + wp[31]);
   const wStar = wp[13] + .6 * wp[16] + .5 * wp[15] + .6 * wp[14] + .45 * (wp[19] + wp[20] + wp[21] + wp[22] + wp[23] + wp[27] + wp[28] + wp[29] + wp[30] + wp[32] + wp[34] + wp[35] + wp[37]);
   const caG = CELLAB ? CELLAB.particleGain() : null;   // the automaton surfacing amplifies its own material's particles
-  const rates = [70 * (wFire + .5 * wMars + .4 * wSun) * (.4 + A), 0, 130 * wAir, 30 * (wEarth + .6 * wSat), 20 * wStar, 0, 0, 0, 110 * wAir * (.5 + A)].map((x, k) => x * awake * (caG ? caG[k] : 1));
+  // bubbles: water and its stones (amber, malachite, selenite: Cancer, Scorpio, Pisces), the Moon's silver and quicksilver, and chill
+  // music (low arousal, the model's 'relaxed'), flowing music more; intense music fewer
+  const relaxed = c01(Math.max((.48 - mind.arousal) / .3, ML.brain && ML.brain.moods && Number.isFinite(ML.brain.moods.relaxed) ? (ML.brain.moods.relaxed - .3) / .5 : 0));
+  const wBub = (wp[7] + .45 * (wp[20] + wp[24] + wp[28]) + .2 * (wp[33] + wp[36]) + .5 * wp[16] + .4 * wp[15] + .25 * wp[1]) * (.55 + .9 * relaxed) + .35 * relaxed * (.4 + .6 * c01(Q.flow));
+  // how electric the moment is: Jupiter above all (tin, its stones lazuli and selenite, its gems royal amethyst and emerald amber),
+  // then storms heard in the sound, a little from iron and fire and from very intense or rough music
+  const wJup = wp[11] + .45 * (wp[25] + wp[28]) + .5 * (wp[32] + wp[35]);
+  BOLT.e = c01(1.6 * wJup + .45 * SND.storm + .3 * wp[12] + .15 * wFire + .2 * c01((ENG.base - .6) / .3) + .15 * c01((Q.frac - .5) / .4));
+  // its colour: the nucleus's own light at full strength, leaning to the song's mood (sad: violet-blue .. happy: gold; flowing music
+  // toward cyan; the more aroused, the more saturated), eased ~0.8 s
+  { const L = U.uLight.value, mx = Math.max(L.r, L.g, L.b, .05); BOLT.cn.setRGB(L.r / mx, L.g / mx, L.b / mx);
+    const h0 = .7 - .55 * c01((mind.valence + 1) / 2), h = h0 + .5 * c01(Q.flow) * (.5 - h0);
+    BOLT.cm.setHSL(h, .5 + .45 * mind.arousal, .62); BOLT.cn.lerp(BOLT.cm, .45);
+    U.uBoltC.value.lerp(BOLT.cn, 1 - Math.exp(-dt / .8)); }
+  boltFrame(dt);
+  BOLT.flash = BOLT.L.step(dt) * awake; BOLT.A.step(dt);   // only a strike flashes the body; the small arcs crackle without lighting it
+  BOLT.lit = awake > .05 ? BOLT.A.write(BOLT.buf, 384, BOLT.L.write(BOLT.buf, 384)) : 0; particles.lines(BOLT.buf, BOLT.lit);   // the strikes first
+  const rates = [70 * (wFire + .5 * wMars + .4 * wSun) * (.4 + A), 60 * wBub * (1 - .5 * ENG.base), 130 * wAir, 30 * (wEarth + .6 * wSat), 20 * wStar, 0, 0, 0, 110 * wAir * (.5 + A)].map((x, k) => x * awake * (caG ? caG[k] : 1));
   const kick = U.uKick.value; if (kick > .7 && FLO.kick <= .7 && (wFire + wMars) > .2) particles.burst('spark', Math.round(10 * (wFire + wMars)), U.uShellR.value); FLO.kick = kick;
   particles.step(dt, rates, U.uShellR.value, t, { field: FIELD, beat: U.uBeatPulse.value, kick: U.uKick.value, arousal: mind.arousal });
   FLO.g.step(dt);
@@ -1982,6 +2360,38 @@ U.uMorph.value = morph.texture;
 const DEV = { stain: false, mat: -1, family: null, layer: {}, M: null, sleep: 'auto', maturity: null, light: null, metal: null, uni: {} };   // developer overrides (the dashboard sets these)
 const MORPH = { frame: 0, dna: dnaGenome(SEED), song: null, evolved: null, cur: null, t: 0, floor: 0, sec: 0, living: 0, cellN: 0, next: 0, flow: 0, half: false, show: 0, shown: false, vary: 0, motion: new THREE.Vector4() };
 MORPH.cur = MORPH.dna; MORPH.living = MORPH.dna.w.living || 0;
+/* the fractal lace, alive: a fresh kind at each new song, section and surfacing, chosen from how the music sounds now (rough,
+   noisy music the escape-time sets, ordered music the geometric ones), never the one just shown; between them it moves every
+   frame (morph-gl uLive: the window drifts and breathes with energy and beat, the set's constant orbits with the harmony,
+   its centre wanders over the body). Before, a new song showed the being's own DNA fractal until its skin was half grown
+   (~70 s), the same kind in the same place for every song. */
+const LACE = { lace: null, harm: 0, harmT: 0, flow: 0, ra: 0, rb: 0, rbT: 0, raT: 0, zoom0: 1, rot: 0, spin: .2, zph: 0, zper: 12, px: 0, py: 0, pdx: 1, pdy: 0, zoom: 1 };
+function laceNew() {
+  const cur = LACE.lace ? LACE.lace.kind : -1; let f = fractalFor(Math.random, (k) => CHR[k] ?? .4);
+  for (let i = 0; i < 20 && f.kind === cur; i++) f = fractalFor(Math.random, (k) => CHR[k] ?? .4);
+  LACE.lace = { ...(MORPH.cur ? MORPH.cur.lace : {}), ...f, s: +(1 + .35 * Math.random()).toFixed(3), scale: +(.6 + .9 * (CHR.intricacy ?? .4)).toFixed(3), twist: +(Math.random() * 6.28).toFixed(3) };
+  // each appearance its own framing: zoom (log-uniform, x0.25..x4), angle, place on the body, spin direction and speed, drift
+  LACE.zoom0 = Math.exp((Math.random() * 2 - 1) * 1.39); LACE.rot = Math.random() * 6.283; LACE.spin = (Math.random() < .5 ? -1 : 1) * (.08 + .3 * Math.random());
+  LACE.zph = Math.random() * 6.283; LACE.zper = 7 + 14 * Math.random(); const a = Math.random() * 6.283; LACE.pdx = Math.cos(a); LACE.pdy = Math.sin(a);
+  LACE.px = (Math.random() - .5) * 1.2; LACE.py = (Math.random() - .5) * 1.2;
+  LACE.raT = LACE.ra + (Math.random() - .5) * 5; LACE.rbT += (Math.random() - .5) * 3;
+}
+function laceLive(dt) {
+  const n = MIX.notes; let x = 0, y = 0; for (let i = 0; i < 12; i++) { const a = 2 * Math.PI * ((i * 7) % 12) / 12; x += n[i] * Math.cos(a); y += n[i] * Math.sin(a); }
+  if (x * x + y * y > 1e-4) { let d = Math.atan2(y, x) - LACE.harmT; d -= 2 * Math.PI * Math.round(d / (2 * Math.PI)); LACE.harmT += d; }   // the harmony's place on the circle of fifths, unwrapped
+  LACE.harm += (LACE.harmT - LACE.harm) * (1 - Math.exp(-dt / .8)) + dt * (.05 + .25 * ENG.base);
+  LACE.flow += dt * (.15 + 1.4 * ENG.base) * (MIRROR.on ? MIR.out.surge : 1);
+  const surge = MIRROR.on ? MIR.out.surge : 1, k3 = 1 - Math.exp(-dt / 3);
+  LACE.raT += dt * (.03 + .2 * ENG.base) * Math.sign(LACE.spin); LACE.ra += (LACE.raT - LACE.ra) * k3; LACE.rb += (LACE.rbT - LACE.rb) * k3;   // its centre wanders over the body
+  LACE.rot += dt * LACE.spin * (.5 + 2.2 * ENG.base) * surge;   // it turns, faster the more intense, surging on the beat
+  LACE.zph += dt * 6.283 / LACE.zper * (.6 + .8 * ENG.base);
+  LACE.zoom = LACE.zoom0 * Math.exp(.45 * Math.sin(LACE.zph) + .25 * ENG.base - .18 * U.uBeatPulse.value * ENG.base);   // slow zoom waves, a push on the beat
+  LACE.px += dt * LACE.pdx * (.04 + .25 * ENG.base) * surge; LACE.py += dt * LACE.pdy * (.04 + .25 * ENG.base) * surge;   // drifting across the set
+  if (Math.abs(LACE.px) > 1.2) LACE.pdx = -Math.sign(LACE.px) * Math.abs(LACE.pdx); if (Math.abs(LACE.py) > 1.2) LACE.pdy = -Math.sign(LACE.py) * Math.abs(LACE.pdy);
+  morph.uniforms.uLive2.value.set(LACE.zoom, LACE.rot, LACE.px, LACE.py);
+  morph.uniforms.uLive.value.set(ENG.base, LACE.harm, U.uBeatPulse.value, LACE.flow); morph.uniforms.uLiveR.value.set(LACE.ra, LACE.rb, 0, 0);
+}
+laceNew();   // a fresh one from launch, not the being's own DNA lace (the same kind, angle and size every time)
 const morphTop = (g) => MORPH_FAMILIES.filter(f => (g.w[f] || 0) > .12).sort((a, b) => g.w[b] - g.w[a]).join('+');
 function morphTick(dt, t) {
   const exp = MEM.song ? MEM.song.experience : 0;
@@ -1992,6 +2402,7 @@ function morphTick(dt, t) {
     MORPH.next = t + .12;
     let g = MORPH.song ? lerpGenome(MORPH.dna, MORPH.evolved || MORPH.song, MORPH.t) : MORPH.dna;
     if (MORPH.xf) { const u = Math.min(1, (t - MORPH.xf.at) / 2.5); if (u >= 1 || !MORPH.xf.from) MORPH.xf = null; else g = lerpGenome(MORPH.xf.from, g, u * u * (3 - 2 * u)); }
+    if (LACE.lace) g = { ...g, lace: LACE.lace };   // the live lace, not the being's or the song's fixed one
     if (DEV.family) g = { ...g, w: { ...DEV.family } };
     MORPH.cur = g; MORPH.living = g.w.living || 0;
     if ((MORPH.t > .5) !== MORPH.half) { MORPH.half = MORPH.t > .5; if (MORPH.half) { blog.unshift('its skin becomes the song'); skinFlush(.9, 'the song takes shape'); } }
@@ -2004,6 +2415,7 @@ function morphTick(dt, t) {
     if (st && !DEV.stain) { U.uStainM.value.fromArray(st.mem); U.uStainN.value.fromArray(st.nuc); U.uStainC.value.fromArray(st.cyto); U.uStainO.value.fromArray(st.org || st.mem); }
     if (COS.t && COS.t.stains && !DEV.stain) { const c = COS.t.stains, w = c.w; U.uStainM.value.lerp(COS.v.fromArray(c.mem), w); U.uStainN.value.lerp(COS.v.fromArray(c.nuc), w); U.uStainC.value.lerp(COS.v.fromArray(c.cyto), w); }   // the chart's three keys
   }
+  laceLive(dt);
   MORPH.motion.set(MORPH.flow, SHOW.phase, earFrame ? earFrame.sub : 0, mind.arousal);
   // the form moves slowly: baking every other frame (every fourth while it rests) is enough, and saves ~1-3 ms of GPU
   // the bake is deferred: drawn right before the body only while the body samples it (uMorphA > .01), see the frame loop;
@@ -2015,18 +2427,29 @@ function morphTick(dt, t) {
   MORPH.show += (show - MORPH.show) * (1 - Math.exp(-dt / (show > MORPH.show ? 1.2 : 4)));
   if (MORPH.show > .5) MORPH.shown = true;
   else if (MORPH.shown && MORPH.show < .03) {   // hidden again: the next surfacing grows a variant, not the same skin
-    MORPH.shown = false; MORPH.vary++;
+    MORPH.shown = false; MORPH.vary++; laceNew();
     const seed = ((MEM.key ? keyHash(MEM.key) : SEED) ^ Math.imul(MORPH.vary, 104729)) >>> 0;
-    if (MORPH.song) MORPH.evolved = mutate(MORPH.evolved || MORPH.song, seed, .18); else MORPH.dna = mutate(MORPH.dna, seed, .18);
+    if (MORPH.song && MIRROR.on && PLACE.cur >= 0) MORPH.evolved = placeGenome(PLACE.cur, MORPH.vary % 3);   // following: one of the place's three variants
+    else if (MORPH.song) MORPH.evolved = mutate(MORPH.evolved || MORPH.song, seed, .18); else MORPH.dna = mutate(MORPH.dna, seed, .18);
   }
   U.uMorphA.value = (.8 + .35 * MORPH.t) * MORPH.show;
-  U.uMorphD.value = MORPH.cur.depth;
+  U.uMorphD.value = MORPH.cur.depth * (.45 + .55 * ENG.base);   // calm music: a shallow relief; intense music: deep
   if (window.__morphA0) U.uMorphA.value = 0;   // lab: the body without its grown form
 }
-function morphSection() {   // a new section: the song's form evolves a step (deterministic for this song and section)
+/* where the music is on the song's map (memory.mjs, 48 x 24): one of 18 places (a 6 x 3 grid), the most frequent of the
+   last ~4 s. Following the sound, a section's look is the song's own form varied by its place, so a chorus that comes
+   back lands in the same place and brings its look back (the living skin and automata keep growing inside it) */
+const PLACE = { ring: new Int16Array(40).fill(-1), n: 0, cur: -1 };
+function placeOf(b) { return Math.min(5, ((b % MW) / MW * 6) | 0) + 6 * Math.min(2, ((((b / MW) | 0)) / MH * 3) | 0); }
+function placeNow() { const c = new Int16Array(18); let best = -1, bn = 0; for (const p of PLACE.ring) if (p >= 0 && ++c[p] > bn) { bn = c[p]; best = p; } return best; }
+function placeGenome(place, vary = 0) { return mutate(MORPH.song, (keyHash(MEM.key) ^ Math.imul(place + 1, 7919) ^ Math.imul(vary, 104729)) >>> 0, .14); }
+function morphSection() {   // a new section: the song's form evolves a step (deterministic for this song and section; following the sound, for this song and place)
   window.__secs = (window.__secs || 0) + 1;
+  laceNew();   // every section brings another fractal
+  if (Math.random() < .5) RS.rung = ((RS.rung || 0) + 1) % 3;   // and may knock the cage up a rung of solids
   if (!MORPH.song || MORPH.t < .4) return;
   MORPH.sec++;
+  if (MIRROR.on) { const pl = placeNow(); if (pl >= 0) { if (pl !== PLACE.cur) { PLACE.cur = pl; MORPH.evolved = placeGenome(pl); } return; } }
   MORPH.evolved = mutate(MORPH.evolved || MORPH.song, (keyHash(MEM.key) ^ Math.imul(MORPH.sec, 7919)) >>> 0, .1);
 }
 window.__morphBench = (opts = {}, w = null, n = 10) => {   // lab: GPU time of one bake (ms), synced with a pixel read
@@ -2042,7 +2465,7 @@ window.__morph = () => ({ t: +MORPH.t.toFixed(2), song: MORPH.song ? morphTop(MO
 // lab: a skin of one fractal kind only (0..14, morph.mjs FRACTAL_KINDS), at full strength
 window.__fractal = (kind) => { const g = morphFor({}, (Math.random() * 1e9) >>> 0, SEED); for (const k of Object.keys(g.w)) g.w[k] = k === 'lace' ? 1 : 0;
   let f = fractalFor(Math.random); for (let i = 0; i < 400 && f.kind !== kind; i++) f = fractalFor(Math.random); Object.assign(g.lace, f);
-  MORPH.song = g; MORPH.evolved = null; MORPH.floor = 1; MORPH.t = 1; MORPH.next = 0; MORPH.cellN = 0; return FRACTAL_KINDS[g.lace.kind] + ' ' + JSON.stringify(f); };
+  MORPH.song = g; MORPH.evolved = null; MORPH.floor = 1; MORPH.t = 1; MORPH.next = 0; MORPH.cellN = 0; LACE.lace = { ...g.lace }; return FRACTAL_KINDS[g.lace.kind] + ' ' + JSON.stringify(f); };
 window.__morphForce = (char, seed, t = 1) => { MORPH.song = morphFor(char, seed >>> 0, SEED); MORPH.evolved = null; MORPH.floor = t; MORPH.t = t; MORPH.next = 0; MORPH.cellN = 0; return morphTop(MORPH.song); };   // lab hook
 /* ---------- the pressure organ (pressure.mjs) turns the body to beads (beads.mjs) and back ----------
    The organ reads the broadcast state (arousal, anticipation, groove, fatigue) and decides by itself: small jets near
@@ -2121,6 +2544,7 @@ function restApply(dt) {
   // M: the room for more than one style; a peak opens it fast, it closes slowly
   const want = MAXIM.want(dt, { drop: S.drop, chill: B.chill, arousal: mind.arousal, groove: mind.groove, sleep: SLEEP.z, beads: BEAD.a > .01 });
   REST.M += ((DEV.M != null ? DEV.M : want) - REST.M) * (1 - Math.exp(-dt / ((DEV.M != null ? DEV.M : want) > REST.M ? .25 : DEV.M != null ? .5 : 3)));
+  if (AWE.m > 0) REST.M = Math.max(REST.M, AWE.m);   // the opening's afterglow keeps the room open (it closes slowly after)
   for (const [group, layers] of Object.entries(LAYERS)) {
     let best = null, bestS = -1;
     for (const [name, [key, ref, bias]] of Object.entries(layers)) {
@@ -2198,9 +2622,10 @@ function beingBody(dt, t) {
     if (SKIN.section >= 0 && sec !== SKIN.section && t - SKIN.at > 25) skinFlush(.75, 'a new section');
     SKIN.section = sec;
     if (S.drop > .9 && t - SKIN.at > 12) skinFlush(1, 'the drop');
-    if (B.chill > .9 && t - SKIN.at > 12) skinFlush(.7, 'chills');
-    if (MEM.recog > .9 && t - SKIN.at > 4) skinFlush(1, 'recognition');
+    if (B.chill > .9 && t - SKIN.at > 12) { skinFlush(.7, 'chills'); if (MIRROR.on) MIR.signature(.7); }
+    if (MEM.recog > .9 && t - SKIN.at > 4) { skinFlush(1, 'recognition'); if (MIRROR.on) MIR.signature(.8); }
     if (mind.groove > .6) SKIN.expr = Math.max(SKIN.expr, SKIN.expr + dt * .03);   // a long groove slowly brings the song up
+    if (MIRROR.on) { SKIN.lift = (SKIN.lift || 0) + (c01((an.state.intensity - .62) / .3) - (SKIN.lift || 0)) * (1 - Math.exp(-dt / 1.5)); SKIN.expr = Math.max(SKIN.expr, .85 * SKIN.lift); }   // following: the song's own high points (a chorus, a drop) bring its skin up, its verses let it go
     const floor = .05 + .08 * learned;
     SKIN.expr += (floor - SKIN.expr) * (1 - Math.exp(-dt / (mind.bored > .5 ? 3 : 5)));
     U.uSongAmt.value = 0;   // the remembered song is never painted on: it shapes the living skin
@@ -2296,11 +2721,12 @@ renderer.setAnimationLoop(ts => {
   an.analyseUpTo(Math.max(0, an.total - Math.round(LATM.delay * 48)));
   const evsNow = an.drain();
   readChar(an.state, dt); deriveChar();
-  beingEvents(mind.step(dt, earFrame, onsetPeak, { tension: an.state.structure.tension, intensity: an.state.intensityAbs ?? an.state.intensity, familiarity: MEM.song ? MEM.song.familiarity : undefined, progress: MEM.song ? MEM.song.progress : undefined, rhythm: DIALS.rhythm, beat: an.state.beat, predicted: timing.predicted * timing.readiness, tissue: tissueStats, proprio: phys,
+  beingEvents(mind.step(dt, earFrame, onsetPeak, { tension: an.state.structure.tension, intensity: an.state.intensityAbs ?? an.state.intensity, familiarity: MEM.song ? MEM.song.familiarity : undefined, progress: MEM.song ? MEM.song.progress : undefined, rhythm: DIALS.rhythm, beat: MIRROR.on ? clockStep(dt) : an.state.beat, predicted: timing.predicted * timing.readiness, tissue: tissueStats, proprio: phys,
     ...(ML.av && performance.now() - ML.avT < 5000 ? { musicA: ML.av.arousal, musicV: ML.av.valence } : {}) })); onsetPeak = 0;
   beOnTime(dt, f0); handleEvents(evsNow, f0);
   B.chill *= Math.exp(-dt / 2.5); B.recoil *= Math.exp(-dt / .6); B.flinch *= Math.exp(-dt / .25);
   rhythmFrame(dt); orgDriveFrame(dt, f0);
+  energyFrame(dt);
   const st = mixState(an.state), bs = st.beat, structure = st.structure;
   // hit envelopes: the engine's smoothed ones, plus the instant ones from events
   const kickV = Math.max(st.drums.kick, V.kick), snareV = Math.max(st.drums.snare, V.snare), hatV = Math.max(st.drums.hat, V.hat);
@@ -2332,8 +2758,8 @@ renderer.setAnimationLoop(ts => {
   const loudF = cu.loudness, vm = cu.vocal * T.voice;
   // a chord change (a new strongest note) rearranges satellites and tendrils, as often as the music changes
   { let a = 0; for (let i = 1; i < 12; i++) if (st.notes[i] > st.notes[a]) a = i;
-    if (a !== S.chord && st.notes[a] > st.notes[S.chord] * 1.4 + .05) { S.chord = a; if (T.reorg > .01 && f0 - S.lastRe > (9000 - 7800 * cu.change) / T.reorg) rearrange(); } }
-  S.reT += dt; if (T.reorg > .01 && S.reT > (45 - 39 * cu.change) / T.reorg) reseed(true);   // minimal music keeps one form for a long time
+    if (a !== S.chord && st.notes[a] > st.notes[S.chord] * 1.4 + .05) { S.chord = a; if (T.reorg > .01 && f0 - S.lastRe > (9000 - 7800 * cu.change) / T.reorg) { if (motifOn()) withSeed(motifSeed(0x100 + a), rearrange); else rearrange(); } } }
+  S.reT += dt; if (T.reorg > .01 && S.reT > (45 - 39 * cu.change) / T.reorg) { if (motifOn()) seededReseed(motifSeed(0x200 + S.chord)); else reseed(true); }   // minimal music keeps one form for a long time
   if (Q.grain > .01 && f0 - S.seedT > 2000) { S.seedT = f0; U.uSeed.value = Math.floor(Math.random() * 997) + .5; }
   // beat grid
   if (bs.confidence > .3) S.gridOn = true; else if (bs.confidence < .2) S.gridOn = false;
@@ -2349,7 +2775,7 @@ renderer.setAnimationLoop(ts => {
   }
   const frozen = S.freeze > 0; if (frozen) S.freeze--;   // glitch stutter: motion holds for a few frames
   if (!frozen) stepDrops(dt, S.tension, (.15 + X * 1.1) * T.fall, bs.bpm);
-  const pulseBeat = Math.pow(.5 + .5 * Math.cos(2 * Math.PI * bs.phase), 3) * c01(mind.lock * 1.5) * (1 - SLEEP.z);   // only a pulse it is actually locked to
+  const pulseBeat = Math.pow(.5 + .5 * Math.cos(2 * Math.PI * bs.phase), 3) * (MIRROR.on ? CLK.trust : c01(mind.lock * 1.5)) * (1 - SLEEP.z);   // only a pulse it is actually locked to (following: one the clock trusts)
   U.uShellR.value = R_SHELL + BOUNCE.k * kickV * (.01 + .05 * X) * S.awake * T.jolt;
   if (!frozen) { placeLobes(dt, t, st, kickV * S.awake * (.25 + 1.1 * X) * T.jolt); placeSats(dt, st.bass, X); placeTendrils(dt, st.lead); }
   U.uChaos.value = Math.min(2, Math.pow(X, 1.3) * T.turb * (1 - .5 * Math.min(1, Q.flow)));   // flowing music stays glassy
@@ -2373,7 +2799,7 @@ renderer.setAnimationLoop(ts => {
   U.uMote.value = Math.min(.5, (.02 + st.pads * .12) * T.motes);
   U.uKick.value = Math.max(kickV, S.drop) * S.awake;
   U.uHat.value = hatV * S.awake;
-  U.uSpikes.value = look.fx.spikes ? (.01 + hatV * .09 + S.tension * .07) * S.awake * T.spikes * (.4 + 1.5 * cu.brightness) * (1 - .7 * Math.min(1, Q.flow)) : 0;
+  U.uSpikes.value = look.fx.spikes ? (.01 + hatV * .02 + S.tension * .07) * S.awake * T.spikes * (.4 + 1.5 * cu.brightness) * (1 - .7 * Math.min(1, Q.flow)) : 0;
   U.uSpikeF.value = (12 + st.centroid * 10) * T.spikeDetail * (.7 + .9 * cu.brightness) * (.8 + .5 * Q.den);
   U.uSpikeP.value = 2 + 3 * cu.brightness; U.uCrisp.value = c01((cu.brightness - .35) * 1.5); U.uCool.value = Math.max(-1, Math.min(1, (cu.brightness - .4) * 2.2));
   U.uFilm.value = Math.min(1, (look.finish === 'iridescent' ? .85 : look.fx.film ? .35 + st.centroid * .4 : 0) * T.film);
@@ -2383,20 +2809,28 @@ renderer.setAnimationLoop(ts => {
   U.uRing2.value = S.ring2; U.uRing2A.value = look.fx.rings && S.ring2 > 0 ? Math.max(0, 1 - S.ring2 * 2.2) * .9 * T.ring : 0;
   // the beat grid: the whole entity pulses, sharp attack, bigger on downbeats; without a confident grid it follows the kick instead
   // regular music: a tight locked pulse; free music: no grid pulse, slow swells that follow loudness and phrasing instead
-  const lockF = .4 + 1.5 * cu.regularity, swell = (S.en - S.enL) * 1.1 * Q.drift;
+  const lockF = .4 + 1.5 * cu.regularity, swell = THREE.MathUtils.clamp(S.en - S.enL, -.15, .15) * 1.1 * Q.drift * (.25 + .75 * ENG.base);   // a swell as big as the music is intense (sound arriving out of silence read as a +.2 swell for ~12 s, even under a soft piano)
   S.enL += (S.en - S.enL) * (1 - Math.exp(-dt / 12));
   const contrast = (st.level - S.lvAvg) * cu.dynamics * .35; S.lvAvg += (st.level - S.lvAvg) * (1 - Math.exp(-dt / 5));
   BOUNCE.k += ((BOUNCE.on ? 1 : 0) - BOUNCE.k) * (1 - Math.exp(-dt / .3));
   { const now = performance.now(), ft = now - QUAL.last; QUAL.last = now;   // governor (being/page/quality.mjs); asleep, the page draws every other frame, so it only judges awake
     if ((SLEEP.z < .5 || !QUAL.auto) && governorStep(QUAL, ft, lastFrameMs, now, beingClock.t) === 'res') resize(); }
-  const rawScale = ((.80 + .12 * loudF + .2 * loudF * X + BOUNCE.k * (1 - ORGD.R) * (S.grid * pulseBeat * (.05 + .06 * S.down) * lockF + (1 - S.grid * Math.min(1, lockF)) * kickV * .04) * S.awake * (.3 + 1.3 * X) * T.pulse + S.drop * .06 + (swell + contrast) * S.awake) * T.size);
+  // size is the felt energy (the moment's intensity and the music's perceived arousal, ENG), not the absolute loudness: mastered music is
+  // about equally loud from a noise wall to a choir, so loudness alone kept the body near its ceiling through a song's calm
+  // (measured: loud->choir, size 1.04 -> .93 while arousal fell .79 -> .22). It rises in ~.4 s and lets go in ~1.2 s.
+  S.fe = ease(S.fe ?? .3, c01(.6 * X + .4 * ENG.base) * S.awake, dt, .4, 1.2);
+  const feS = .35 + .65 * S.fe;   // the beat, hits and swells grow with the energy: a calm passage stays small
+  const rawScale = ((.48 + .03 * loudF + .64 * Math.pow(S.fe, 1.1) + feS * (BOUNCE.k * (1 - ORGD.R) * (S.grid * pulseBeat * (.05 + .06 * S.down) * lockF + (1 - S.grid * Math.min(1, lockF)) * kickV * .04) * S.awake * (.3 + 1.3 * X) * T.pulse + S.drop * .06 + (swell + contrast) * S.awake)) * T.size);   // calm ~.55-.7 (tiny), intense ~1.1: it expands as the song does
   // a soft ceiling: above 1 the size compresses smoothly toward 1.18 (beats still show), so it never outgrows the window
   const quiet = c01(S.quiet / 4);
-  // resting breath: slow (~12 per minute) and its own, never the musical pulse (that read as a phantom beat in silence)
-  SLEEP.bp += dt * .2;
-  const breath = quiet * .012 * Math.sin(2 * Math.PI * SLEEP.bp);
+  // resting breath: slow (~12 per minute) and its own, never the musical pulse (that read as a phantom beat in silence);
+  // awake under music with no beat it keeps breathing (LIFE.breath), a little faster when roused, with a sigh every few minutes
+  const awakeB = LIFE.breath ? S.awake * (1 - SLEEP.z) * (1 - c01(mind.lock * 1.6)) * (1 - S.fe) : 0;
+  SLEEP.bp += dt * (.2 + .15 * mind.arousal * awakeB);
+  if (LIFE.breath) { BREATH.sigh = Math.max(0, BREATH.sigh - dt / 2.5); if (awakeB > .4 && Math.random() < dt / 180) BREATH.sigh = 1; }
+  const breath = (quiet * .012 + awakeB * (.005 + .012 * BREATH.sigh)) * Math.sin(2 * Math.PI * SLEEP.bp);
   const beingScale = rawScale * (1 + .07 * mind.daAnticipation - .06 * B.recoil + .03 * B.flinch) + breath;
-  U.uScale.value = Math.max(.62, beingScale <= 1 ? beingScale : 1 + .18 * Math.tanh((beingScale - 1) / .18));
+  U.uScale.value = Math.max(.45, beingScale <= 1 ? beingScale : 1 + .18 * Math.tanh((beingScale - 1) / .18));
   // energy sets the texture slowly: calm is thick and syrupy, intense is thin and separate
   S.k += (THREE.MathUtils.lerp(.38, .08, X) * T.visc * (1 + .3 * Math.min(1, Q.flow)) * (1 + wt * .4) - S.k) * (1 - Math.exp(-dt * 2)); U.uK.value = S.k;   // calm: thick and syrupy; wild: thin and splitting
   if (look.light === 'rng') lightTo.setRGB(rngRgb[0], rngRgb[1], rngRgb[2]);
@@ -2406,7 +2840,7 @@ renderer.setAnimationLoop(ts => {
     // positive valence leans towards amber, negative towards deep blue, along the shorter way round the hue circle
     const toward = v >= 0 ? .08 : .62; let dh = toward - h0; if (dh > .5) dh -= 1; if (dh < -.5) dh += 1;
     B.hue = (((h0 + dh * Math.min(1, Math.abs(v)) * .8) % 1) + 1) % 1;
-    lightTo.setHSL(B.hue, .35 + .55 * mind.arousal, .5 + .12 * c01(mind.daTonic + .5) + .1 * B.chill);
+    lightTo.setHSL(B.hue, .3 + .6 * ENG.base, .5 + .12 * c01(mind.daTonic + .5) + .1 * B.chill);
   }
   else { const l = LIGHT[look.light] || LIGHT.solar; lightTo.setRGB(l[0], l[1], l[2]); }
   { const ml = materialLight(MAT.m.shown); if (ml) lightTo.lerp(COS.c.setRGB(...ml.rgb), ml.w); }   // what it is made of colours its light
@@ -2418,15 +2852,16 @@ renderer.setAnimationLoop(ts => {
   if (ORGD.k > 0) metalTo.lerp(ORGD.col, ORGD.metalW * ORGD.k);   // and the metal itself takes its skin's colour (ORGD, by strength)
   U.uMetal.value.lerp(metalTo, 1 - Math.exp(-dt * 2));
   // glow follows level and dopamine, which can step in one frame: eased (rise ~80 ms, fall ~400 ms) so it swells, never cuts
-  { const g = (.28 + S.awake * (.22 + X * .55 + st.level * .25)) * (.6 + .75 * loudF + contrast) * T.glow * (1 + .35 * Math.max(0, mind.daPhasic) + .4 * B.chill) * COS.glow * (1 + EXT.glow) * (1 + ORGD.glow);
+  { const g = (.28 + S.awake * (.22 + X * .55 + st.level * .25)) * (.6 + .75 * Math.min(loudF, .2 + .8 * ENG.base) + contrast) * T.glow * (1 + .35 * Math.max(0, mind.daPhasic) + .4 * B.chill) * COS.glow * (1 + EXT.glow) * (1 + ORGD.glow) * (MIRROR.on ? mirGlow(dt) : 1) * (1 + AWE.glow) * (1 + .9 * BOLT.flash);
     U.uGlow.value += (g - U.uGlow.value) * (1 - Math.exp(-dt / (g > U.uGlow.value ? .08 : .4))); }
   cosmosFrame(dt);
   U.uFilm.value = Math.max(U.uFilm.value, B.chill * .9, COS.film);
-  if (!frozen) time += dt * (.3 + S.awake * .7) * (1 + .4 * Q.den - .3 * Q.flow) * (.65 + .35 * mind.energy) * COS.flow;
+  if (!frozen) time += dt * (.3 + S.awake * .7) * (1 + .4 * Q.den - .3 * Q.flow) * (.65 + .35 * mind.energy) * COS.flow * (MIRROR.on ? MIR.out.surge : 1);
   U.uTime.value = time; U.uAwake.value = S.awake;
   beingBody(dt, t);
   S.look.lerp(S.lookTo, 1 - Math.exp(-dt * 3)); U.uLook.value.copy(S.look);
   if (look.hud && f0 - hudT > 66) { hudT = f0; updateHud(f0, st); }
+  hitFrame(dt);
   mlFrame(dt, f0, kickV, snareV, hatV, st);
   CELLAB?.frame(dt);
   devFrame(f0);
@@ -2437,9 +2872,11 @@ renderer.setAnimationLoop(ts => {
   EXT.frame?.(dt, 0);   // the local folder's own steps: before the full-screen spread and after the body's size is set
   immersiveFrame(dt);
   EXT.frame?.(dt, 1);
+  mirrorFrame(dt, st);
   danceFrame(dt);
   voiceFrame(dt);
   hatchFrame(dt); formFrame(dt); reactFrame(dt);
+  aweFrame(dt); thinkFrame(dt); fidgetFrame(dt);
   beadsFrame(dt);
   gpuPoll(); QUAL.gpu = FTM.poll();
   // fast asleep (silence: shell whole, breathing at ~0.2 Hz, everything dimmed), or capped by the governor on a fast display: draw every other frame. The aura runs two of its passes in one

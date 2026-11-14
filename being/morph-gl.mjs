@@ -12,6 +12,7 @@ const BAKE_GLSL = /* glsl */`
   uniform vec3 uAxis; uniform float uSym, uMirror, uFreq, uCrisp;
   uniform vec4 uCW[ ${CPPN_W / 4} ]; uniform vec4 uCA[ ${(CPPN_LAYERS * CPPN_UNITS) / 4} ]; uniform vec3 uLatent;
   uniform vec4 uCells, uCells2, uPollen, uPollen2, uTuring, uLace, uLace2, uMotion;
+  uniform vec4 uLive, uLiveR, uLive2;   // uLive2: zoom, rotation, pan x, pan y (the page's LACE, new each appearance and moving all the time)   // the fractal lace, live: x energy, y harmony (an angle round the circle of fifths), z the beat, w its own flow; uLiveR: where on the body it is centred (two angles)
   uniform vec4 uImpA, uImpB, uImpC;              // the elements the song lived through: fire water air earth | saturn jupiter mars sun | venus mercury moon -
   uniform vec4 uPts[ 256 ];                    // cell centres (xyz) and tissue code (w: compartment + .5 rim + .49 variation)
   uniform sampler2D uAtt;
@@ -196,6 +197,16 @@ const BAKE_GLSL = /* glsl */`
     q = mat2( c_, - s_, s_, c_ ) * q;
     int kind = int( uLace.w + .5 );
     vec2 P = uLace2.xy; float Z = uLace2.z;
+    // live: the window drifts over the set and breathes with the energy and the beat; the set's own constant orbits with the
+    // harmony (a Julia set changes shape as the music moves round the circle of fifths), a little wider the more intense it is
+    { float c = cos( uLive2.y ), s = sin( uLive2.y ); q = mat2( c, - s, s, c ) * q; }
+    bool bounded = kind == 2 || kind == 14 || ( kind >= 6 && kind <= 9 );   // sets that live in a small disc: kept in frame
+    q = q * ( bounded ? clamp( uLive2.x, .45, 1.7 ) : uLive2.x ) + uLive2.zw * ( bounded ? .35 : 1. );
+    vec2 orb = vec2( cos( uLive.y ), sin( uLive.y ) ) * ( .4 + .9 * uLive.x );
+    if ( kind == 2 || kind == 14 ) P += .05 * orb;
+    else if ( kind == 3 || kind == 4 || kind == 10 ) P += Z * .6 * orb;
+    else if ( kind == 11 ) P += vec2( .03, .06 ) * orb;
+    else if ( kind == 1 || kind == 5 ) P.x += .25 * orb.x;
     if ( kind == 1 ) {   // Kleinian / Mandelbox folds: box folds and circle inversions
       float k = 1.5 + uLace.y * 2.; vec2 z = q * k, c0 = z; float dr = 1., S = -1.5 - P.x * .9, trap = 1e9;
       for ( int i = 0; i < 12; i++ ) { z = clamp( z, -1., 1. ) * 2. - z; float r2 = dot( z, z ); if ( r2 < .25 ) { z *= 4.; dr *= 4.; } else if ( r2 < 1. ) { z /= r2; dr /= r2; } z = z * S + c0; dr = dr * abs( S ) + 1.; trap = min( trap, abs( length( z ) - 1. ) ); }
@@ -277,7 +288,7 @@ const BAKE_GLSL = /* glsl */`
     }
     // 0: Apollonian circles (circle inversions)
     q = q * ( 1.2 + uLace.y * 1.6 ) + vec2( .31, .17 );
-    float scale = 1., ls = uLace.x;
+    float scale = 1., ls = uLace.x + .07 * sin( uLive.y ) * ( .4 + uLive.x );
     for ( int i = 0; i < 9; i++ ) {
       q = - 1. + 2. * fract( .5 * q + .5 );
       float r2 = max( dot( q, q ), 1e-4 ), k = ls / r2; q *= k; scale *= k;
@@ -287,6 +298,7 @@ const BAKE_GLSL = /* glsl */`
     return vec4( .3 + .65 * ( 1. - smoothstep( 0., w * 4., dist ) ), line * ( 1. - deep ), ( 1. - line ) * deep * .8, line * deep );
   }
   vec4 lace( vec3 f ) {   // no seam at the equator; only the hemispheres that show are computed
+    { float a = uLiveR.x, b = uLiveR.y; f.xz = mat2( cos( a ), - sin( a ), sin( a ), cos( a ) ) * f.xz; f.yz = mat2( cos( b ), - sin( b ), sin( b ), cos( b ) ) * f.yz; }   // centred where it wanders to, not always at the poles
     float w = smoothstep( -.3, .3, f.y );
     if ( w < .001 ) return fractalHemi( f, -1. ); if ( w > .999 ) return fractalHemi( f, 1. );
     return mix( fractalHemi( f, -1. ), fractalHemi( f, 1. ), w );
@@ -351,7 +363,7 @@ export function createMorph(renderer, THREE, { size = 384, mipmaps = true, half 
     uLatent: { value: new THREE.Vector3() },
     uCells: { value: new THREE.Vector4(8, .5, .5, .08) }, uCells2: { value: new THREE.Vector4() },
     uPollen: { value: new THREE.Vector4() }, uPollen2: { value: new THREE.Vector4() }, uTuring: { value: new THREE.Vector4(20, 0, 0, 1) },
-    uLace: { value: new THREE.Vector4(1.1, 1, 0, 0) }, uLace2: { value: new THREE.Vector4() }, uImpA: { value: new THREE.Vector4() }, uImpB: { value: new THREE.Vector4() }, uImpC: { value: new THREE.Vector4() }, uMotion: { value: new THREE.Vector4() },
+    uLace: { value: new THREE.Vector4(1.1, 1, 0, 0) }, uLace2: { value: new THREE.Vector4() }, uImpA: { value: new THREE.Vector4() }, uImpB: { value: new THREE.Vector4() }, uImpC: { value: new THREE.Vector4() }, uMotion: { value: new THREE.Vector4() }, uLive: { value: new THREE.Vector4() }, uLiveR: { value: new THREE.Vector4() }, uLive2: { value: new THREE.Vector4(1, 0, 0, 0) },
     uPts: { value: Array.from({ length: 256 }, () => new THREE.Vector4(0, 1, 0, 0)) }, uAtt: { value: attTex },
     uPrev: { value: null }, uX: { value: 1 },
   };

@@ -82,8 +82,11 @@ export function governorStep(Q, ft, cpu, now, t) {
 
 /* the body's upscale: Catmull-Rom (sharper than the bilinear stretch a smaller canvas gets) clamped to the four nearest
    source texels (no ringing at the metal's edges), then a little contrast-adaptive sharpening (after AMD's CAS) that
-   restores the detail lost to the lower resolution without halos. Premultiplied alpha in and out. */
-export const UPSCALE_FRAG = /* glsl */`precision highp float; varying vec2 vUv; uniform sampler2D uSrc; uniform vec2 uSrcSize; uniform float uSharp;
+   restores the detail lost to the lower resolution without halos. Far below the window's resolution that crispness turns each
+   source texel's grain into a hard square (each covers 2x2 window pixels at k = .5), so from 1.25x to 2x the result eases into a
+   cubic B-spline (four bilinear taps), which is smoother and also nearer the full-resolution picture there (uSmooth).
+   Premultiplied alpha in and out. */
+export const UPSCALE_FRAG = /* glsl */`precision highp float; varying vec2 vUv; uniform sampler2D uSrc; uniform vec2 uSrcSize; uniform float uSharp, uSmooth;
   vec4 at( vec2 tc ) { return texture2D( uSrc, tc / uSrcSize ); }
   void main() {
     vec2 sp = vUv * uSrcSize, tc = floor( sp - .5 ) + .5, f = sp - tc;
@@ -99,8 +102,17 @@ export const UPSCALE_FRAG = /* glsl */`precision highp float; varying vec2 vUv; 
     if ( uSharp > 0. ) {   // CAS: sharpen less where the neighbourhood already spans the full range
       vec4 blur = ( a + b + d + e ) * .25;
       vec3 amp = sqrt( clamp( min( mn.rgb, 1. - mx.rgb ) / max( mx.rgb, 1e-4 ), 0., 1. ) );
+      float m0 = max( c.r, max( c.g, c.b ) );
       c.rgb += ( c.rgb - blur.rgb ) * amp * uSharp;
       c = clamp( c, mn, mx );
+      float m1 = max( c.r, max( c.g, c.b ) );
+      if ( c.a < .98 && m0 > 1e-4 ) c.a *= clamp( m1 / m0, 0., 1. );   // a soft light dimmed by the sharpening loses its alpha with it: no dark rim on the desktop
+    }
+    if ( uSmooth > 0. ) {
+      vec2 b0 = ( 1. - f ) * ( 1. - f ) * ( 1. - f ) / 6., b1 = ( 4. - 6. * f * f + 3. * f * f * f ) / 6., b3 = f * f * f / 6., b2 = 1. - b0 - b1 - b3;
+      vec2 g0 = b0 + b1, g1 = b2 + b3, h0 = tc - 1. + b1 / g0, h1 = tc + 1. + b3 / g1;
+      vec4 q = at( h0 ) * g0.x * g0.y + at( vec2( h1.x, h0.y ) ) * g1.x * g0.y + at( vec2( h0.x, h1.y ) ) * g0.x * g1.y + at( h1 ) * g1.x * g1.y;
+      c = mix( c, q, uSmooth );
     }
     gl_FragColor = vec4( min( c.rgb, vec3( c.a ) ), c.a );
   }`;
@@ -117,7 +129,7 @@ export const DOWNSCALE_FRAG = /* glsl */`precision highp float; varying vec2 vUv
 
 export function createUpscale(THREE, renderer) {
   const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
-  const UU = { uSrc: { value: null }, uSrcSize: { value: new THREE.Vector2(1, 1) }, uSharp: { value: .35 }, uDstSize: { value: new THREE.Vector2(1, 1) } };
+  const UU = { uSrc: { value: null }, uSrcSize: { value: new THREE.Vector2(1, 1) }, uSharp: { value: .35 }, uSmooth: { value: 0 }, uDstSize: { value: new THREE.Vector2(1, 1) } };
   const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }';
   const up = new THREE.ShaderMaterial({ uniforms: UU, depthTest: false, depthWrite: false, vertexShader: VS, fragmentShader: UPSCALE_FRAG });
@@ -129,6 +141,7 @@ export function createUpscale(THREE, renderer) {
     /** src (a render target) -> this pass's target at its own size, up or down; returns the texture to show */
     render(src) {
       UU.uSrc.value = src.texture; UU.uSrcSize.value.set(src.width, src.height); UU.uDstSize.value.set(rt.width, rt.height);
+      UU.uSmooth.value = Math.min(1, Math.max(0, (rt.width / Math.max(1, src.width) - 1.25) / .75));   // 0 up to 1.25x, 1 at 2x
       quad.material = src.width > rt.width ? down : up;
       const prev = renderer.getRenderTarget(); renderer.setRenderTarget(rt); renderer.render(scene, cam); renderer.setRenderTarget(prev);
       return rt.texture;

@@ -220,6 +220,9 @@ function buildLive() {
   b.append(h('div', { class: 'hearbar' }, P.steer, P.hearNote), P.hearGrid, h('div', { class: 'sub2', style: 'margin:10px 0 3px' }, 'top genre over time'), P.genreC, h('div', { class: 'sub2', style: 'margin:8px 0 3px' }, 'embedding'), P.embC);
   hover(P.genreC, (x) => { const a = hearHist; if (!a.length) return ''; const i = Math.floor(x * Math.max(HEARN, a.length)) - (Math.max(HEARN, a.length) - a.length); const e = a[i]; return e ? `${e.g} · ${fmt(e.p, 2)}` : ''; });
   hover(P.embC, (x) => { const e = S && S.brain && S.brain.emb; return e ? `dim ${Math.floor(x * e.length)} · ${fmt(e[Math.min(e.length - 1, Math.floor(x * e.length))], 2)}` : ''; });
+  // intensity over the song: what the music is (the model's perceived arousal, and the moment within it) against how big ON is
+  b = panel('energy', 'Intensity and ON', true); P.engC = canvas(140); b.append(h('div', { class: 'sub2', style: 'margin:0 0 4px' }, 'this song: music intensity (blue), the moment (grey), ON\'s size (warm); the size should follow the blue'), P.engC);
+  hover(P.engC, (x) => { const a = ENGH.rows; if (!a.length) return ''; const r = a[Math.min(a.length - 1, Math.floor(x * a.length))]; return `${fmt(r.t - a[0].t, 0)} s · music ${fmt(r.music)} · moment ${fmt(r.moment)} · size ${fmt(r.size)}`; });
   b = panel('ear', 'Ear', true); P.earC = canvas(150); P.earKv = h('div', { class: 'kv' }); b.append(P.earC, P.earKv);
   hover(P.earC, (x, y) => { const w = P.earC.clientWidth, i = Math.floor((x * w - 34) / (w - 34) * HN) - (HN - coch.length), col = coch[i]; if (!col) return ''; const k = Math.max(0, Math.min(27, Math.floor((1 - y * P.earC._h / (P.earC._h - 12)) * 28))); return `${Math.round(55 * 2 ** (k / 4))} Hz · ${fmt(col[k], 2)}`; });
   // rhythm
@@ -286,6 +289,7 @@ function render(force) {
   const gpu = lastGpu; $('#perf').textContent = `${s.perf.fps} fps` + (gpu.body ? ` · body ${fmt(gpu.body.median, 1)} ms` : '') + (gpu.bake ? ` · skin ${fmt(gpu.bake.median, 1)} ms` : '');
   const n = overrideCount(d); $('#ovr').hidden = !n; $('#ovr').textContent = n + (n === 1 ? ' override' : ' overrides') + ' ×';
   drawHearing(s.brain || null);
+  engDraw();
   // ear (the cochleagram history grows only while live)
   heat(P.earC, HN, 28, (x, y) => { const col = coch[x - (HN - coch.length)]; return col ? col[y] : null; }, { left: 34, bottom: 12, rowLabels: [[0, '55 Hz'], [8, '220'], [16, '880'], [24, '3.5k']], colLabels: [[0, '−' + Math.round(HN * DT) + ' s'], [HN, 'now', 'right']] });
   P.earKv.replaceChildren(...kv([['level', s.ear && s.ear.level, 4], ['onset', s.ear && s.ear.onset], ['roughness', s.ear && s.ear.rough], ['sub-bass', s.ear && s.ear.sub], ['hum', s.ear && s.ear.hum], ['tissue σ', s.tissue.sigma], ['branching', s.tissue.branching], ['coherence', s.tissue.coherence]]));
@@ -352,6 +356,8 @@ function feed(s) {
   DEXT.feed?.(s);
   if (CTL.jMode && s.journey) { const j = s.journey; if (document.activeElement !== CTL.jMode) CTL.jMode.value = j.mode; if (document.activeElement !== CTL.jPal) CTL.jPal.value = j.pal;
     CTL.jInfo.textContent = j.mode === 'off' ? '' : `journey ${fmt(j.journey, 2)} · absorption ${fmt(j.absorption, 2)}`; }
+  if (CTL.mirror) { CTL.mirror.classList.toggle('on', s.mirror !== false); CTL.mirror.textContent = s.mirror !== false ? 'Follow the sound: on' : 'Follow the sound: off'; }
+  if (CTL.mirrorGain && Number.isFinite(s.mirrorGain) && document.activeElement !== CTL.mirrorGain._inp) { CTL.mirrorGain._inp.value = s.mirrorGain; CTL.mirrorGain._out.textContent = fmt(s.mirrorGain, 2); }
   if (CTL.prop) { CTL.prop.classList.toggle('on', !!s.proposals); CTL.prop.textContent = s.proposals ? 'Proposal materials: on' : 'Proposal materials: off'; }
   if (s.ear) { coch.push(s.ear.amp.map((a) => Math.min(1, Math.log1p(a / .015) / 3))); if (coch.length > HN) coch.shift(); }
   push('err', s.timing.errMs); push('obpm', s.organ ? s.organ.bpm : 0); push('val', s.mind.valence); push('aro', s.mind.arousal); push('mood', s.mind.mood); push('da', s.mind.daPhasic); push('sur', s.mind.surprise); push('fps', s.perf.fps);
@@ -419,6 +425,8 @@ function buildRail(schema) {
   CTL.metal = colorRow('metal', 'Metal', (v) => dash.cmd({ k: 'metal', v }), () => dash.cmd({ k: 'metal', v: null }));
   CTL.mat = tag(h('select', { on: { change: () => dash.cmd({ k: 'material', v: +CTL.mat.value }) } }, h('option', { value: -1 }, 'Material: auto'), ...MATERIALS.map((m, i) => h('option', { value: i }, m))), 'material');
   CTL.prop = tag(h('button', { title: 'Show the proposed elements and planets (lab preview) instead of the current ones', on: { click: () => dash.cmd({ k: 'proposals', v: !(S && S.proposals) }) } }, 'Proposal materials: off'), 'proposals-rail');
+  CTL.mirrorGain = slider('How strongly it follows', .5, 3, .05, 1.8, (v) => dash.cmd({ k: 'mirrorGain', v })); tag(CTL.mirrorGain._inp, 'mirror-gain');
+  CTL.mirror = tag(h('button', { class: 'on', title: 'The fast body layer (being/mirror.mjs): hits, loudness and the beat move the body at once, in a style the song sets. Off: the movement as before, for comparison', on: { click: () => dash.cmd({ k: 'mirror', v: !(S && S.mirror !== false) }) } }, 'Follow the sound: on'), 'mirror');
   // edge experiments: each switch takes one candidate for the see-through outline away
   CTL.fx = {}; const fxRow = h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px' }, h('span', { class: 'sub2' }, 'Outline:'));
   for (const [k, label, tip] of [['aura', 'aura echo', 'the feedback trail: each frame echoed slightly larger behind the body'], ['rim', 'edge sheen', 'fresnel: the bright reflective rim at grazing angles'], ['halo', 'halo', 'the core light glowing round the silhouette'], ['thin', 'thin-metal light', 'light bleeding through where the shell is thin']]) {
@@ -454,7 +462,7 @@ function buildRail(schema) {
   CTL.jInfo = h('span', { class: 'sub2' });
   CTL.imm = tag(h('button', { title: 'ON alone on a black screen, its light free to spread across it (Escape leaves)', on: { click: async () => { const on = await dash.app('immersive', !(CTL.imm.classList.contains('on'))); CTL.imm.classList.toggle('on', !!on); } } }, 'Full screen (black)'), 'immersive');
   const jRow = h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px' }, CTL.jMode, CTL.jPal, CTL.jRamp, CTL.jInfo, CTL.imm);
-  $('#look').append(CTL.mem, CTL.nuc, CTL.cyto, CTL.stainAmt, CTL.light, CTL.metal, CTL.mat, CTL.prop, fxRow, CTL.pix, CTL.lev, CTL.dith, gRow, CTL.gAmt, rRow, CTL.rT, CTL.rE, jRow, CTL.jJ, CTL.jT);
+  $('#look').append(CTL.mem, CTL.nuc, CTL.cyto, CTL.stainAmt, CTL.light, CTL.metal, CTL.mat, CTL.mirror, CTL.mirrorGain, CTL.prop, fxRow, CTL.pix, CTL.lev, CTL.dith, gRow, CTL.gAmt, rRow, CTL.rT, CTL.rE, jRow, CTL.jJ, CTL.jT);
   DEXT.look?.();
   // skin: family mix override, maturity
   CTL.famAuto = tag(h('button', { class: 'on', on: { click: () => dash.cmd({ k: 'family', v: null }) } }, 'auto'), 'family-auto');
@@ -593,9 +601,29 @@ function sticky(s) {
   if (s.uniNames && CTL.uList && !CTL.uNames) { CTL.uNames = new Set(s.uniNames); CTL.uList.replaceChildren(...s.uniNames.map((n) => h('option', { value: n }))); }
   if (!s.skinPng && sticky.png) s.skinPng = sticky.png;
 }
+// the intensity graph keeps the whole song (a new title starts it again), at most 4 samples a second
+const ENGH = { key: '', rows: [], last: -1 };
+function engFeed(s) {
+  const e = s.energy; if (!e) return;
+  const key = (s.memory && s.memory.title) || (s.app && s.app.track && s.app.track.title) || '';
+  if (key !== ENGH.key) { ENGH.key = key; ENGH.rows = []; ENGH.last = -1; }
+  if (e.t - ENGH.last < .25 && e.t >= ENGH.last) return; ENGH.last = e.t;
+  ENGH.rows.push(e); if (ENGH.rows.length > 4 * 60 * 15) ENGH.rows.splice(0, ENGH.rows.length - 4 * 60 * 15);
+}
+function engDraw() {
+  const c = P.engC; if (!c || !live(c)) return; const a = ENGH.rows; const [g, w, hh] = ctx2d(c);
+  g.strokeStyle = C.grid; g.lineWidth = 1; for (const v of [0, .5, 1]) { const y = Math.round(hh - 14 - v * (hh - 22)) + .5; g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+  if (a.length < 2) return;
+  const n = a.length, x = (i) => i / (n - 1) * w, y = (v) => hh - 14 - Math.max(0, Math.min(1, v)) * (hh - 22);
+  const line = (f, col, lw) => { g.strokeStyle = col; g.lineWidth = lw; g.lineJoin = 'round'; g.beginPath(); a.forEach((r, i) => (i ? g.lineTo(x(i), y(f(r))) : g.moveTo(x(i), y(f(r))))); g.stroke(); };
+  line((r) => r.moment, C.muted || '#888', 1);
+  line((r) => r.music, C.c1, 2);
+  line((r) => (r.size - .45) / (1.18 - .45), C.c4 || '#e8a040', 2);   // ON's size on its own range: .45 tiny .. 1.18 full
+  const dur = a[n - 1].t - a[0].t; g.fillStyle = C.ink2; g.font = '11px "Segoe UI"'; g.fillText('0 s', 2, hh - 2); const lab = fmt(dur, 0) + ' s'; g.fillText(lab, w - g.measureText(lab).width - 2, hh - 2);
+}
 let built = false, pending = false;
 dash.schema().then((schema) => { buildRail(schema); });
-dash.onSnap((s) => { S = s; sticky(s); if (!built) { built = true; buildLive(); } if (ORG.feed) ORG.feed(s.organism, frozen); else if (s.organism && s.organism.static) ORG.early = s.organism; ORG.feedDrive?.(s.orgDrive, frozen); if (!frozen) CLB.feed?.(s.cellab); if (!frozen) feed(s); if (!frozen && !pending) { pending = true; requestAnimationFrame(() => { pending = false; try { render(); } catch (e) { console.error(e); } }); } });
+dash.onSnap((s) => { S = s; sticky(s); if (!built) { built = true; buildLive(); } if (ORG.feed) ORG.feed(s.organism, frozen); else if (s.organism && s.organism.static) ORG.early = s.organism; ORG.feedDrive?.(s.orgDrive, frozen); if (!frozen) CLB.feed?.(s.cellab); if (!frozen) { feed(s); engFeed(s); } if (!frozen && !pending) { pending = true; requestAnimationFrame(() => { pending = false; try { render(); } catch (e) { console.error(e); } }); } });
 addEventListener('resize', () => { if (S) render(true); });
 </script>
 </body>

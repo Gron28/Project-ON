@@ -47,12 +47,13 @@ export const bodyFragment = ({ EXT, NOTES, ND, NT, TP, NS }) => `
   uniform vec4 uT[ ${NT * TP} ]; uniform vec4 uTB[ ${NT} ]; uniform float uRimK; uniform float uHaloK; uniform float uThinK; uniform vec4 uS[ ${NS} ];
   uniform float uGrain; uniform float uFrac; uniform float uIntr; uniform float uDisp; uniform float uSeed; uniform float uSplit; uniform float uRays; uniform float uCool; uniform float uCrisp; uniform float uSpikeP; uniform float uFlowS;
   uniform float uNoteTint; uniform vec3 uLight; uniform float uCoreR; uniform float uCoreI; uniform float uGlow; uniform float uK;
-  uniform float uRise; uniform float uMaskR; uniform float uImm; uniform vec4 uRiseSeed; uniform float uRW[ 8 ]; uniform float uEther;
+  uniform vec4 uGeo; uniform vec4 uRiseLive; uniform float uRise; uniform float uMaskR; uniform float uImm; uniform vec4 uRiseSeed; uniform float uRW[ 8 ]; uniform float uEther;
   uniform float uJour; uniform float uPeak; uniform float uPhen[ 8 ]; uniform float uCyA; uniform float uCyN; uniform float uCyPh; uniform vec3 uCyAx; uniform float uPhenT; uniform float uPhenK; uniform float uPhenS; uniform float uMarb; uniform float uIllum; uniform float uAbsorption; uniform float uJFlow; uniform float uJBars; uniform float uJPal;
   uniform float uShellR; uniform float uThick; uniform float uOpen; uniform float uHalo; uniform float uChaos; uniform float uVar; uniform sampler2D uSkin; uniform float uSkinA; uniform float uZoom; uniform float uEnv; uniform float uTurbSpeed; uniform float uTurbDetail; uniform float uWob;
   uniform float uSpikes; uniform float uSpikeF; uniform float uFilm; uniform vec3 uMetal;
   uniform float uRing; uniform float uRingA; uniform float uRing2; uniform float uRing2A;
   uniform float uSparks; uniform float uMote; uniform float uAwake; uniform float uHat; uniform float uKick;
+  uniform vec4 uHw[ 8 ]; uniform vec4 uHs[ 8 ]; uniform float uHitA;   // each heard drum hit as its own wave over the skin: uHw dir + age (s), uHs type (0 kick, 1 snare, 2 hat), strength
   uniform float uSH[ 21 ]; uniform vec4 uJc; uniform float uJw; uniform float uNuc; uniform float uNucRot; uniform vec3 uTissueC;
   uniform sampler2D uSongTex; uniform sampler2D uSongGlow; uniform float uSongAmt; uniform float uSongRot;
   uniform float uProp; uniform float uAro; uniform float uEcho; uniform vec4 uPWa; uniform vec4 uPWb; uniform vec4 uPWc; uniform vec4 uCast;${EXT.shader.decl}
@@ -141,10 +142,10 @@ ${CA_GLSL}
   float rTrap;   // orbit trap of the last form evaluated, for its light
   const float RPHI = 1.618034, RR = .62;
   float rBulb( vec3 p ) {   // the Mandelbulb, its power breathing
-    vec3 z = p; float dr = 1., r = 0., n = mix( 5., 9.5, uRiseSeed.x ) - 2. * ( .5 + .5 * sin( uTime * .23 ) ) * ( 1. - uRise ); rTrap = 1e9;   // each song its own power
+    vec3 z = p; float dr = 1., r = 0., n = mix( 5., 9.5, uRiseSeed.x ) - 2. * ( .5 + .5 * sin( uTime * .23 ) ) * ( 1. - uRise ) + 1.6 * uRiseLive.x + .7 * sin( uRiseLive.y ) + .5 * uRiseLive.z; rTrap = 1e9;   // each song its own power; it swells with the energy, turns with the harmony, kicks on the beat
     for ( int i = 0; i < 7; i++ ) {
       r = length( z ); if ( r > 2. ) break;
-      float th = acos( clamp( z.y / r, -1., 1. ) ) + uTime * .05 + uRiseSeed.y * 3., ph = atan( z.z, z.x ) + uRiseSeed.z * 6.;
+      float th = acos( clamp( z.y / r, -1., 1. ) ) + uRiseLive.w * .08 + uRiseSeed.y * 3., ph = atan( z.z, z.x ) + uRiseSeed.z * 6.;
       dr = pow( r, n - 1. ) * n * dr + 1.;
       z = pow( r, n ) * vec3( sin( th * n ) * cos( ph * n ), cos( th * n ), sin( th * n ) * sin( ph * n ) ) + p;
       rTrap = min( rTrap, dot( z, z ) );
@@ -161,12 +162,12 @@ ${CA_GLSL}
   float rCrystal( vec3 p ) {   // the Sierpinski icosahedron (scale phi^2)
     float s = 1.; rTrap = 1e9;
     float S = mix( 2.35, 2.95, uRiseSeed.z );   // each song its own scale and twist
-    for ( int i = 0; i < 3; i++ ) { p = p * S - rNearV( p ) * ( S - 1. ); p.xy *= rot( ( .2 * sin( uTime * .21 + float( i ) ) + ( uRiseSeed.y - .5 ) * 1.2 ) * uRise ); p.yz *= rot( ( uRiseSeed.w - .5 ) * .8 * uRise ); s *= S; rTrap = min( rTrap, length( p ) ); }
+    for ( int i = 0; i < 3; i++ ) { p = p * S - rNearV( p ) * ( S - 1. ); p.xy *= rot( ( .2 * sin( uRiseLive.w * .35 + float( i ) ) + .25 * sin( uRiseLive.y ) + ( uRiseSeed.y - .5 ) * 1.2 ) * uRise ); p.yz *= rot( ( uRiseSeed.w - .5 ) * .8 * uRise ); s *= S; rTrap = min( rTrap, length( p ) ); }
     rTrap = clamp( rTrap * .5, 0., 1. );
     return ( ( abs( p.x ) + abs( p.y ) + abs( p.z ) ) * .57735 - .5 - .08 * sin( uTime * .4 ) ) / s;
   }
   float rApollo( vec3 p ) {   // Apollonian sphere inversion: spheres inside spheres
-    float sc = 1., k0 = mix( 1.02, 1.32, uRiseSeed.z ) + .1 * sin( uTime * .2 ); rTrap = 1e9;
+    float sc = 1., k0 = mix( 1.02, 1.32, uRiseSeed.z ) + .1 * sin( uRiseLive.w * .3 ) + .08 * sin( uRiseLive.y ) * ( .4 + uRiseLive.x ); rTrap = 1e9;
     for ( int i = 0; i < 6; i++ ) { p = -1. + 2. * fract( .5 * p + .5 ); float r2 = dot( p, p ); rTrap = min( rTrap, r2 ); float k = k0 / r2; p *= k; sc *= k; }
     rTrap = clamp( rTrap, 0., 1. );
     return .25 * abs( p.y ) / sc;
@@ -177,23 +178,38 @@ ${CA_GLSL}
       d = max( d, ( min( max( r.x, r.y ), min( max( r.y, r.z ), max( r.z, r.x ) ) ) - 1. ) / s ); }
     return d;
   }
-  const vec3 RG[ 16 ] = vec3[ 16 ](   // GDF face normals: icosahedron 0..9, dodecahedron 10..15
+  const vec3 RG[ 19 ] = vec3[ 19 ](   // GDF face normals: cube 0..2, octahedron 3..6, icosahedron 3..12, dodecahedron 13..18
+    vec3( 1., 0., 0. ), vec3( 0., 1., 0. ), vec3( 0., 0., 1. ),
     vec3( .577350, .577350, .577350 ), vec3( -.577350, .577350, .577350 ), vec3( .577350, -.577350, .577350 ), vec3( .577350, .577350, -.577350 ),
     vec3( 0., .356822, .934172 ), vec3( 0., -.356822, .934172 ), vec3( .934172, 0., .356822 ), vec3( -.934172, 0., .356822 ), vec3( .356822, .934172, 0. ), vec3( -.356822, .934172, 0. ),
     vec3( 0., .850651, .525731 ), vec3( 0., -.850651, .525731 ), vec3( .525731, 0., .850651 ), vec3( -.525731, 0., .850651 ), vec3( .850651, .525731, 0. ), vec3( -.850651, .525731, 0. ) );
   float rWire( vec3 p, float r, int a, int b, float w ) {   // the edges of a convex polyhedron: where its two nearest face planes meet
     float d1 = -1e9, d2 = -1e9;
-    for ( int i = 0; i < 16; i++ ) { if ( i < a || i >= b ) continue; float v = abs( dot( p, RG[ i ] ) ); if ( v > d1 ) { d2 = d1; d1 = v; } else if ( v > d2 ) d2 = v; }
+    for ( int i = a; i < b; i++ ) { float v = abs( dot( p, RG[ i ] ) ); if ( v > d1 ) { d2 = d1; d1 = v; } else if ( v > d2 ) d2 = v; }
     float sd = d1 - r;
     return max( length( vec2( max( sd, - .2 ), d2 - r ) ), abs( sd ) ) - w;
   }
-  float rGeo( vec3 p ) {   // nested icosahedron and dodecahedron wireframes, each 1/phi the last, counter-rotating
+  // the ladder of solids the cage climbs as the music intensifies: cube, octahedron, cuboctahedron, dodecahedron, icosahedron,
+  // icosidodecahedron, and every face of them at once (the face sets of RG; each rung has more faces than the last)
+  float rRung( vec3 p, float r, int L, float w ) {
+    if ( L <= 0 ) return rWire( p, r, 0, 3, w );
+    if ( L == 1 ) return rWire( p, r, 3, 7, w );
+    if ( L == 2 ) return rWire( p, r, 0, 7, w );
+    if ( L == 3 ) return rWire( p, r * .87, 13, 19, w );
+    if ( L == 4 ) return rWire( p, r, 3, 13, w );
+    if ( L == 5 ) return rWire( p, r, 3, 19, w );
+    return rWire( p, r, 0, 19, w );
+  }
+  float rGeo( vec3 p ) {   // nested shells of the solids, each 1/phi the last, counter-rotating; the music sets how many, how far up the ladder each is, and their spin (uGeo)
     float d = 1e9, r = RR * mix( .95, 1.15, uRise ); rTrap = 0.;
     for ( int k = 0; k < 6; k++ ) {
       float fk = float( k ), sg = mod( fk, 2. ) * 2. - 1.;
-      vec3 q = p; q.xz *= rot( sg * uTime * ( .11 + .04 * fk ) + uRiseSeed.y * 6. ); q.xy *= rot( sg * uTime * .07 + fk + uRiseSeed.w * 6. );
-      float e = ( k % 2 == 0 ) ? rWire( q, r, 0, 10, .006 + .004 * r ) : rWire( q, r * .87, 10, 16, .006 + .004 * r );
-      if ( e < d ) { d = e; rTrap = fk / 6.; }
+      if ( fk > uGeo.w + .99 ) break;
+      float lv = clamp( uGeo.x - .7 * fk, 0., 6. ), f = fract( lv ); int L = int( lv );
+      vec3 q = p; q.xz *= rot( sg * uGeo.y * ( 1. + .35 * fk ) + uRiseSeed.y * 6. ); q.xy *= rot( sg * uGeo.y * .6 + fk + uRiseSeed.w * 6. );
+      float rr = r * ( 1. + .07 * uGeo.z * ( 1. - mod( fk, 2. ) ) ), w = ( .006 + .004 * rr ) * clamp( uGeo.w + 1. - fk, .15, 1. );
+      float sf = L < 6 ? smoothstep( 0., 1., f ) : 0., e = rRung( q, rr, L, w * ( 1. - sf ) + 1e-4 ); if ( sf > .02 ) e = min( e, rRung( q, rr, L + 1, w * sf ) );   // the next solid's edges thicken in as the last one's thin away
+      if ( e < d ) { d = e; rTrap = fk / 6. + .08 * lv; }
       r /= RPHI;
     }
     return min( d, length( p ) - .035 );
@@ -204,7 +220,7 @@ ${CA_GLSL}
       vec3 v = rNearV( p );
       float h = clamp( dot( p, v ), 0., L ), e = ( length( p - v * h ) - .055 * ( 1. - .5 * h / L ) ) / sc;
       if ( e < d ) { d = e; rTrap = float( i ) / 4.; }
-      p -= v * L; p.xy *= rot( .25 * sin( uTime * .13 + float( i ) ) + ( uRiseSeed.y - .5 ) * 1.4 ); p *= B; sc *= B;
+      p -= v * L; p.xy *= rot( .25 * sin( uRiseLive.w * .25 + float( i ) ) + .2 * sin( uRiseLive.y ) + ( uRiseSeed.y - .5 ) * 1.4 ); p *= B; sc *= B;
     }
     return d;
   }
@@ -217,7 +233,7 @@ ${CA_GLSL}
     float d = 1e9, r = RR * mix( 1., 1.12, uRise ); rTrap = 0.;
     for ( int k = 0; k < 4; k++ ) {
       float fk = float( k ), sg = mod( fk, 2. ) * 2. - 1.;
-      vec3 q = p; q.xz *= rot( sg * uTime * ( .07 + .03 * fk ) + fk + uRiseSeed.y * 6. ); q.xy *= rot( sg * uTime * .05 + 2. * fk + uRiseSeed.z * 6. );
+      vec3 q = p; q.xz *= rot( sg * uRiseLive.w * ( .12 + .05 * fk ) + fk + uRiseSeed.y * 6. ); q.xy *= rot( sg * uRiseLive.w * .08 + 2. * fk + uRiseSeed.z * 6. + .3 * sin( uRiseLive.y ) );
       vec3 f = rIcoFold( q ), g = rIcoFold( vec3( q.xy * rot( .628318 ), q.z ) );
       float lines = min( min( f.x, min( f.y, f.z ) ), min( abs( dot( f, RN1 ) ), abs( dot( f, RN2 ) ) ) );
       float lines2 = min( min( g.x, min( g.y, g.z ) ), min( abs( dot( g, RN1 ) ), abs( dot( g, RN2 ) ) ) );
@@ -235,8 +251,8 @@ ${CA_GLSL}
     if ( v == 0 ) { float s = RR / 1.1 * mix( .9, 1.15, k ); return rBulb( p / s ) * s; }
     if ( v == 1 ) { float s = RR * mix( .5, 1.1, k ); return rCrystal( p / s ) * s; }
     if ( v == 2 ) { float s = mix( .12, .2, uRiseSeed.x ); return max( max( rApollo( p / s + uRiseSeed.yzw * 2. ) * s, r - RR * mix( 1., 1.25, k ) ), -( r - RR * .25 ) ); }
-    if ( v == 3 ) { vec3 q = p; q.xz *= rot( uTime * .05 + uRiseSeed.y * 3. ); q.yz *= rot( uRiseSeed.w * 2. ); float z = mix( 1.4, 1.1, k ) * mix( .8, 1.3, uRiseSeed.x ); return max( rSponge( q * z, ( r - RR * mix( 1., 1.3, k ) ) * z ) / z, -( r - RR * .5 * k ) ); }
-    if ( v == 4 ) { float s = RR / 1.05 * mix( .3, 1.1, k ) * mix( .85, 1.2, uRiseSeed.x ), tr; vec3 jq = p; jq.xy *= rot( uRiseSeed.y * 6.28 ); jq.yz *= rot( uRiseSeed.z * 6.28 ); float j = julia( jq / s, tr ) * s; rTrap = clamp( sqrt( tr ), 0., 1. ); return j; }
+    if ( v == 3 ) { vec3 q = p; q.xz *= rot( uRiseLive.w * .1 + uRiseSeed.y * 3. ); q.yz *= rot( uRiseSeed.w * 2. ); float z = mix( 1.4, 1.1, k ) * mix( .8, 1.3, uRiseSeed.x ); return max( rSponge( q * z, ( r - RR * mix( 1., 1.3, k ) ) * z ) / z, -( r - RR * .5 * k ) ); }
+    if ( v == 4 ) { float s = RR / 1.05 * mix( .3, 1.1, k ) * mix( .85, 1.2, uRiseSeed.x ), tr; vec3 jq = p; jq.xy *= rot( uRiseSeed.y * 6.28 + uRiseLive.w * .1 ); jq.yz *= rot( uRiseSeed.z * 6.28 ); float j = julia( jq / s, tr ) * s; rTrap = clamp( sqrt( tr ), 0., 1. ); return j; }
     if ( v == 5 ) return rGeo( p );
     if ( v == 6 ) { float s = RR * 1.25; return rCoral( p / s ) * s; }
     return rLattice( p );
@@ -329,6 +345,25 @@ ${CA_GLSL}
   vec2 jSphereUV( vec3 s ) { return vec2( atan( s.x, s.z ) / JTAU * 16., asin( clamp( s.y, -1., 1. ) ) / JTAU * 16. ) + vec2( 0., uJFlow * .02 ); }
   float jReveal( vec3 s ) { return 1. - smoothstep( uIllum * 3.4 - .3, uIllum * 3.4, acos( clamp( dot( s, normalize( vec3( .3, .8, .5 ) ) ), -1., 1. ) ) ); }   // the engraving grows across the body from one point
   float jRelief( vec3 n ) { vec3 s = jSpin( n ); return jPlait( jSphereUV( s ), .06, .06 ).a * jReveal( s ); }   // the engraving's depth
+  // the drums, each its own wave (the page's HITW): a kick is a wide, deep ring rolling slowly out from its region, a snare a
+  // sharp quick crest, a hat a fine shiver; each runs from where that instrument lives in the body (mirror.mjs's body map)
+  vec2 hitAt( vec3 n, int i ) {   // x: height, y: light, for one hit
+    float age = uHw[ i ].w, s = uHs[ i ].y, a = acos( clamp( dot( n, uHw[ i ].xyz ), -1., 1. ) );
+    if ( uHs[ i ].x < .5 ) { float R = 2.3 * age, w = .3, f = ( a - R ) / w, e = s * exp( - age / .55 ) * smoothstep( 0., .03, age ) * smoothstep( 3.3, 2.6, R );
+      return vec2( e * .075 * ( exp( - f * f ) - .55 * exp( - ( f + 1.4 ) * ( f + 1.4 ) ) ), e * exp( - f * f ) ); }
+    if ( uHs[ i ].x < 1.5 ) { float R = 3.8 * age, w = .085, f = ( a - R ) / w, e = s * exp( - age / .32 ) * smoothstep( 3.3, 2.6, R );
+      return vec2( e * .04 * exp( - f * f ), e * exp( - f * f ) ); }
+    float R = 5.5 * age, w = .07, f = ( a - R ) / w;
+    if ( abs( f ) > 3.5 ) return vec2( 0. );   // a hat's crest is thin: off it, exp(-f^2) < 5e-6
+    float e = s * exp( - age / .16 ) * smoothstep( 3.3, 2.6, R ), r = exp( - f * f );
+    return vec2( e * .009 * r * sin( a * 120. ), e * r * smoothstep( .3, 1., sin( a * 120. + age * 40. ) ) );
+  }
+  vec2 hitWaves( vec3 n ) { vec2 h = vec2( 0. ); for ( int i = 0; i < 8; i++ ) if ( uHs[ i ].y > .01 ) h += hitAt( n, i ); return h * uHitA; }
+  vec3 hitLight( vec3 n ) {   // kicks glow deep and warm along their ring, snares white, hats a cold glitter
+    vec3 c = vec3( 0. );
+    for ( int i = 0; i < 8; i++ ) if ( uHs[ i ].y > .01 ) { float l = hitAt( n, i ).y; c += l * ( uHs[ i ].x < .5 ? mix( uLight, vec3( 1., .45, .2 ), .5 ) * .5 : uHs[ i ].x < 1.5 ? vec3( 1., .97, .92 ) * .9 : vec3( .6, .9, 1. ) * 1.4 ); }
+    return c * uHitA;
+  }
   float map( vec3 p ) {
     p.x /= 1. + uWide;
     float pr = uProp > .5 ? propShape( p ) : 0.;   // lab: the proposed materials move the shell itself outward from the nucleus
@@ -380,6 +415,7 @@ ${CA_GLSL}
         disp += uIntr * .011 * sin( p.x * 17. + uTime * 1.1 + sin( p.y * 9. ) ) * sin( p.y * 15. - uTime * .9 ) * sin( p.z * 13. + uTime * .7 ) * smoothstep( .2, 0., d );
       }
       disp += shDisp( normalize( p ) ) * smoothstep( .3, 0., d );
+      if ( uHitA > .001 && d < .25 ) disp += hitWaves( normalize( p ) ).x * smoothstep( .25, 0., d );   // the drums' waves (eight hits per march step: skipped where their weight is 0)
       if ( uCyA > .001 ) {   // cymatics: the leading planet's number as a sectoral standing wave of the whole body (Saturn 3 ... Moon 9), round a slowly turning axis
         vec3 nn = normalize( p ), e1 = normalize( cross( uCyAx, vec3( .31, .17, .93 ) ) ), e2 = cross( uCyAx, e1 );
         float st = length( cross( nn, uCyAx ) ), phi = atan( dot( nn, e2 ), dot( nn, e1 ) );
@@ -397,7 +433,7 @@ ${CA_GLSL}
         disp += ( ( hgt - .45 ) * .09 + gl * .025 ) * uSongAmt * smoothstep( .25, 0., d ) * ( 1. - smoothstep( .85, .99, abs( sn.y ) ) ); }   // the remembered song raises and carves the metal
       if ( uMorphA > .01 ) disp += ( textureLod( uMorph, normalize( p ), 1. ).r - .5 ) * 2. * uMorphD * uMorphA * smoothstep( .15, 0., d );   // the song's grown form (morph.mjs)
       if ( uIllum > .01 ) disp -= jRelief( normalize( p ) ) * .004 * smoothstep( .15, 0., d );   // the journey's engraving, cut into the metal
-      if ( uSkinA > .01 ) { vec3 sn = normalize( p ), sk = skinSample( uSkin, sn ); disp += ( sk.r - .3 ) * .035 * uSkinA * smoothstep( .15, 0., d ) * ( 1. - smoothstep( .85, .99, abs( sn.y ) ) ); }   // fades at the poles, where the texture pinches   // the living skin raises the metal where it grows
+      if ( uSkinA > .01 ) { vec3 sn = normalize( p ); disp += ( skinHeight( uSkin, sn ) - .3 ) * .035 * uSkinA * smoothstep( .15, 0., d ) * ( 1. - smoothstep( .85, .99, abs( sn.y ) ) ); }   // fades at the poles, where the texture pinches   // the living skin raises the metal where it grows
       if ( uCaA > .01 ) disp += ( caLook( normalize( p ) ).a - .35 ) * uCaD * uCaA * smoothstep( .15, 0., d );   // the automaton carves the metal: live cells raised, resting ones sunk
       d -= clamp( disp, - .12, .12 ) * smoothstep( - .012, .012, shellTh( p ) );   // displacement never refills the holes where the metal has parted
     }
@@ -991,6 +1027,7 @@ ${CA_GLSL}
         float spine = smoothstep( .012, -.006, serpentD( p ) );   // its spine: a line of light along the crest, swelling on the beat
         col += mix( uLight, vec3( .85, .95, 1. ), .5 ) * spine * ( .12 + .3 * uBeatPulse ) * ( .4 + uGlow );
       }
+      if ( uHitA > .001 ) col += hitLight( sn ) * ( .5 + .6 * uGlow );   // the drums' waves catch the light, each its own colour
       if ( uGlisten > .01 ) {   // glistening: tiny facets each catching the light for a moment
         vec3 g = floor( sn * 150. ); float hh = hash3( g );
         vec3 fn = normalize( n + ( vec3( hash3( g + 3.1 ), hash3( g + 7.7 ), hash3( g + 1.3 ) ) - .5 ) * .55 );
@@ -1162,7 +1199,7 @@ ${EXT.shader.screen}
     vec3 mapped = 1. - exp( - col * 1.22 );
     float lum = dot( col, vec3( .2126, .7152, .0722 ) ), mLum = 1. - exp( - lum * 1.22 );
     col = mix( mapped, col * ( mLum / max( lum, 1e-4 ) ), .28 );
-    alpha = max( alpha, clamp( max( col.r, max( col.g, col.b ) ) * 1.25, 0., 1. ) ) * smoothstep( uMaskR, uMaskR * .8, length( uvW ) );   // its round window; full screen, it opens
+    alpha = max( alpha, clamp( max( col.r, max( col.g, col.b ) ), 0., 1. ) ) * smoothstep( uMaskR, uMaskR * .8, length( uvW ) );   // its round window; full screen, it opens. Glows: alpha no higher than their colour, so over a light desktop they brighten, never grey it
     col *= smoothstep( uMaskR, uMaskR * .8, length( uvW ) );   // (the black ground of full screen is made in the final pass, so the aura still shows round it)
     gl_FragColor = vec4( min( col, vec3( alpha ) ), alpha );
   }`;
@@ -1213,7 +1250,8 @@ export const AURA_FRAG = `precision highp float; varying vec2 vUv; uniform sampl
     }`;
 /* the final picture: the scene over its aura, the look (pixels, colour levels, dither) and the glitch artifacts */
 export const COMPOSITE_FRAG = `precision highp float; varying vec2 vUv; uniform sampler2D uFb, uScene; uniform float uFbAmt, uPix, uLev, uDith, uGS, uGA, uGT, uGTm, uRayA, uMaskR, uImm; uniform vec2 uRes, uRayC; uniform vec3 uRayT;
-    vec4 samp(vec2 uv) { vec4 sc = texture2D(uScene, uv); vec3 fb = texture2D(uFb, uv).rgb * uFbAmt; return vec4(sc.rgb + fb * (1. - sc.a), max(sc.a, clamp(max(fb.r, max(fb.g, fb.b)) * 1.5, 0., 1.))); }
+    vec4 samp(vec2 uv) { vec4 sc = texture2D(uScene, uv); sc.a = clamp(sc.a, 0., 1.);   // additive layers (beads) can sum past 1
+    vec3 fb = texture2D(uFb, uv).rgb * uFbAmt; return vec4(sc.rgb + fb * (1. - sc.a), max(sc.a, clamp(max(fb.r, max(fb.g, fb.b)), 0., 1.))); }   // the echoes are light: alpha no higher than their colour, so on the desktop they only brighten (1.5x laid a grey haze over light windows)
     float gh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uGT * 17.13) * 43758.5453); }   // per-glitch-frame hash
     float luma(vec3 c) { return dot(c, vec3(.299, .587, .114)); }
     // glitch artifacts (lab): 1 split, 2 tear, 3 mosh, 4 sort, 5 crt, 6 corrupt; uGA 0..1
