@@ -201,6 +201,15 @@ vec3 skinSample(sampler2D t, vec3 d){
   vec2 uv = skinUV(d);
   return textureLod(t, vec2(fract(uv.x), uv.y), 0.0).rgb;   // no mips, no derivatives -> no seam
 }
+// the pattern as height for displacement: a bilinear sample's slope is constant across each texel, so normals taken from it
+// light every texel as a flat square (~10 px on screen at 192x96); a cubic B-spline (four bilinear taps) has a continuous slope
+float skinHeight(sampler2D t, vec3 d){
+  vec2 sz = vec2(textureSize(t, 0)), sp = skinUV(d) * sz, tc = floor(sp - 0.5) + 0.5, f = sp - tc;
+  vec2 b0 = (1.0 - f) * (1.0 - f) * (1.0 - f) / 6.0, b1 = (4.0 - 6.0 * f * f + 3.0 * f * f * f) / 6.0, b3 = f * f * f / 6.0, b2 = 1.0 - b0 - b1 - b3;
+  vec2 g0 = b0 + b1, g1 = b2 + b3, h0 = (tc - 1.0 + b1 / g0) / sz, h1 = (tc + 1.0 + b3 / g1) / sz;
+  return (textureLod(t, h0, 0.0).r * g0.x + textureLod(t, vec2(h1.x, h0.y), 0.0).r * g1.x) * g0.y
+       + (textureLod(t, vec2(h0.x, h1.y), 0.0).r * g0.x + textureLod(t, h1, 0.0).r * g1.x) * g1.y;   // wraps in x like the skin (RepeatWrapping)
+}
 `;
 
 // ---------------------------------------------------------------------------------------------

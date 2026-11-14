@@ -26,7 +26,7 @@ export function createBeads(THREE, renderer, { bodyFragment, U, W = 128, H = 128
   let posA = new THREE.WebGLRenderTarget(W, H, rtOpts), posB = posA.clone();
   const B = {
     uPrevPos: { value: null }, uPos: { value: null }, uBW: { value: W }, uBN: { value: N }, uBK: { value: 1 }, uBFlow: { value: 0 }, uBTime: { value: 0 },
-    uBAxis: { value: new THREE.Vector3(0, 1, 0) }, uBA: { value: 0 }, uBOrigin: { value: new THREE.Vector3(0, 0, 1) }, uBKick: { value: 0 }, uBSize: { value: 1 }, uBFresh: { value: 1 },
+    uBAxis: { value: new THREE.Vector3(0, 1, 0) }, uBA: { value: 0 }, uBOrigin: { value: new THREE.Vector3(0, 0, 1) }, uBKick: { value: 0 }, uBSize: { value: 1.6 }, uBFresh: { value: 1 },
     uBMelt: { value: 0 }, uBOrbit: { value: 1 },
   };
   const uniforms = { ...U, ...B };
@@ -71,7 +71,10 @@ export function createBeads(THREE, renderer, { bodyFragment, U, W = 128, H = 128
       ro = vec3( 0., 0., 4.2 * uZoom ); ro.yz *= brot( uLook.y * .35 ); ro.xz *= brot( uLook.x * .55 );
       ww = normalize( - ro ); uu = normalize( cross( ww, vec3( 0., 1., 0. ) ) ); vv = cross( uu, ww );
     }`;
-  const drawMat = new THREE.ShaderMaterial({ uniforms, depthTest: true, depthWrite: false, transparent: true, blending: THREE.AdditiveBlending,
+  const drawMat = new THREE.ShaderMaterial({ uniforms, depthTest: true, depthWrite: false, transparent: true,
+    // premultiplied lights add as they are (three's AdditiveBlending multiplies the colour by alpha but adds alpha whole: every
+    // bead's glow was stored darker than it is opaque, a dark disc on a light desktop, a black one while alpha was 1)
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor,
     vertexShader: /* glsl */`
     uniform sampler2D uPos; uniform float uBW, uBN, uBA, uBKick, uBSize, uBTime, uBMelt, uBOrbit; uniform vec3 uBOrigin, uBAxis;
     uniform vec2 uRes; uniform vec2 uLook; uniform float uScale; uniform vec2 uShift; uniform float uZoom; uniform float uPxK;
@@ -159,17 +162,20 @@ export function createBeads(THREE, renderer, { bodyFragment, U, W = 128, H = 128
       float face = mix( .3, 1., smoothstep( -.35, .6, dot( vHome, - ww ) ) );
       float d = sqrt( d2 ) * 3.;   // in bead radii
       float edge = smoothstep( 1., .55, sqrt( d2 ) );   // the glow is gone before the quad ends: no discs
-      float core = exp( - d * d * 9. ), glow = exp( - d * 3.2 ) * .1 * edge, halo = exp( - d * 1.2 ) * .012 * edge;
+      float core = exp( - d * d * 4.5 ),   // a wider bright core: the beads read as balls, not specks
+            glow = exp( - d * 3.2 ) * .1 * edge, halo = exp( - d * 1.2 ) * .012 * edge;
       float star = big * ( exp( - abs( vQ.x ) * 80. ) + exp( - abs( vQ.y ) * 80. ) ) * exp( - d * 1.1 ) * .35 * edge;
       // a long tail of brightness: most beads are faint embers, a few are stars (they add up where they crowd)
-      float lum = .12 + .88 * pow( fract( vSeed * 7.31 + .17 ), 5. ) + .6 * big;
+      float lum = .3 + .9 * pow( fract( vSeed * 7.31 + .17 ), 4. ) + .7 * big;   // brighter embers: on a desktop they read as dim otherwise
       float I = ( core * 1.5 + glow + halo + star ) * lum * tw * face * vLp * ( .55 + .45 * mo.r ) * .55 * vGain * 2.2;
       I *= 1. + .8 * mo.b * step( .45, mo.b );   // nuclei shine
       I *= mix( 1., .3 + 1.6 * caB.a, min( uCaA, 1. ) );   // resting cells dim, live ones flare
       // the wave front burns brighter while it melts back into the liquid
       I *= 1. + vFront * ( .6 + 1.4 * uBMelt );
-      vec3 col = mix( hue, vec3( 1., .97, .92 ), core * .85 ) * I * ( .5 + .5 * uGlow ) * 1.1;
-      gl_FragColor = vec4( col, 1. );
+      vec3 col = mix( hue, vec3( 1., .97, .92 ), core * .85 ) * I * ( .6 + .5 * uGlow ) * 1.2;
+      // premultiplied, alpha from brightness: the dark rim of each bead's glow quad stays
+      // see-through on the transparent desktop window (alpha 1 drew every quad as a black disc with a dark outline)
+      gl_FragColor = vec4( col, clamp( min( col.r, min( col.g, col.b ) ), 0., 1. ) );   // alpha its dimmest channel: a light only ever brightens what is behind it, in every channel (a tinted one greyed a pale desktop)
     }` });
   const mesh = new THREE.Mesh(geo, drawMat);
   mesh.frustumCulled = false; mesh.renderOrder = 1; mesh.visible = false;
